@@ -1,0 +1,546 @@
+// CourtFlow - Esquema de datos
+// Plataforma SaaS multi-club (multi-tenant) para gesti?n de clubes de p?del.
+// Toda entidad de negocio depende de `clubId` (discriminador de tenant).
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ---------------------------------------------------------------------------
+// Base multi-tenant
+// ---------------------------------------------------------------------------
+
+model Club {
+  id             String   @id @default(cuid())
+  name           String
+  slug           String   @unique
+  timezone       String   @default("America/Argentina/Buenos_Aires")
+  currency       String   @default("ARS")
+  locale         String   @default("es-AR")
+  // Feature flags: m?dulos habilitados por club (sin tocar c?digo)
+  enabledModules String[] @default([])
+  categories     String[] @default(["1ra", "2da", "3ra", "4ta", "5ta", "6ta", "7ma", "8va"])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  courts          Court[]
+  memberships     Membership[]
+  bookingSettings BookingSettings?
+  bookings        Booking[]
+  fixedBookings   FixedBooking[]
+  movements       AccountMovement[]
+  productTypes    ProductType[]
+  products        Product[]
+  tournaments     Tournament[]
+
+  @@map("clubs")
+}
+
+/// Persona global. Si tiene login, `id` se corresponde con el usuario de
+/// Supabase Auth (auth.uid). Los jugadores cargados por el club pueden no tener
+/// email todav?a (alta r?pida por el administrador).
+model User {
+  id            String         @id @default(cuid())
+  email         String?        @unique
+  fullName      String
+  firstName     String?
+  lastName      String?
+  phone         String?
+  gender        Gender?
+  birthDate     DateTime?      @db.Date
+  city          String?
+  address       String?
+  country       String?
+  category      String?
+  courtPosition CourtPosition?
+  /// Posici?n en el ranking del club (null = sin ranking).
+  ranking      Int?
+  /// Puntos acumulados (torneos / ranking).
+  accumulatedPoints Int @default(0)
+  photoUrl      String?
+  createdAt     DateTime       @default(now())
+
+  memberships         Membership[]
+  bookingPlayers      BookingPlayer[]
+  responsibleBookings Booking[]         @relation("BookingResponsible")
+  responsibleFixed    FixedBooking[]    @relation("FixedResponsible")
+  accountMovements        AccountMovement[]
+  tournamentRegistrations TournamentRegistration[]
+  pairsAsPlayer1          TournamentPair[]         @relation("PairPlayer1")
+  pairsAsPlayer2          TournamentPair[]         @relation("PairPlayer2")
+
+  @@map("users")
+}
+
+/// Rol de una persona dentro de un club. Una persona puede tener distintos
+/// roles en distintos clubes (requisito de la visi?n del producto).
+model Membership {
+  id     String @id @default(cuid())
+  clubId String
+  userId String
+  role   Role
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([clubId, userId, role])
+  @@index([clubId])
+  @@map("memberships")
+}
+
+enum Role {
+  OWNER
+  CLUB_ADMIN
+  RECEPTIONIST
+  CASHIER
+  PROFESSOR
+  PLAYER
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum CourtPosition {
+  DRIVE
+  REVES
+  AMBOS
+}
+
+// ---------------------------------------------------------------------------
+// M?dulo: Gesti?n de Turnos
+// ---------------------------------------------------------------------------
+
+model Court {
+  id       String   @id @default(cuid())
+  clubId   String
+  name     String
+  active   Boolean  @default(true)
+  order    Int      @default(0)
+  createdAt DateTime @default(now())
+
+  club          Club           @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  bookings      Booking[]
+  fixedBookings FixedBooking[]
+
+  @@index([clubId])
+  @@map("courts")
+}
+
+/// Configuraci?n de turnos por club (regla general + ajuste por club).
+model BookingSettings {
+  clubId            String  @id
+  openTime          String  @default("08:00") // HH:mm
+  closeTime         String  @default("23:00") // HH:mm
+  slotDurationMin   Int     @default(90)
+  intervalMin       Int     @default(0)
+  preReservationMin Int     @default(15) // vencimiento de una PRE-RESERVA
+  requirePrePayment Boolean @default(false)
+  turnoProductId    String? // producto del cat?logo que define el precio del turno
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@map("booking_settings")
+}
+
+/// Un turno = alquiler de una cancha (club + cancha + fecha + hora + duraci?n).
+/// El estado DISPONIBLE no se persiste: es la ausencia de un Booking en ese slot.
+model Booking {
+  id             String        @id @default(cuid())
+  clubId         String
+  courtId        String
+  date           DateTime      @db.Date
+  startTime      String // HH:mm
+  durationMin    Int
+  type           BookingType   @default(NO_FIJO)
+  status         BookingStatus @default(PRE_RESERVA)
+  paymentStatus  PaymentStatus @default(UNPAID)
+  price          Int           @default(0) // precio del turno
+  chargeMovementId String? // movimiento de cuenta generado (si ya se impact?)
+  responsibleId  String // jugador responsable (User)
+  fixedBookingId String? // origen, si nace de un turno fijo
+  expiresAt      DateTime? // vencimiento de la PRE-RESERVA
+  notes          String?
+  createdById    String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  club         Club            @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  court        Court           @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  fixedBooking FixedBooking?   @relation(fields: [fixedBookingId], references: [id])
+  responsible  User            @relation("BookingResponsible", fields: [responsibleId], references: [id])
+  players      BookingPlayer[]
+
+  @@index([clubId, courtId, date])
+  @@map("bookings")
+}
+
+/// Jugadores asociados a un turno (hasta 4, validado en la capa de aplicaci?n).
+model BookingPlayer {
+  id        String @id @default(cuid())
+  bookingId String
+  userId    String
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, userId])
+  @@map("booking_players")
+}
+
+/// Turno FIJO: plantilla semanal. Se crea una vez, se repite cada semana en el
+/// mismo d?a/hora/cancha y s?lo finaliza cuando el club lo cancela (active=false).
+model FixedBooking {
+  id            String   @id @default(cuid())
+  clubId        String
+  courtId       String
+  dayOfWeek     Int // 0 = domingo ... 6 = s?bado
+  startTime     String // HH:mm
+  durationMin   Int
+  responsibleId String
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  club        Club      @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  court       Court     @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  responsible User      @relation("FixedResponsible", fields: [responsibleId], references: [id])
+  bookings    Booking[]
+
+  @@index([clubId, courtId])
+  @@map("fixed_bookings")
+}
+
+enum BookingType {
+  FIJO
+  NO_FIJO
+}
+
+enum BookingStatus {
+  PRE_RESERVA
+  RESERVADO
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+// ---------------------------------------------------------------------------
+// Cuenta corriente del cliente/jugador
+// ---------------------------------------------------------------------------
+
+/// Movimiento en la cuenta de un jugador: CHARGE (compra/consumo) suma deuda,
+/// PAYMENT (pago) la reduce. El monto se guarda en unidades enteras de la moneda.
+model AccountMovement {
+  id          String         @id @default(cuid())
+  clubId      String
+  userId      String
+  type        MovementType
+  amount      Int
+  concept     String?
+  method      PaymentMethod?
+  // Snapshot de venta (cuando el movimiento proviene de vender un producto)
+  productId   String?
+  quantity    Float? // admite fracciones (ej. 0.25 = 1/4)
+  unitPrice   Int?
+  createdById String?
+  createdAt   DateTime       @default(now())
+
+  club    Club     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id])
+
+  @@index([clubId, userId])
+  @@map("account_movements")
+}
+
+// ---------------------------------------------------------------------------
+// Cat?logo de productos (compartido por Bar, insumos, etc.)
+// ---------------------------------------------------------------------------
+
+model ProductType {
+  id        String   @id @default(cuid())
+  clubId    String
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  club     Club      @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@index([clubId])
+  @@map("product_types")
+}
+
+/// Producto vendible. Montos en centavos (?100). marginPct tambi?n ?100.
+model Product {
+  id          String   @id @default(cuid())
+  clubId      String
+  typeId      String?
+  name        String
+  code        String?
+  description String?
+  notes       String?
+  cost        Int      @default(0)
+  marginPct   Int      @default(0)
+  price       Int      @default(0)
+  rounding    Int      @default(0)
+  stock       Int      @default(0) // control manual de stock
+  isComposite Boolean  @default(false) // conjunto (true) / individual (false)
+  photoUrl    String?
+  active      Boolean  @default(true)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  club          Club              @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  type          ProductType?      @relation(fields: [typeId], references: [id])
+  saleMovements AccountMovement[]
+
+  @@unique([clubId, code])
+  @@index([clubId])
+  @@map("products")
+}
+
+enum MovementType {
+  CHARGE
+  PAYMENT
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  CARD
+}
+
+// ---------------------------------------------------------------------------
+// M?dulo: Torneos
+// ---------------------------------------------------------------------------
+
+/// Torneo del club. Montos en centavos (?100).
+model Tournament {
+  id                   String           @id @default(cuid())
+  clubId               String
+  type                 TournamentType   @default(ZONAS)
+  name                 String
+  description          String?
+  status               TournamentStatus @default(DRAFT)
+  startDate            DateTime         @db.Date
+  endDate              DateTime?        @db.Date
+  fee                  Int              @default(0)
+  /// Canchas disponibles para partidos del torneo (capacidad horaria).
+  courtCount           Int              @default(1)
+  /// Slug p?blico para el link de inscripci?n (?nico por club).
+  publicSlug           String
+  registrationOpensAt  DateTime?
+  registrationClosesAt DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  club              Club                         @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  registrations     TournamentRegistration[]
+  pairs             TournamentPair[]
+  categories        TournamentCategory[]
+  playDays          TournamentPlayDay[]
+  slotReservations  TournamentSlotReservation[]
+
+  @@unique([clubId, publicSlug])
+  @@index([clubId])
+  @@map("tournaments")
+}
+
+/// Categor?a competitiva dentro del torneo (ej. Femenina 5ta, Masculina 4ta).
+/// Cada una tiene formato por fase propio; parejas y fixture son por categor?a.
+model TournamentCategory {
+  id           String   @id @default(cuid())
+  tournamentId String
+  name         String
+  sortOrder    Int      @default(0)
+  /// Modo simulaci?n de fixture/tiempos (persistente por categor?a).
+  simulationEnabled         Boolean @default(false)
+  simulationConfirmedCount  Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tournament       Tournament                  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  settings         TournamentSettings?
+  pairs            TournamentPair[]
+  slotReservations TournamentSlotReservation[]
+
+  @@unique([tournamentId, name])
+  @@index([tournamentId])
+  @@map("tournament_categories")
+}
+
+/// Configuraci?n operativa de una categor?a del torneo por zonas (formato por fase).
+model TournamentSettings {
+  categoryId String @id
+  /// Fase de zonas (grupos)
+  zonesMatchFormat      MatchFormat @default(ONE_SET_6)
+  zonesMatchDurationMin Int         @default(75)
+  /// Fase intermedia (perdedor afuera)
+  knockoutMatchFormat      MatchFormat @default(TWO_SETS_STB)
+  knockoutMatchDurationMin Int         @default(90)
+  /// Fase final (semifinal, final, desempatos)
+  finalMatchFormat      MatchFormat @default(BEST_OF_3)
+  finalMatchDurationMin Int         @default(120)
+  /// Instancia desde la que comienza la fase final (rondas previas = fase intermedia)
+  finalStartsAtRound    FinalPhaseStartRound @default(SEMI_FINALS)
+  intervalMin           Int         @default(0)
+  /// Parejas / participantes por zona (t?picamente 3).
+  pairsPerZone          Int         @default(3)
+  /// Fechas (YYYY-MM-DD) asignadas a cada fase, referenciando d?as de juego del torneo.
+  zonesPlayDates        String[]    @default([])
+  knockoutPlayDates     String[]    @default([])
+  finalPlayDates        String[]    @default([])
+  /// Fixture armado de zonas (JSON): parejas por zona + partidos con d?a/hora/cancha.
+  zonesFixture          Json?
+
+  category TournamentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@map("tournament_settings")
+}
+
+/// D?a y rango horario habilitado para jugar partidos del torneo (compartido entre categor?as).
+/// La fecha es siempre el d?a de inicio; si endTime < startTime, el cierre cae al d?a siguiente.
+model TournamentPlayDay {
+  id           String   @id @default(cuid())
+  tournamentId String
+  date         DateTime @db.Date
+  startTime    String   // HH:mm, inicio del bloque habilitado
+  endTime      String   // HH:mm; puede ser del d?a siguiente (ej. 18:00?02:00)
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+
+  @@unique([tournamentId, date])
+  @@index([tournamentId])
+  @@map("tournament_play_days")
+}
+
+/// Pareja inscripta en una categor?a del torneo por zonas.
+model TournamentPair {
+  id            String             @id @default(cuid())
+  tournamentId  String
+  categoryId    String
+  player1Id     String
+  player2Id     String?
+  zoneLabel     String?
+  /// Preferencia de d?as para los 2 partidos de zonas: SAME_DAY | DIFFERENT_DAYS | ANY
+  zonesDayPreference String @default("ANY")
+  status        RegistrationStatus @default(PENDING)
+  player1Confirmed Boolean @default(false)
+  player2Confirmed Boolean @default(false)
+  player1PaymentStatus PaymentStatus @default(UNPAID)
+  player2PaymentStatus PaymentStatus @default(UNPAID)
+  /// Resumen derivado (ambos pagados, uno, ninguno).
+  paymentStatus PaymentStatus      @default(UNPAID)
+  notes         String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  tournament       Tournament                  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  category         TournamentCategory          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  player1          User                        @relation("PairPlayer1", fields: [player1Id], references: [id], onDelete: Cascade)
+  player2          User?                       @relation("PairPlayer2", fields: [player2Id], references: [id], onDelete: Cascade)
+  slotReservations TournamentSlotReservation[]
+
+  @@index([tournamentId])
+  @@index([categoryId])
+  @@map("tournament_pairs")
+}
+
+/// Preferencia de disponibilidad horaria (fase de zonas) por pareja.
+/// Varias parejas pueden marcar la misma celda; no es reserva exclusiva.
+model TournamentSlotReservation {
+  id           String   @id @default(cuid())
+  tournamentId String
+  categoryId   String
+  pairId       String
+  playDate     DateTime @db.Date
+  courtIndex   Int
+  slotIndex    Int
+  startTime    String
+  endTime      String
+  /// Solo "zones" en v1 (rangos de preferencia de fase de zonas).
+  phase        String   @default("zones")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tournament Tournament         @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  category   TournamentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  pair       TournamentPair     @relation(fields: [pairId], references: [id], onDelete: Cascade)
+
+  @@unique([pairId, playDate, courtIndex, slotIndex])
+  @@index([pairId])
+  @@index([tournamentId, categoryId])
+  @@index([tournamentId, playDate, courtIndex, slotIndex])
+  @@map("tournament_slot_reservations")
+}
+
+/// Inscripci?n de un jugador a un torneo.
+model TournamentRegistration {
+  id            String             @id @default(cuid())
+  tournamentId  String
+  userId        String
+  status        RegistrationStatus @default(PENDING)
+  paymentStatus PaymentStatus      @default(UNPAID)
+  category      String?
+  /// Disponibilidad horaria cargada por el jugador (JSON libre).
+  availability  Json?
+  notes         String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tournamentId, userId])
+  @@index([tournamentId])
+  @@map("tournament_registrations")
+}
+
+enum TournamentStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  FINISHED
+}
+
+enum TournamentType {
+  AMERICANO
+  ZONAS
+  ELIMINACION_DIRECTA
+  PAREJAS_SORTEADAS
+  MIXTO
+  RELAMPAGO
+}
+
+enum RegistrationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum MatchFormat {
+  ONE_SET_6
+  ONE_SET_9
+  TWO_SETS_STB
+  BEST_OF_3
+}
+
+enum FinalPhaseStartRound {
+  ROUND_32
+  ROUND_16
+  QUARTER_FINALS
+  SEMI_FINALS
+}
