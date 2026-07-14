@@ -1,11 +1,16 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
 const PRISMA_SCHEMA_REVISION = 26;
 
+/** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
+const PG_POOL_MAX = 1;
+
 type GlobalPrisma = {
   prisma?: PrismaClient;
+  pgPool?: Pool;
   prismaRevision?: number;
   prismaFingerprint?: string;
 };
@@ -13,16 +18,48 @@ type GlobalPrisma = {
 const globalForPrisma = globalThis as unknown as GlobalPrisma;
 
 function createPrismaClient() {
-  const adapter = new PrismaPg({
+  const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
+    max: PG_POOL_MAX,
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
   });
-  return new PrismaClient({
+  pool.on("error", (err) => {
+    console.error("[prisma] pg pool error", err);
+  });
+
+  const adapter = new PrismaPg(pool);
+  const client = new PrismaClient({
     adapter,
     log:
       process.env.NODE_ENV === "development"
         ? ["error", "warn"]
         : ["error"],
   });
+
+  globalForPrisma.pgPool = pool;
+  return client;
+}
+
+async function disposeCachedClient() {
+  const cached = globalForPrisma.prisma;
+  const pool = globalForPrisma.pgPool;
+  globalForPrisma.prisma = undefined;
+  globalForPrisma.pgPool = undefined;
+  if (cached) {
+    try {
+      await cached.$disconnect();
+    } catch {
+      // ignore
+    }
+  }
+  if (pool) {
+    try {
+      await pool.end();
+    } catch {
+      // ignore
+    }
+  }
 }
 
 /// Huella del cliente generado: si cambia tras `prisma generate`, recreamos el singleton.
@@ -106,8 +143,8 @@ function getPrismaClient(): PrismaClient {
     return cached;
   }
 
-  if (cached) {
-    void cached.$disconnect();
+  if (cached || globalForPrisma.pgPool) {
+    void disposeCachedClient();
   }
 
   const client = createPrismaClient();
