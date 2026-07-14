@@ -8,7 +8,7 @@ import { getZonasTournamentDetail } from "@/modules/tournaments/application/get-
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
 
 export const metadata = {
-  title: "Zonas del torneo · CourtFlow",
+  title: "Zonas del torneo · VeloxCourt",
 };
 
 export default async function TorneoZonasCategoriaPage({

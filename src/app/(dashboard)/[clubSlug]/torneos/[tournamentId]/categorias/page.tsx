@@ -8,7 +8,7 @@ import { getTournamentCategories } from "@/modules/tournaments/application/get-t
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
 
 export const metadata = {
-  title: "Categorías del torneo · CourtFlow",
+  title: "Categorías del torneo · VeloxCourt",
 };
 
 export default async function TorneoCategoriasPage({

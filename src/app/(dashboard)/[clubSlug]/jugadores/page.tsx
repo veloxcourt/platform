@@ -5,7 +5,7 @@ import { getPlayersList } from "@/modules/bookings/application/get-players-list"
 import { PlayersTable } from "@/components/features/players/players-table";
 
 export const metadata = {
-  title: "Jugadores · CourtFlow",
+  title: "Jugadores · VeloxCourt",
 };
 
 export default async function JugadoresPage({

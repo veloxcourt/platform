@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { CalendarClock, ArrowRight } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
@@ -11,7 +11,7 @@ export default function Home() {
         <span className="grid size-14 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
           <CalendarClock className="size-7" />
         </span>
-        <h1 className="text-4xl font-bold tracking-tight">CourtFlow</h1>
+        <h1 className="text-4xl font-bold tracking-tight">VeloxCourt</h1>
         <p className="max-w-md text-balance text-muted-foreground">
           Plataforma SaaS integral para la gestión de clubes de pádel. Turnos,
           torneos, socios, caja y más, en un solo lugar.

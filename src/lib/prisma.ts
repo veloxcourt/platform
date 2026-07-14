@@ -2,7 +2,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 25;
+const PRISMA_SCHEMA_REVISION = 26;
 
 type GlobalPrisma = {
   prisma?: PrismaClient;
@@ -44,6 +44,7 @@ function schemaFingerprint(): string {
     "zonesFixture" in settingsFields ? "1" : "0",
     "courtCount" in Prisma.TournamentScalarFieldEnum ? "1" : "0",
     "tournamentSlotReservation" in Prisma.ModelName ? "1" : "0",
+    "ecoTorneoSimulation" in Prisma.ModelName ? "1" : "0",
   ].join(":");
 }
 
@@ -51,7 +52,10 @@ function clientHasCurrentDelegates(client: PrismaClient): boolean {
   return (
     "tournamentSlotReservation" in client &&
     typeof (client as { tournamentSlotReservation?: { findMany?: unknown } })
-      .tournamentSlotReservation?.findMany === "function"
+      .tournamentSlotReservation?.findMany === "function" &&
+    "ecoTorneoSimulation" in client &&
+    typeof (client as { ecoTorneoSimulation?: { findMany?: unknown } })
+      .ecoTorneoSimulation?.findMany === "function"
   );
 }
 
@@ -78,6 +82,7 @@ function isGeneratedClientCurrent(): boolean {
     "knockoutPlayDates" in settingsFields &&
     "finalPlayDates" in settingsFields &&
     "zonesFixture" in settingsFields &&
+    "ecoTorneoSimulation" in Prisma.ModelName &&
     !("category" in pairFields)
   );
 }

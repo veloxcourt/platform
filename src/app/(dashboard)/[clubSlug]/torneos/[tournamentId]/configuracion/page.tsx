@@ -7,7 +7,7 @@ import { getTournamentConfig } from "@/modules/tournaments/application/get-tourn
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
 
 export const metadata = {
-  title: "Configuración del torneo · CourtFlow",
+  title: "Configuración del torneo · VeloxCourt",
 };
 
 export default async function TorneoConfiguracionPage({

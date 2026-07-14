@@ -10,7 +10,7 @@ import { WhatsAppTestPanel } from "@/components/features/notifications/whatsapp-
 import { getPlayersList } from "@/modules/bookings/application/get-players-list";
 
 export const metadata = {
-  title: "Configuración de Turnos · CourtFlow",
+  title: "Configuración de Turnos · VeloxCourt",
 };
 
 export default async function ConfiguracionTurnosPage({

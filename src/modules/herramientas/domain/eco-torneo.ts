@@ -1,6 +1,8 @@
 /// Eco-Torneo: planilla de costos e ingresos de un torneo.
 /// Montos en centavos (mismo criterio de la plataforma).
 
+import { pesosToCents } from "@/lib/money";
+
 export type EcoFlowType = "ENTRADA" | "SALIDA";
 
 export const ECO_ENTRADA_CATEGORIES = [
@@ -145,6 +147,70 @@ export function createEcoItem(
     porcentaje: partial?.porcentaje ?? null,
     enSaldo: partial?.enSaldo ?? def.defaultEnSaldo ?? true,
   };
+}
+
+/** Planilla de ejemplo al crear una simulación nueva. */
+export function defaultEcoItems(): EcoItem[] {
+  return [
+    createEcoItem("INSCRIPCIONES", {
+      observacion: "2 categorías · 21 parejas c/u · 84 jugadores",
+      cantidad: 84,
+      valorCents: pesosToCents(35_000),
+    }),
+    createEcoItem("SPONSOR", {
+      observacion: "",
+      valorCents: null,
+    }),
+    createEcoItem("PREMIOS_PLATA", {
+      observacion: "",
+      porcentaje: 30,
+    }),
+    createEcoItem("REMUNERACION_AYUDANTE", {
+      observacion: "",
+      porcentaje: 5,
+    }),
+    createEcoItem("USO_CANCHAS", {
+      observacion: "Resto: 100% − premios − ayudante",
+    }),
+    createEcoItem("PELOTAS", {
+      observacion: "",
+      cantidad: null,
+      valorCents: null,
+    }),
+    createEcoItem("PERSONAL_BAR", {
+      observacion: "",
+      cantidad: null,
+      valorCents: null,
+    }),
+    createEcoItem("GASTO_GENERAL", {
+      observacion: "",
+      cantidad: null,
+      valorCents: null,
+    }),
+  ];
+}
+
+export function nextSimulationName(existingNames: string[]): string {
+  let n = existingNames.length + 1;
+  const used = new Set(existingNames.map((name) => name.trim().toLowerCase()));
+  while (used.has(`simulación ${n}`)) n += 1;
+  return `Simulación ${n}`;
+}
+
+export function cloneSimulationName(sourceName: string): string {
+  const base = sourceName.trim() || "Simulación";
+  const suffix = " (copia)";
+  if (base.endsWith(suffix)) return `${base}`;
+  const maxBase = 80 - suffix.length;
+  return `${base.slice(0, maxBase)}${suffix}`;
+}
+
+/** Clona items con nuevos ids de fila. */
+export function cloneEcoItems(items: EcoItem[]): EcoItem[] {
+  return items.map((item) => ({
+    ...item,
+    id: crypto.randomUUID(),
+  }));
 }
 
 export function totalInscripcionesCents(items: EcoItem[]): number {

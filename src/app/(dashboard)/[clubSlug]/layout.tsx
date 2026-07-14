@@ -20,7 +20,7 @@ export default async function DashboardLayout({
             <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
               <CalendarClock className="size-4" />
             </span>
-            CourtFlow
+            VeloxCourt
           </Link>
           <span className="text-sm text-muted-foreground">/ {clubSlug}</span>
         </div>

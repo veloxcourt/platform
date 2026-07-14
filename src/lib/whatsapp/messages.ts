@@ -1,8 +1,8 @@
-export function buildTestMessage(clubName: string, playerName: string): string {
+﻿export function buildTestMessage(clubName: string, playerName: string): string {
   return [
     `Hola ${playerName}!`,
     "",
-    `Prueba de notificación de *${clubName}* vía CourtFlow.`,
+    `Prueba de notificación de *${clubName}* vía VeloxCourt.`,
     "",
     "Si recibís este mensaje, el sistema de alarmas está funcionando.",
   ].join("\n");

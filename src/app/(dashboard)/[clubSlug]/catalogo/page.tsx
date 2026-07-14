@@ -8,7 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export const metadata = {
-  title: "Catálogo · CourtFlow",
+  title: "Catálogo · VeloxCourt",
 };
 
 export default async function CatalogoPage({

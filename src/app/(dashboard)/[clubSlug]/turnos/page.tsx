@@ -12,7 +12,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export const metadata = {
-  title: "Turnos · CourtFlow",
+  title: "Turnos · VeloxCourt",
 };
 
 export default async function TurnosPage({

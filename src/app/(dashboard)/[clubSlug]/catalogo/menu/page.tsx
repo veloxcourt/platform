@@ -6,7 +6,7 @@ import { getBookingRepository } from "@/modules/bookings/infrastructure/reposito
 import { PriceMenu } from "@/components/features/catalog/price-menu";
 
 export const metadata = {
-  title: "Menú de precios · CourtFlow",
+  title: "Menú de precios · VeloxCourt",
 };
 
 export default async function MenuPage({

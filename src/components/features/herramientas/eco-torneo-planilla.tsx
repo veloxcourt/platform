@@ -1,8 +1,10 @@
 "use client";
 
 import { GripVertical, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
+import { saveSimulationItemsAction } from "@/app/(dashboard)/[clubSlug]/herramientas/eco-torneo/actions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -24,45 +26,9 @@ const SELECT_CLASS =
 const INPUT_NUM =
   "h-8 w-full min-w-[5.5rem] text-right tabular-nums";
 
-function exampleItems(): EcoItem[] {
-  return [
-    createEcoItem("INSCRIPCIONES", {
-      observacion: "2 categorías · 21 parejas c/u · 84 jugadores",
-      cantidad: 84,
-      valorCents: pesosToCents(35_000),
-    }),
-    createEcoItem("SPONSOR", {
-      observacion: "",
-      valorCents: null,
-    }),
-    createEcoItem("PREMIOS_PLATA", {
-      observacion: "",
-      porcentaje: 30,
-    }),
-    createEcoItem("REMUNERACION_AYUDANTE", {
-      observacion: "",
-      porcentaje: 5,
-    }),
-    createEcoItem("USO_CANCHAS", {
-      observacion: "Resto: 100% − premios − ayudante",
-    }),
-    createEcoItem("PELOTAS", {
-      observacion: "",
-      cantidad: null,
-      valorCents: null,
-    }),
-    createEcoItem("PERSONAL_BAR", {
-      observacion: "",
-      cantidad: null,
-      valorCents: null,
-    }),
-    createEcoItem("GASTO_GENERAL", {
-      observacion: "",
-      cantidad: null,
-      valorCents: null,
-    }),
-  ];
-}
+const AUTOSAVE_MS = 500;
+
+type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 function moveItem(list: EcoItem[], fromId: string, toId: string): EcoItem[] {
   if (fromId === toId) return list;
@@ -75,12 +41,69 @@ function moveItem(list: EcoItem[], fromId: string, toId: string): EcoItem[] {
   return next;
 }
 
-export function EcoTorneoPlanilla({ currency = "ARS" }: { currency?: string }) {
-  const [items, setItems] = useState<EcoItem[]>(() => exampleItems());
+export function EcoTorneoPlanilla({
+  clubSlug,
+  simulationId,
+  currency = "ARS",
+  initialItems,
+}: {
+  clubSlug: string;
+  simulationId: string;
+  currency?: string;
+  initialItems: EcoItem[];
+}) {
+  const [items, setItems] = useState<EcoItem[]>(initialItems);
   const [addFlow, setAddFlow] = useState<EcoFlowType>("ENTRADA");
   const [addCategory, setAddCategory] = useState<EcoCategory>("INSCRIPCIONES");
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+
+  const itemsRef = useRef(items);
+  const dirtyRef = useRef(false);
+  const skipNextSaveRef = useRef(true);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  useEffect(() => {
+    setItems(initialItems);
+    dirtyRef.current = false;
+    skipNextSaveRef.current = true;
+    setSaveStatus("idle");
+    // Solo al cambiar de simulación; no resetear tras refresh/rename.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+  }, [simulationId]);
+
+  useEffect(() => {
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
+    dirtyRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      const snapshot = itemsRef.current;
+      setSaveStatus("saving");
+      void saveSimulationItemsAction(clubSlug, simulationId, snapshot).then(
+        (result) => {
+          if (!result.ok) {
+            setSaveStatus("error");
+            toast.error(result.error);
+            return;
+          }
+          dirtyRef.current = false;
+          setSaveStatus("saved");
+        },
+      );
+    }, AUTOSAVE_MS);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [items, clubSlug, simulationId]);
 
   const planilla = computePlanilla(items);
 
@@ -433,14 +456,23 @@ export function EcoTorneoPlanilla({ currency = "ARS" }: { currency?: string }) {
           <Plus className="size-4" />
           Agregar ítem
         </Button>
+        <p className="ml-auto text-xs text-muted-foreground">
+          {saveStatus === "saving"
+            ? "Guardando…"
+            : saveStatus === "saved"
+              ? "Guardado"
+              : saveStatus === "error"
+                ? "Error al guardar"
+                : null}
+        </p>
       </div>
 
       <p className="text-xs text-muted-foreground">
         Arrastrá el ícono ⋮⋮ para reordenar. La columna Saldo decide si el ítem
         entra en totales. Uso canchas es informativo (tilde off por defecto):{" "}
         {planilla.restoPct}% de{" "}
-        {formatMoney(planilla.inscripcionesTotalCents, currency)}. Todavía no se
-        guarda.
+        {formatMoney(planilla.inscripcionesTotalCents, currency)}. Doble clic en
+        la pestaña para renombrar. Los cambios se guardan solos.
       </p>
     </div>
   );

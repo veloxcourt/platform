@@ -5,7 +5,7 @@ import { getTournamentsList } from "@/modules/tournaments/application/get-tourna
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
 
 export const metadata = {
-  title: "Torneos · CourtFlow",
+  title: "Torneos · VeloxCourt",
 };
 
 export default async function TorneosPage({

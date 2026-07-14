@@ -1,4 +1,4 @@
-// CourtFlow - Esquema de datos
+﻿// VeloxCourt - Esquema de datos
 // Plataforma SaaS multi-club (multi-tenant) para gesti?n de clubes de p?del.
 // Toda entidad de negocio depende de `clubId` (discriminador de tenant).
 
@@ -27,15 +27,16 @@ model Club {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  courts          Court[]
-  memberships     Membership[]
-  bookingSettings BookingSettings?
-  bookings        Booking[]
-  fixedBookings   FixedBooking[]
-  movements       AccountMovement[]
-  productTypes    ProductType[]
-  products        Product[]
-  tournaments     Tournament[]
+  courts               Court[]
+  memberships          Membership[]
+  bookingSettings      BookingSettings?
+  bookings             Booking[]
+  fixedBookings        FixedBooking[]
+  movements            AccountMovement[]
+  productTypes         ProductType[]
+  products             Product[]
+  tournaments          Tournament[]
+  ecoTorneoSimulations EcoTorneoSimulation[]
 
   @@map("clubs")
 }
@@ -543,4 +544,20 @@ enum FinalPhaseStartRound {
   ROUND_16
   QUARTER_FINALS
   SEMI_FINALS
+}
+
+/// Simulación Eco-Torneo: planilla de costos/ingresos estimados por club.
+model EcoTorneoSimulation {
+  id        String   @id @default(cuid())
+  clubId    String
+  name      String
+  items     Json
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@index([clubId])
+  @@map("eco_torneo_simulations")
 }

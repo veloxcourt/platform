@@ -1,4 +1,4 @@
-import type { MatchFormat } from "./config-schema";
+﻿import type { MatchFormat } from "./config-schema";
 import { distributeZoneSizes } from "./simulate-category-schedule";
 
 export type ZoneResultColumn = {
@@ -119,7 +119,7 @@ export function zoneLabelFromIndex(index: number): string {
   return `Zona ${index + 1}`;
 }
 
-/// Cantidad de partidos de zona según tamaño (formato CourtFlow, no RR puro en 4).
+/// Cantidad de partidos de zona según tamaño (formato VeloxCourt, no RR puro en 4).
 export function zoneMatchCount(zoneSize: number): number {
   if (zoneSize < 2) return 0;
   if (zoneSize === 3) return 3;

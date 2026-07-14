@@ -1,4 +1,4 @@
-import type { CategoryPhaseConfig } from "./types";
+﻿import type { CategoryPhaseConfig } from "./types";
 import type {
   FinalPhaseStartRound,
   PlayDayValues,
@@ -58,7 +58,7 @@ export function distributeZoneSizes(
 ): number[] {
   if (pairCount <= 0) return [];
 
-  // Formato canónico CourtFlow: objetivo 3, complemento 4.
+  // Formato canónico VeloxCourt: objetivo 3, complemento 4.
   if (targetSize === 3) {
     if (pairCount < 3) return [pairCount];
     if (pairCount === 5) return [3, 2];
