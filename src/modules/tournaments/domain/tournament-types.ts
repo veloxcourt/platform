@@ -1,4 +1,4 @@
-﻿/// Catálogo de formatos de torneo disponibles en VeloxCourt.
+/// Catálogo de formatos de torneo disponibles en VeloxCourt.
 export const TOURNAMENT_TYPES = [
   "AMERICANO",
   "ZONAS",

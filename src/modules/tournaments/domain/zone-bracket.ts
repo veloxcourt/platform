@@ -1,4 +1,4 @@
-﻿import type { MatchFormat } from "./config-schema";
+import type { MatchFormat } from "./config-schema";
 import { distributeZoneSizes } from "./simulate-category-schedule";
 
 export type ZoneResultColumn = {

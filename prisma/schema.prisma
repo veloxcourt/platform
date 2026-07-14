@@ -1,5 +1,5 @@
-﻿// VeloxCourt - Esquema de datos
-// Plataforma SaaS multi-club (multi-tenant) para gesti?n de clubes de p?del.
+// VeloxCourt - Esquema de datos
+// Plataforma SaaS multi-club (multi-tenant) para gestion de clubes de padel.
 // Toda entidad de negocio depende de `clubId` (discriminador de tenant).
 
 datasource db {

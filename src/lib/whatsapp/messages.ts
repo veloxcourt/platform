@@ -1,4 +1,4 @@
-﻿export function buildTestMessage(clubName: string, playerName: string): string {
+export function buildTestMessage(clubName: string, playerName: string): string {
   return [
     `Hola ${playerName}!`,
     "",

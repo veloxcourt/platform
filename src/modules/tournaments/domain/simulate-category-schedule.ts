@@ -1,4 +1,4 @@
-﻿import type { CategoryPhaseConfig } from "./types";
+import type { CategoryPhaseConfig } from "./types";
 import type {
   FinalPhaseStartRound,
   PlayDayValues,
