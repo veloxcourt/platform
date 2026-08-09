@@ -10,6 +10,7 @@ import type {
   SellableProduct,
 } from "@/modules/catalog/domain/types";
 import type { ProductValues } from "@/modules/catalog/domain/product-schema";
+import { totalRecipeCostCents } from "@/modules/catalog/domain/recipe-cost";
 import type {
   Booking,
   BookingSettings,
@@ -58,6 +59,75 @@ async function resolveTurnoPrice(
     select: { price: true },
   });
   return product?.price ?? 0;
+}
+
+type ResolveRecipeResult =
+  | {
+      ok: true;
+      cost: number;
+      components: { componentId: string; quantity: number }[];
+    }
+  | { ok: false; error: string };
+
+/// Valida componentes (solo simples del club) y calcula el costo del conjunto.
+async function resolveProductCostAndComponents(
+  clubId: string,
+  input: ProductValues,
+  parentId?: string,
+): Promise<ResolveRecipeResult> {
+  if (!input.isComposite) {
+    return { ok: true, cost: input.cost, components: [] };
+  }
+
+  const components = input.components ?? [];
+  if (components.length === 0) {
+    return { ok: true, cost: 0, components: [] };
+  }
+
+  const ids = [...new Set(components.map((c) => c.componentId))];
+  if (parentId && ids.includes(parentId)) {
+    return { ok: false, error: "Un conjunto no puede incluirse a sí mismo" };
+  }
+
+  const rows = await prisma.product.findMany({
+    where: { clubId, id: { in: ids } },
+    select: {
+      id: true,
+      cost: true,
+      baseQuantity: true,
+      isComposite: true,
+    },
+  });
+  if (rows.length !== ids.length) {
+    return { ok: false, error: "Hay componentes inválidos o de otro club" };
+  }
+  if (rows.some((r) => r.isComposite)) {
+    return {
+      ok: false,
+      error: "La receta solo admite productos simples (sin combos)",
+    };
+  }
+
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const cost = totalRecipeCostCents(
+    components.map((c) => {
+      const row = byId.get(c.componentId)!;
+      return {
+        componentCostCents: row.cost,
+        componentBaseQty: row.baseQuantity,
+        recipeQty: c.quantity,
+      };
+    }),
+  );
+
+  return {
+    ok: true,
+    cost,
+    components: components.map((c) => ({
+      componentId: c.componentId,
+      quantity: c.quantity,
+    })),
+  };
 }
 
 /// Convierte "YYYY-MM-DD" a un Date UTC a medianoche (para columnas `@db.Date`).
@@ -150,7 +220,7 @@ export class PrismaBookingRepository implements BookingRepository {
 
   async getPlayers(clubId: string): Promise<PlayerRef[]> {
     const users = await prisma.user.findMany({
-      where: { memberships: { some: { clubId } } },
+      where: { memberships: { some: { clubId, role: "PLAYER" } } },
       orderBy: { fullName: "asc" },
     });
     return users.map((u) => ({
@@ -163,7 +233,7 @@ export class PrismaBookingRepository implements BookingRepository {
   async listPlayers(clubId: string): Promise<PlayerListItem[]> {
     const [users, grouped] = await Promise.all([
       prisma.user.findMany({
-        where: { memberships: { some: { clubId } } },
+        where: { memberships: { some: { clubId, role: "PLAYER" } } },
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { fullName: "asc" }],
       }),
       prisma.accountMovement.groupBy({
@@ -218,7 +288,10 @@ export class PrismaBookingRepository implements BookingRepository {
     userId: string,
   ): Promise<NewPlayerValues | null> {
     const u = await prisma.user.findFirst({
-      where: { id: userId, memberships: { some: { clubId } } },
+      where: {
+        id: userId,
+        memberships: { some: { clubId, role: "PLAYER" } },
+      },
     });
     if (!u) return null;
     const phone = splitPhoneForForm(u.phone);
@@ -277,7 +350,7 @@ export class PrismaBookingRepository implements BookingRepository {
     input: NewPlayerValues,
   ): Promise<void> {
     const belongs = await prisma.membership.findFirst({
-      where: { clubId, userId },
+      where: { clubId, userId, role: "PLAYER" },
       select: { id: true },
     });
     if (!belongs) return;
@@ -401,7 +474,10 @@ export class PrismaBookingRepository implements BookingRepository {
     url: string | null,
   ): Promise<void> {
     await prisma.user.updateMany({
-      where: { id: userId, memberships: { some: { clubId } } },
+      where: {
+        id: userId,
+        memberships: { some: { clubId, role: "PLAYER" } },
+      },
       data: { photoUrl: url },
     });
   }
@@ -735,7 +811,7 @@ export class PrismaBookingRepository implements BookingRepository {
     const rows = await prisma.product.findMany({
       where: { clubId },
       include: { type: true },
-      orderBy: { name: "asc" },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
     return rows.map((p) => ({
       id: p.id,
@@ -749,8 +825,12 @@ export class PrismaBookingRepository implements BookingRepository {
       rounding: p.rounding,
       stock: p.stock,
       isComposite: p.isComposite,
+      baseQuantity: p.baseQuantity,
+      unit: p.unit,
       photoUrl: p.photoUrl,
       active: p.active,
+      sortOrder: p.sortOrder,
+      showInPriceMenu: p.showInPriceMenu,
     }));
   }
 
@@ -758,7 +838,24 @@ export class PrismaBookingRepository implements BookingRepository {
     clubId: string,
     id: string,
   ): Promise<(ProductValues & { photoUrl: string | null }) | null> {
-    const p = await prisma.product.findFirst({ where: { id, clubId } });
+    const p = await prisma.product.findFirst({
+      where: { id, clubId },
+      include: {
+        components: {
+          include: {
+            component: {
+              select: {
+                id: true,
+                name: true,
+                unit: true,
+                baseQuantity: true,
+                cost: true,
+              },
+            },
+          },
+        },
+      },
+    });
     if (!p) return null;
     return {
       name: p.name,
@@ -772,7 +869,13 @@ export class PrismaBookingRepository implements BookingRepository {
       rounding: p.rounding,
       stock: p.stock,
       isComposite: p.isComposite,
+      baseQuantity: p.baseQuantity,
+      unit: p.unit as ProductValues["unit"],
       active: p.active,
+      components: p.components.map((c) => ({
+        componentId: c.componentId,
+        quantity: c.quantity,
+      })),
       photoUrl: p.photoUrl,
     };
   }
@@ -780,7 +883,7 @@ export class PrismaBookingRepository implements BookingRepository {
   async getSellableProducts(clubId: string): Promise<SellableProduct[]> {
     const rows = await prisma.product.findMany({
       where: { clubId, active: true },
-      orderBy: { name: "asc" },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
     return rows.map((p) => ({ id: p.id, name: p.name, price: p.price }));
   }
@@ -789,23 +892,46 @@ export class PrismaBookingRepository implements BookingRepository {
     clubId: string,
     input: ProductValues,
   ): Promise<MutationResult & { id?: string }> {
+    const resolved = await resolveProductCostAndComponents(clubId, input);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
     try {
-      const created = await prisma.product.create({
-        data: {
-          clubId,
-          name: input.name,
-          code: input.code ? input.code : null,
-          description: input.description ? input.description : null,
-          notes: input.notes ? input.notes : null,
-          typeId: input.typeId ? input.typeId : null,
-          cost: input.cost,
-          marginPct: input.marginPct,
-          price: input.price,
-          rounding: input.rounding,
-          stock: input.stock,
-          isComposite: input.isComposite,
-          active: input.active,
-        },
+      const agg = await prisma.product.aggregate({
+        where: { clubId },
+        _max: { sortOrder: true },
+      });
+      const sortOrder = (agg._max.sortOrder ?? -1) + 1;
+      const created = await prisma.$transaction(async (tx) => {
+        const product = await tx.product.create({
+          data: {
+            clubId,
+            name: input.name,
+            code: input.code ? input.code : null,
+            description: input.description ? input.description : null,
+            notes: input.notes ? input.notes : null,
+            typeId: input.typeId ? input.typeId : null,
+            cost: resolved.cost,
+            marginPct: input.marginPct,
+            price: input.price,
+            rounding: input.rounding,
+            stock: input.stock,
+            isComposite: input.isComposite,
+            baseQuantity: input.isComposite ? 1 : input.baseQuantity,
+            unit: input.isComposite ? "u" : input.unit,
+            active: input.active,
+            sortOrder,
+            showInPriceMenu: false,
+          },
+        });
+        if (resolved.components.length > 0) {
+          await tx.productComponent.createMany({
+            data: resolved.components.map((c) => ({
+              parentId: product.id,
+              componentId: c.componentId,
+              quantity: c.quantity,
+            })),
+          });
+        }
+        return product;
       });
       return { ok: true, id: created.id };
     } catch (e) {
@@ -825,23 +951,39 @@ export class PrismaBookingRepository implements BookingRepository {
       select: { id: true },
     });
     if (!belongs) return { ok: false, error: "Producto no encontrado" };
+    const resolved = await resolveProductCostAndComponents(clubId, input, id);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
     try {
-      await prisma.product.update({
-        where: { id },
-        data: {
-          name: input.name,
-          code: input.code ? input.code : null,
-          description: input.description ? input.description : null,
-          notes: input.notes ? input.notes : null,
-          typeId: input.typeId ? input.typeId : null,
-          cost: input.cost,
-          marginPct: input.marginPct,
-          price: input.price,
-          rounding: input.rounding,
-          stock: input.stock,
-          isComposite: input.isComposite,
-          active: input.active,
-        },
+      await prisma.$transaction(async (tx) => {
+        await tx.product.update({
+          where: { id },
+          data: {
+            name: input.name,
+            code: input.code ? input.code : null,
+            description: input.description ? input.description : null,
+            notes: input.notes ? input.notes : null,
+            typeId: input.typeId ? input.typeId : null,
+            cost: resolved.cost,
+            marginPct: input.marginPct,
+            price: input.price,
+            rounding: input.rounding,
+            stock: input.stock,
+            isComposite: input.isComposite,
+            baseQuantity: input.isComposite ? 1 : input.baseQuantity,
+            unit: input.isComposite ? "u" : input.unit,
+            active: input.active,
+          },
+        });
+        await tx.productComponent.deleteMany({ where: { parentId: id } });
+        if (resolved.components.length > 0) {
+          await tx.productComponent.createMany({
+            data: resolved.components.map((c) => ({
+              parentId: id,
+              componentId: c.componentId,
+              quantity: c.quantity,
+            })),
+          });
+        }
       });
       return { ok: true };
     } catch (e) {
@@ -857,6 +999,28 @@ export class PrismaBookingRepository implements BookingRepository {
     active: boolean,
   ): Promise<void> {
     await prisma.product.updateMany({ where: { id, clubId }, data: { active } });
+  }
+
+  async setProductShowInPriceMenu(
+    clubId: string,
+    id: string,
+    showInPriceMenu: boolean,
+  ): Promise<void> {
+    await prisma.product.updateMany({
+      where: { id, clubId },
+      data: { showInPriceMenu },
+    });
+  }
+
+  async reorderProducts(clubId: string, orderedIds: string[]): Promise<void> {
+    await prisma.$transaction(
+      orderedIds.map((id, index) =>
+        prisma.product.updateMany({
+          where: { id, clubId },
+          data: { sortOrder: index },
+        }),
+      ),
+    );
   }
 
   async setProductPhoto(

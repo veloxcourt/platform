@@ -88,8 +88,8 @@ export function PlayersTable({
   }, [players, query]);
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <div className="flex shrink-0 items-center justify-between gap-3">
         <div className="relative max-w-xs flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -105,9 +105,9 @@ export function PlayersTable({
         </Button>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border">
+      <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
         <table className="w-full text-sm">
-          <thead className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
+          <thead className="sticky top-0 z-10 border-b bg-muted text-left text-xs text-muted-foreground">
             <tr>
               <th className="w-10 px-3 py-2" />
               <th className="px-3 py-2 font-medium">Nombre</th>

@@ -12,7 +12,9 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "auth:invite-owner": "tsx scripts/invite-owner.ts",
+    "auth:grant-superadmin": "tsx scripts/grant-superadmin.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

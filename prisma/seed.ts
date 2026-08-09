@@ -64,12 +64,63 @@ async function main() {
     },
   });
 
+  const allPrivileges = [
+    "PLAYERS",
+    "CATALOG",
+    "PRICE_MENU",
+    "BOOKINGS",
+    "TOURNAMENTS",
+    "TOOLS",
+    "USER_TYPES",
+    "USERS",
+  ] as const;
+
+  const ownerType = await prisma.clubUserType.upsert({
+    where: { clubId_name: { clubId: club.id, name: "Dueño" } },
+    update: { privileges: [...allPrivileges] },
+    create: {
+      clubId: club.id,
+      name: "Dueño",
+      description: "Acceso completo al club.",
+      privileges: [...allPrivileges],
+    },
+  });
+
+  await prisma.clubUserType.upsert({
+    where: { clubId_name: { clubId: club.id, name: "Administrador" } },
+    update: {},
+    create: {
+      clubId: club.id,
+      name: "Administrador",
+      description: "Operación diaria del club.",
+      privileges: [
+        "PLAYERS",
+        "CATALOG",
+        "PRICE_MENU",
+        "BOOKINGS",
+        "TOURNAMENTS",
+        "TOOLS",
+      ],
+    },
+  });
+
   await prisma.membership.upsert({
     where: {
       clubId_userId_role: { clubId: club.id, userId: owner.id, role: "OWNER" },
     },
-    update: {},
-    create: { clubId: club.id, userId: owner.id, role: "OWNER" },
+    update: {
+      userTypeId: ownerType.id,
+      staffStatus: "ACTIVE",
+      allowedModules: [...allPrivileges],
+    },
+    create: {
+      clubId: club.id,
+      userId: owner.id,
+      role: "OWNER",
+      userTypeId: ownerType.id,
+      staffStatus: "ACTIVE",
+      allowedModules: [...allPrivileges],
+    },
   });
 
   // Jugadores demo para testear torneos: 48 hombres + 48 mujeres

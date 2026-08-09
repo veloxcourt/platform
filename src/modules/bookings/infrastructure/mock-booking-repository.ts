@@ -8,6 +8,7 @@ import type {
   SellableProduct,
 } from "@/modules/catalog/domain/types";
 import type { ProductValues } from "@/modules/catalog/domain/product-schema";
+import { totalRecipeCostCents } from "@/modules/catalog/domain/recipe-cost";
 import type {
   Booking,
   BookingSettings,
@@ -58,6 +59,8 @@ interface ClubRecord {
     id: string;
     photoUrl: string | null;
     active: boolean;
+    sortOrder: number;
+    showInPriceMenu: boolean;
   })[];
 }
 
@@ -70,6 +73,58 @@ function turnoPriceOf(
 ): number {
   if (!turnoProductId) return 0;
   return record.products.find((p) => p.id === turnoProductId)?.price ?? 0;
+}
+
+function resolveMockRecipeCost(
+  record: ClubRecord,
+  input: ProductValues,
+  parentId?: string,
+):
+  | {
+      ok: true;
+      cost: number;
+      components: { componentId: string; quantity: number }[];
+    }
+  | { ok: false; error: string } {
+  if (!input.isComposite) {
+    return { ok: true, cost: input.cost, components: [] };
+  }
+  const components = input.components ?? [];
+  if (components.length === 0) {
+    return { ok: true, cost: 0, components: [] };
+  }
+  const ids = [...new Set(components.map((c) => c.componentId))];
+  if (parentId && ids.includes(parentId)) {
+    return { ok: false, error: "Un conjunto no puede incluirse a sí mismo" };
+  }
+  const rows = ids.map((id) => record.products.find((p) => p.id === id));
+  if (rows.some((r) => !r)) {
+    return { ok: false, error: "Hay componentes inválidos o de otro club" };
+  }
+  if (rows.some((r) => r!.isComposite)) {
+    return {
+      ok: false,
+      error: "La receta solo admite productos simples (sin combos)",
+    };
+  }
+  const cost = totalRecipeCostCents(
+    components.map((c) => {
+      const row = record.products.find((p) => p.id === c.componentId)!;
+      return {
+        componentCostCents: row.cost,
+        componentBaseQty: row.baseQuantity ?? 1,
+        recipeQty: c.quantity,
+      };
+    }),
+  );
+  return {
+    ok: true,
+    cost,
+    components: components.map((c) => ({
+      componentId: c.componentId,
+      quantity: c.quantity,
+    })),
+  };
 }
 
 const DEFAULT_SETTINGS: BookingSettings = {
@@ -553,10 +608,17 @@ export class MockBookingRepository implements BookingRepository {
         rounding: p.rounding,
         stock: p.stock,
         isComposite: p.isComposite,
+        baseQuantity: p.baseQuantity ?? 1,
+        unit: p.unit ?? "u",
         photoUrl: p.photoUrl,
         active: p.active,
+        sortOrder: p.sortOrder,
+        showInPriceMenu: p.showInPriceMenu,
       }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort(
+        (a, b) =>
+          a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+      );
   }
 
   async getProduct(
@@ -565,15 +627,40 @@ export class MockBookingRepository implements BookingRepository {
   ): Promise<(ProductValues & { photoUrl: string | null }) | null> {
     const p = getOrCreateRecord(clubId).products.find((x) => x.id === id);
     if (!p) return null;
-    const { id: _id, ...values } = p;
-    return values;
+    return {
+      name: p.name,
+      code: p.code,
+      description: p.description,
+      notes: p.notes,
+      typeId: p.typeId,
+      cost: p.cost,
+      marginPct: p.marginPct,
+      price: p.price,
+      rounding: p.rounding,
+      stock: p.stock,
+      isComposite: p.isComposite,
+      baseQuantity: p.baseQuantity ?? 1,
+      unit: p.unit ?? "u",
+      active: p.active,
+      components: p.components ?? [],
+      photoUrl: p.photoUrl,
+    };
   }
 
   async getSellableProducts(clubId: string): Promise<SellableProduct[]> {
     return getOrCreateRecord(clubId)
       .products.filter((p) => p.active)
-      .map((p) => ({ id: p.id, name: p.name, price: p.price }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        price: p.price,
+        sortOrder: p.sortOrder,
+      }))
+      .sort(
+        (a, b) =>
+          a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+      )
+      .map(({ id, name, price }) => ({ id, name, price }));
   }
 
   async createProduct(
@@ -584,8 +671,22 @@ export class MockBookingRepository implements BookingRepository {
     if (input.code && record.products.some((p) => p.code === input.code)) {
       return { ok: false, error: "Ya existe un producto con ese código" };
     }
+    const resolved = resolveMockRecipeCost(record, input);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
     const id = `prod-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    record.products.push({ ...input, id, photoUrl: null });
+    const sortOrder =
+      record.products.reduce((max, p) => Math.max(max, p.sortOrder), -1) + 1;
+    record.products.push({
+      ...input,
+      cost: resolved.cost,
+      components: resolved.components,
+      baseQuantity: input.isComposite ? 1 : input.baseQuantity,
+      unit: input.isComposite ? "u" : input.unit,
+      id,
+      photoUrl: null,
+      sortOrder,
+      showInPriceMenu: false,
+    });
     return { ok: true, id };
   }
 
@@ -603,7 +704,15 @@ export class MockBookingRepository implements BookingRepository {
     ) {
       return { ok: false, error: "Ya existe un producto con ese código" };
     }
-    Object.assign(p, input);
+    const resolved = resolveMockRecipeCost(record, input, id);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    Object.assign(p, {
+      ...input,
+      cost: resolved.cost,
+      components: resolved.components,
+      baseQuantity: input.isComposite ? 1 : input.baseQuantity,
+      unit: input.isComposite ? "u" : input.unit,
+    });
     return { ok: true };
   }
 
@@ -614,6 +723,23 @@ export class MockBookingRepository implements BookingRepository {
   ): Promise<void> {
     const p = getOrCreateRecord(clubId).products.find((x) => x.id === id);
     if (p) p.active = active;
+  }
+
+  async setProductShowInPriceMenu(
+    clubId: string,
+    id: string,
+    showInPriceMenu: boolean,
+  ): Promise<void> {
+    const p = getOrCreateRecord(clubId).products.find((x) => x.id === id);
+    if (p) p.showInPriceMenu = showInPriceMenu;
+  }
+
+  async reorderProducts(clubId: string, orderedIds: string[]): Promise<void> {
+    const record = getOrCreateRecord(clubId);
+    orderedIds.forEach((id, index) => {
+      const p = record.products.find((x) => x.id === id);
+      if (p) p.sortOrder = index;
+    });
   }
 
   async setProductPhoto(): Promise<void> {

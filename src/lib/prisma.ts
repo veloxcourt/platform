@@ -3,66 +3,24 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 26;
+const PRISMA_SCHEMA_REVISION = 30;
 
 /** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
 const PG_POOL_MAX = 1;
 
+type PrismaBundle = {
+  client: PrismaClient;
+  pool: Pool;
+  revision: number;
+  fingerprint: string;
+};
+
 type GlobalPrisma = {
-  prisma?: PrismaClient;
-  pgPool?: Pool;
-  prismaRevision?: number;
-  prismaFingerprint?: string;
+  prismaBundle?: PrismaBundle;
 };
 
 const globalForPrisma = globalThis as unknown as GlobalPrisma;
 
-function createPrismaClient() {
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    max: PG_POOL_MAX,
-    idleTimeoutMillis: 10_000,
-    connectionTimeoutMillis: 10_000,
-  });
-  pool.on("error", (err) => {
-    console.error("[prisma] pg pool error", err);
-  });
-
-  const adapter = new PrismaPg(pool);
-  const client = new PrismaClient({
-    adapter,
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["error", "warn"]
-        : ["error"],
-  });
-
-  globalForPrisma.pgPool = pool;
-  return client;
-}
-
-async function disposeCachedClient() {
-  const cached = globalForPrisma.prisma;
-  const pool = globalForPrisma.pgPool;
-  globalForPrisma.prisma = undefined;
-  globalForPrisma.pgPool = undefined;
-  if (cached) {
-    try {
-      await cached.$disconnect();
-    } catch {
-      // ignore
-    }
-  }
-  if (pool) {
-    try {
-      await pool.end();
-    } catch {
-      // ignore
-    }
-  }
-}
-
-/// Huella del cliente generado: si cambia tras `prisma generate`, recreamos el singleton.
 function schemaFingerprint(): string {
   const pairFields = Prisma.TournamentPairScalarFieldEnum;
   const categoryFields = Prisma.TournamentCategoryScalarFieldEnum;
@@ -82,6 +40,14 @@ function schemaFingerprint(): string {
     "courtCount" in Prisma.TournamentScalarFieldEnum ? "1" : "0",
     "tournamentSlotReservation" in Prisma.ModelName ? "1" : "0",
     "ecoTorneoSimulation" in Prisma.ModelName ? "1" : "0",
+    "productComponent" in Prisma.ModelName ? "1" : "0",
+    "baseQuantity" in Prisma.ProductScalarFieldEnum ? "1" : "0",
+    "authUserId" in Prisma.UserScalarFieldEnum ? "1" : "0",
+    "allowedModules" in Prisma.MembershipScalarFieldEnum ? "1" : "0",
+    "clubUserType" in Prisma.ModelName ? "1" : "0",
+    "userTypeId" in Prisma.MembershipScalarFieldEnum ? "1" : "0",
+    "isSuperAdmin" in Prisma.UserScalarFieldEnum ? "1" : "0",
+    "clubRequest" in Prisma.ModelName ? "1" : "0",
   ].join(":");
 }
 
@@ -92,66 +58,85 @@ function clientHasCurrentDelegates(client: PrismaClient): boolean {
       .tournamentSlotReservation?.findMany === "function" &&
     "ecoTorneoSimulation" in client &&
     typeof (client as { ecoTorneoSimulation?: { findMany?: unknown } })
-      .ecoTorneoSimulation?.findMany === "function"
+      .ecoTorneoSimulation?.findMany === "function" &&
+    "productComponent" in client &&
+    typeof (client as { productComponent?: { findMany?: unknown } })
+      .productComponent?.findMany === "function" &&
+    "clubUserType" in client &&
+    typeof (client as { clubUserType?: { findMany?: unknown } }).clubUserType
+      ?.findMany === "function" &&
+    "clubRequest" in client &&
+    typeof (client as { clubRequest?: { findMany?: unknown } }).clubRequest
+      ?.findMany === "function"
   );
 }
 
-function isGeneratedClientCurrent(): boolean {
-  const pairFields = Prisma.TournamentPairScalarFieldEnum;
-  const categoryFields = Prisma.TournamentCategoryScalarFieldEnum;
-  const settingsFields = Prisma.TournamentSettingsScalarFieldEnum;
-  return (
-    "type" in Prisma.TournamentScalarFieldEnum &&
-    "courtCount" in Prisma.TournamentScalarFieldEnum &&
-    "tournamentPair" in Prisma.ModelName &&
-    "tournamentCategory" in Prisma.ModelName &&
-    "tournamentSlotReservation" in Prisma.ModelName &&
-    "categoryId" in pairFields &&
-    "player1PaymentStatus" in pairFields &&
-    "player2PaymentStatus" in pairFields &&
-    "player1Confirmed" in pairFields &&
-    "player2Confirmed" in pairFields &&
-    "zonesDayPreference" in pairFields &&
-    "simulationEnabled" in categoryFields &&
-    "simulationConfirmedCount" in categoryFields &&
-    "pairsPerZone" in settingsFields &&
-    "zonesPlayDates" in settingsFields &&
-    "knockoutPlayDates" in settingsFields &&
-    "finalPlayDates" in settingsFields &&
-    "zonesFixture" in settingsFields &&
-    "ecoTorneoSimulation" in Prisma.ModelName &&
-    !("category" in pairFields)
-  );
+function createBundle(fingerprint: string): PrismaBundle {
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: PG_POOL_MAX,
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
+  });
+  pool.on("error", (err) => {
+    console.error("[prisma] pg pool error", err);
+  });
+
+  const adapter = new PrismaPg(pool);
+  const client = new PrismaClient({
+    adapter,
+    log:
+      process.env.NODE_ENV === "development"
+        ? ["error", "warn"]
+        : ["error"],
+  });
+
+  return {
+    client,
+    pool,
+    revision: PRISMA_SCHEMA_REVISION,
+    fingerprint,
+  };
 }
 
-/// Turbopack puede conservar un PrismaClient viejo tras `prisma generate`.
-/// Recreamos el cliente si la revisión/huella del schema o los delegates no coinciden.
 function getPrismaClient(): PrismaClient {
-  const cached = globalForPrisma.prisma;
   const fingerprint = schemaFingerprint();
-  const revisionOk =
-    globalForPrisma.prismaRevision === PRISMA_SCHEMA_REVISION;
-  const fingerprintOk = globalForPrisma.prismaFingerprint === fingerprint;
+  const cached = globalForPrisma.prismaBundle;
 
   if (
     cached &&
-    revisionOk &&
-    fingerprintOk &&
-    isGeneratedClientCurrent() &&
-    clientHasCurrentDelegates(cached)
+    cached.revision === PRISMA_SCHEMA_REVISION &&
+    cached.fingerprint === fingerprint &&
+    clientHasCurrentDelegates(cached.client)
   ) {
-    return cached;
+    return cached.client;
   }
 
-  if (cached || globalForPrisma.pgPool) {
-    void disposeCachedClient();
+  // En desarrollo no cerramos el pool anterior: HMR puede dejar requests
+  // usando el cliente viejo y `pool.end()` provoca este error.
+  // El proceso se limpia al reiniciar `npm run dev`.
+  const previous = cached;
+  const next = createBundle(fingerprint);
+  globalForPrisma.prismaBundle = next;
+
+  if (previous && process.env.NODE_ENV === "production") {
+    void previous.client.$disconnect().catch(() => {});
+    void previous.pool.end().catch(() => {});
   }
 
-  const client = createPrismaClient();
-  globalForPrisma.prisma = client;
-  globalForPrisma.prismaRevision = PRISMA_SCHEMA_REVISION;
-  globalForPrisma.prismaFingerprint = fingerprint;
-  return client;
+  return next.client;
 }
 
-export const prisma = getPrismaClient();
+/**
+ * Proxy: evita que un `export const` quede apuntando a un cliente obsoleto
+ * tras recrear el singleton.
+ */
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop, receiver) {
+    const client = getPrismaClient();
+    const value = Reflect.get(client as object, prop, receiver);
+    return typeof value === "function"
+      ? (value as (...args: unknown[]) => unknown).bind(client)
+      : value;
+  },
+});

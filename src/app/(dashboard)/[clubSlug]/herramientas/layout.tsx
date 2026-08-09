@@ -2,6 +2,7 @@ import { Suspense } from "react";
 
 import { EcoTorneoHeaderActions } from "@/components/features/herramientas/eco-torneo-header-actions";
 import { HerramientasSubnav } from "@/components/features/herramientas/herramientas-subnav";
+import { enforceClubModulePage } from "@/lib/auth/access";
 
 export default async function HerramientasLayout({
   children,
@@ -11,6 +12,7 @@ export default async function HerramientasLayout({
   params: Promise<{ clubSlug: string }>;
 }) {
   const { clubSlug } = await params;
+  await enforceClubModulePage(clubSlug, "herramientas");
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4">

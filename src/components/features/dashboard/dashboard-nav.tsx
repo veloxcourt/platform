@@ -3,11 +3,26 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { ACTIVE_MODULES, MODULE_LABELS, MODULES } from "@/config/modules";
+import {
+  ACTIVE_MODULES,
+  MODULE_LABELS,
+  MODULES,
+  type AdminModuleKey,
+} from "@/config/modules";
 import { cn } from "@/lib/utils";
 
-export function DashboardNav({ clubSlug }: { clubSlug: string }) {
+export function DashboardNav({
+  clubSlug,
+  allowedModules,
+}: {
+  clubSlug: string;
+  allowedModules: AdminModuleKey[];
+  isOwner?: boolean;
+}) {
   const pathname = usePathname();
+  const canSeeUpcoming =
+    allowedModules.includes("tipos-usuario") ||
+    allowedModules.includes("usuarios");
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
@@ -21,23 +36,32 @@ export function DashboardNav({ clubSlug }: { clubSlug: string }) {
     );
 
   const fixedLinks = [
-    { href: `/${clubSlug}/jugadores`, label: "Jugadores" },
-    { href: `/${clubSlug}/catalogo`, label: "Catálogo" },
-  ];
+    { href: `/${clubSlug}/jugadores`, label: "Jugadores", module: "jugadores" },
+    { href: `/${clubSlug}/catalogo`, label: "Catálogo", module: "catalogo" },
+    {
+      href: `/${clubSlug}/catalogo/menu`,
+      label: "Menú de precios",
+      module: "menu-precios",
+    },
+  ] satisfies { href: string; label: string; module: AdminModuleKey }[];
 
   return (
     <nav className="flex gap-1 overflow-x-auto px-2">
-      {fixedLinks.map((link) => (
-        <Link key={link.href} href={link.href}>
-          <span className={linkClass(isActive(link.href))}>{link.label}</span>
-        </Link>
-      ))}
+      {fixedLinks
+        .filter((link) => allowedModules.includes(link.module))
+        .map((link) => (
+          <Link key={link.href} href={link.href}>
+            <span className={linkClass(isActive(link.href))}>{link.label}</span>
+          </Link>
+        ))}
 
       {MODULES.map((mod) => {
         const href = `/${clubSlug}/${mod}`;
         const enabled = ACTIVE_MODULES.includes(mod);
+        const permitted = allowedModules.includes(mod as AdminModuleKey);
 
         if (!enabled) {
+          if (!canSeeUpcoming) return null;
           return (
             <span key={mod} title="Próximamente" className="cursor-not-allowed">
               <span className="inline-block whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground/60">
@@ -47,6 +71,8 @@ export function DashboardNav({ clubSlug }: { clubSlug: string }) {
           );
         }
 
+        if (!permitted) return null;
+
         return (
           <Link key={mod} href={href}>
             <span className={linkClass(isActive(href))}>
@@ -55,6 +81,24 @@ export function DashboardNav({ clubSlug }: { clubSlug: string }) {
           </Link>
         );
       })}
+
+      {allowedModules.includes("tipos-usuario") ? (
+        <Link href={`/${clubSlug}/tipos-usuario`}>
+          <span className={linkClass(isActive(`/${clubSlug}/tipos-usuario`))}>
+            Tipos de usuario
+          </span>
+        </Link>
+      ) : null}
+
+      {allowedModules.includes("usuarios") ? (
+        <Link href={`/${clubSlug}/administradores`}>
+          <span
+            className={linkClass(isActive(`/${clubSlug}/administradores`))}
+          >
+            Usuarios
+          </span>
+        </Link>
+      ) : null}
     </nav>
   );
 }

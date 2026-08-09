@@ -63,7 +63,7 @@ export function PriceMenu({
 
       {filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Sin productos.
+          Sin productos publicados en el menú.
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">

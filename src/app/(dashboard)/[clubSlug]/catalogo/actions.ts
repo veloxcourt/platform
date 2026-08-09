@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { requireClubModuleAccess } from "@/lib/auth/access";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import {
   createSupabaseAdminClient,
@@ -18,6 +19,7 @@ import type { SellableProduct } from "@/modules/catalog/domain/types";
 type Result = { ok: true } | { ok: false; error: string };
 
 async function resolveClubId(clubSlug: string) {
+  await requireClubModuleAccess(clubSlug, "catalogo");
   const repo = getBookingRepository();
   const club = await repo.getClubBySlug(clubSlug);
   return { repo, clubId: club?.id ?? null };
@@ -25,6 +27,7 @@ async function resolveClubId(clubSlug: string) {
 
 function revalidate(clubSlug: string) {
   revalidatePath(`/${clubSlug}/catalogo`);
+  revalidatePath(`/${clubSlug}/catalogo/menu`);
 }
 
 // --- Tipos de producto ---
@@ -105,6 +108,32 @@ export async function setProductActiveAction(
   const { repo, clubId } = await resolveClubId(clubSlug);
   if (!clubId) return { ok: false, error: "Club no encontrado" };
   await repo.setProductActive(clubId, id, active);
+  revalidate(clubSlug);
+  return { ok: true };
+}
+
+export async function setProductShowInPriceMenuAction(
+  clubSlug: string,
+  id: string,
+  showInPriceMenu: boolean,
+): Promise<Result> {
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+  await repo.setProductShowInPriceMenu(clubId, id, showInPriceMenu);
+  revalidate(clubSlug);
+  return { ok: true };
+}
+
+export async function reorderProductsAction(
+  clubSlug: string,
+  orderedIds: string[],
+): Promise<Result> {
+  if (!Array.isArray(orderedIds) || orderedIds.some((id) => typeof id !== "string")) {
+    return { ok: false, error: "Orden inválido" };
+  }
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+  await repo.reorderProducts(clubId, orderedIds);
   revalidate(clubSlug);
   return { ok: true };
 }

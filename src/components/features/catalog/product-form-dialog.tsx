@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   Camera,
@@ -31,8 +31,16 @@ import {
   storeToPct,
 } from "@/lib/money";
 import { computePrice, realMarginPct } from "@/modules/catalog/domain/pricing";
-import type { ProductType } from "@/modules/catalog/domain/types";
-import type { ProductValues } from "@/modules/catalog/domain/product-schema";
+import { lineCostCents } from "@/modules/catalog/domain/recipe-cost";
+import type {
+  ProductListItem,
+  ProductType,
+} from "@/modules/catalog/domain/types";
+import {
+  PRODUCT_UNITS,
+  type ProductUnit,
+  type ProductValues,
+} from "@/modules/catalog/domain/product-schema";
 import {
   bindImagePasteListener,
   imageFileFromPasteEventAsync,
@@ -40,6 +48,7 @@ import {
   readImageFileFromClipboard,
 } from "@/lib/clipboard-image";
 import { AvatarCropStep } from "@/components/features/turnos/avatar-crop-step";
+import { RecipeProductPicker } from "@/components/features/catalog/recipe-product-picker";
 import {
   createProductAction,
   removeProductPhotoAction,
@@ -50,9 +59,20 @@ import {
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
+const UNIT_LABELS: Record<ProductUnit, string> = {
+  u: "u (unidad)",
+  g: "g",
+  kg: "kg",
+  ml: "ml",
+  l: "l",
+};
+
+type RecipeLine = { componentId: string; quantity: number };
+
 export function ProductFormDialog({
   clubSlug,
   types,
+  products,
   open,
   onOpenChange,
   editing,
@@ -62,6 +82,8 @@ export function ProductFormDialog({
 }: {
   clubSlug: string;
   types: ProductType[];
+  /** Catálogo completo para armar la receta (se filtran simples). */
+  products: ProductListItem[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editing?: {
@@ -85,6 +107,9 @@ export function ProductFormDialog({
   const [isComposite, setIsComposite] = useState(false);
   const [stock, setStock] = useState(0);
   const [active, setActive] = useState(true);
+  const [baseQuantity, setBaseQuantity] = useState(1);
+  const [unit, setUnit] = useState<ProductUnit>("u");
+  const [recipe, setRecipe] = useState<RecipeLine[]>([]);
 
   // Valores en unidades de pantalla (pesos / porcentaje)
   const [cost, setCost] = useState(0);
@@ -103,6 +128,27 @@ export function ProductFormDialog({
   const pasteZoneRef = useRef<HTMLDivElement>(null);
   const handleFileRef = useRef<(file: File) => void>(() => {});
 
+  const simpleProducts = useMemo(
+    () =>
+      products.filter(
+        (p) => !p.isComposite && (!editing || p.id !== editing.id),
+      ),
+    [products, editing],
+  );
+
+  const productById = useMemo(() => {
+    const map = new Map(products.map((p) => [p.id, p]));
+    return map;
+  }, [products]);
+
+  const recipeCostCents = useMemo(() => {
+    return recipe.reduce((sum, line) => {
+      const comp = productById.get(line.componentId);
+      if (!comp) return sum;
+      return sum + lineCostCents(comp.cost, comp.baseQuantity, line.quantity);
+    }, 0);
+  }, [recipe, productById]);
+
   useEffect(() => {
     if (!open) return;
     const seed = editing ?? defaults ?? null;
@@ -115,6 +161,9 @@ export function ProductFormDialog({
     setIsComposite(v?.isComposite ?? false);
     setStock(v?.stock ?? 0);
     setActive(v?.active ?? true);
+    setBaseQuantity(v?.baseQuantity ?? 1);
+    setUnit((v?.unit as ProductUnit) ?? "u");
+    setRecipe(v?.components ?? []);
     setCost(v ? centsToPesos(v.cost) : 0);
     setMargin(v ? storeToPct(v.marginPct) : 0);
     setRounding(v ? centsToPesos(v.rounding) : 0);
@@ -148,6 +197,12 @@ export function ProductFormDialog({
     };
   }, [open, editing, defaults]);
 
+  // Costo del conjunto = suma de la receta
+  useEffect(() => {
+    if (!isComposite) return;
+    setCost(centsToPesos(recipeCostCents));
+  }, [isComposite, recipeCostCents]);
+
   // Recalcula el precio salvo que el usuario lo haya fijado a mano
   useEffect(() => {
     if (priceManual) return;
@@ -160,6 +215,31 @@ export function ProductFormDialog({
   }, [cost, margin, rounding, priceManual]);
 
   const realPct = realMarginPct(pesosToCents(cost), pesosToCents(price)) / 100;
+
+  function addRecipeLine(componentId: string) {
+    if (!componentId) return;
+    if (recipe.some((l) => l.componentId === componentId)) {
+      toast.error("Ese producto ya está en la receta");
+      return;
+    }
+    const comp = productById.get(componentId);
+    setRecipe((prev) => [
+      ...prev,
+      { componentId, quantity: comp?.baseQuantity ?? 1 },
+    ]);
+  }
+
+  function updateRecipeQty(componentId: string, quantity: number) {
+    setRecipe((prev) =>
+      prev.map((l) =>
+        l.componentId === componentId ? { ...l, quantity } : l,
+      ),
+    );
+  }
+
+  function removeRecipeLine(componentId: string) {
+    setRecipe((prev) => prev.filter((l) => l.componentId !== componentId));
+  }
 
   function applyPhotoFile(file: File) {
     startPhoto(async () => {
@@ -317,6 +397,18 @@ export function ProductFormDialog({
       toast.error("Ingresá el nombre del producto");
       return;
     }
+    if (!isComposite && !(baseQuantity > 0)) {
+      toast.error("La cantidad base debe ser mayor a 0");
+      return;
+    }
+    if (isComposite) {
+      for (const line of recipe) {
+        if (!(line.quantity > 0)) {
+          toast.error("Cada ítem de la receta debe tener cantidad mayor a 0");
+          return;
+        }
+      }
+    }
     const values: ProductValues = {
       name: name.trim(),
       code: code.trim(),
@@ -329,7 +421,10 @@ export function ProductFormDialog({
       rounding: pesosToCents(rounding),
       stock,
       isComposite,
+      baseQuantity: isComposite ? 1 : baseQuantity,
+      unit: isComposite ? "u" : unit,
       active,
+      components: isComposite ? recipe : [],
     };
     startTransition(async () => {
       if (editing) {
@@ -361,9 +456,14 @@ export function ProductFormDialog({
     });
   }
 
+  const recipeExcludeIds = useMemo(
+    () => recipe.map((l) => l.componentId),
+    [recipe],
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {cropFile
@@ -533,13 +633,142 @@ export function ProductFormDialog({
               </select>
             </Field>
 
-            <Field label="Costo ($)">
+            <div className="col-span-2 flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <p className="text-sm font-medium">Es un conjunto (combo)</p>
+                <p className="text-xs text-muted-foreground">
+                  Armá la receta con productos simples; el costo se calcula solo.
+                </p>
+              </div>
+              <Checkbox
+                checked={isComposite}
+                onCheckedChange={(v) => {
+                  const next = v === true;
+                  setIsComposite(next);
+                  if (!next) setRecipe([]);
+                }}
+              />
+            </div>
+
+            {!isComposite && (
+              <>
+                <Field label="Cantidad">
+                  <Input
+                    type="number"
+                    min={0.001}
+                    step="any"
+                    value={baseQuantity}
+                    onChange={(e) => setBaseQuantity(Number(e.target.value))}
+                  />
+                </Field>
+                <Field label="Unidad">
+                  <select
+                    className={SELECT_CLASS}
+                    value={unit}
+                    onChange={(e) => setUnit(e.target.value as ProductUnit)}
+                  >
+                    {PRODUCT_UNITS.map((u) => (
+                      <option key={u} value={u}>
+                        {UNIT_LABELS[u]}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </>
+            )}
+
+            {isComposite && (
+              <div className="col-span-2 space-y-2 rounded-lg border p-3">
+                <p className="text-sm font-medium">Receta</p>
+                {recipe.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Todavía no hay ítems. Agregá productos simples.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {recipe.map((line) => {
+                      const comp = productById.get(line.componentId);
+                      const lineCost = comp
+                        ? lineCostCents(
+                            comp.cost,
+                            comp.baseQuantity,
+                            line.quantity,
+                          )
+                        : 0;
+                      return (
+                        <li
+                          key={line.componentId}
+                          className="grid grid-cols-[1fr_5.5rem_auto_auto] items-center gap-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm">
+                              {comp?.name ?? "Producto"}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground">
+                              Base {comp?.baseQuantity ?? "?"}{" "}
+                              {comp?.unit ?? ""} · $
+                              {centsToPesos(lineCost).toFixed(2)}
+                            </p>
+                          </div>
+                          <Input
+                            type="number"
+                            min={0.001}
+                            step="any"
+                            value={line.quantity}
+                            onChange={(e) =>
+                              updateRecipeQty(
+                                line.componentId,
+                                Number(e.target.value),
+                              )
+                            }
+                          />
+                          <span className="text-xs text-muted-foreground">
+                            {comp?.unit ?? ""}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            title="Quitar"
+                            onClick={() => removeRecipeLine(line.componentId)}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-xs text-muted-foreground">
+                    Buscá y tocá un producto para agregarlo a la receta.
+                  </p>
+                  <RecipeProductPicker
+                    products={simpleProducts}
+                    types={types}
+                    excludeIds={recipeExcludeIds}
+                    onPick={addRecipeLine}
+                  />
+                </div>
+              </div>
+            )}
+
+            <Field
+              label="Costo ($)"
+              hint={
+                isComposite
+                  ? "Calculado desde la receta"
+                  : `Costo de ${baseQuantity} ${unit}`
+              }
+            >
               <Input
                 type="number"
                 min={0}
                 step="0.01"
                 value={cost}
                 onChange={(e) => setCost(Number(e.target.value))}
+                readOnly={isComposite}
+                disabled={isComposite}
               />
             </Field>
             <Field label="% Ganancia">
@@ -611,19 +840,6 @@ export function ProductFormDialog({
                 />
                 {active ? "Activo" : "Inactivo"}
               </label>
-            </div>
-
-            <div className="col-span-2 flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <p className="text-sm font-medium">Es un conjunto (combo)</p>
-                <p className="text-xs text-muted-foreground">
-                  Compuesto por otros productos (la receta se define más adelante).
-                </p>
-              </div>
-              <Checkbox
-                checked={isComposite}
-                onCheckedChange={(v) => setIsComposite(v === true)}
-              />
             </div>
 
             <Field label="Descripción" className="col-span-2">

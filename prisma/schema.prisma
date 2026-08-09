@@ -29,6 +29,7 @@ model Club {
 
   courts               Court[]
   memberships          Membership[]
+  userTypes            ClubUserType[]
   bookingSettings      BookingSettings?
   bookings             Booking[]
   fixedBookings        FixedBooking[]
@@ -41,11 +42,35 @@ model Club {
   @@map("clubs")
 }
 
+/// Perfil de acceso definido por el club (Dueño, Administrador, etc.).
+/// Los privilegios se configuran por tipo y se heredan al asignar el tipo
+/// a una membresía.
+model ClubUserType {
+  id          String        @id @default(cuid())
+  clubId      String
+  name        String
+  description String?
+  privileges  AdminModule[] @default([])
+  active      Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  club         Club         @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  memberships  Membership[]
+
+  @@unique([clubId, name])
+  @@index([clubId])
+  @@map("club_user_types")
+}
+
 /// Persona global. Si tiene login, `id` se corresponde con el usuario de
 /// Supabase Auth (auth.uid). Los jugadores cargados por el club pueden no tener
 /// email todav?a (alta r?pida por el administrador).
 model User {
   id            String         @id @default(cuid())
+  /// Identificador de Supabase Auth. Se mantiene separado del id de negocio
+  /// para poder vincular jugadores y propietarios creados antes del login.
+  authUserId    String?        @unique
   email         String?        @unique
   fullName      String
   firstName     String?
@@ -63,6 +88,8 @@ model User {
   /// Puntos acumulados (torneos / ranking).
   accumulatedPoints Int @default(0)
   photoUrl      String?
+  /// Superadministrador de la plataforma (no es un privilegio de club).
+  isSuperAdmin  Boolean        @default(false)
   createdAt     DateTime       @default(now())
 
   memberships         Membership[]
@@ -77,19 +104,55 @@ model User {
   @@map("users")
 }
 
+/// Solicitud pública para dar de alta un club en VeloxCourt.
+model ClubRequest {
+  id              String            @id @default(cuid())
+  clubName        String
+  contactName     String
+  email           String
+  phone           String
+  locality        String
+  message         String?
+  status          ClubRequestStatus @default(PENDING)
+  createdClubId   String?
+  reviewedAt      DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([status])
+  @@index([email])
+  @@map("club_requests")
+}
+
+enum ClubRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 /// Rol de una persona dentro de un club. Una persona puede tener distintos
 /// roles en distintos clubes (requisito de la visi?n del producto).
 model Membership {
-  id     String @id @default(cuid())
-  clubId String
-  userId String
-  role   Role
+  id             String            @id @default(cuid())
+  clubId         String
+  userId         String
+  role           Role
+  userTypeId     String?
+  /// Legado: preferir privilegios del ClubUserType asignado.
+  allowedModules AdminModule[]     @default([])
+  staffStatus    StaffAccessStatus?
+  invitedAt      DateTime?
+  acceptedAt     DateTime?
+  disabledAt     DateTime?
 
-  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  club     Club          @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userType ClubUserType? @relation(fields: [userTypeId], references: [id], onDelete: SetNull)
 
   @@unique([clubId, userId, role])
   @@index([clubId])
+  @@index([userId])
+  @@index([userTypeId])
   @@map("memberships")
 }
 
@@ -100,6 +163,23 @@ enum Role {
   CASHIER
   PROFESSOR
   PLAYER
+}
+
+enum AdminModule {
+  PLAYERS
+  CATALOG
+  PRICE_MENU
+  BOOKINGS
+  TOURNAMENTS
+  TOOLS
+  USER_TYPES
+  USERS
+}
+
+enum StaffAccessStatus {
+  INVITED
+  ACTIVE
+  DISABLED
 }
 
 enum Gender {
@@ -295,22 +375,47 @@ model Product {
   marginPct   Int      @default(0)
   price       Int      @default(0)
   rounding    Int      @default(0)
-  stock       Int      @default(0) // control manual de stock
-  isComposite Boolean  @default(false) // conjunto (true) / individual (false)
-  photoUrl    String?
-  active      Boolean  @default(true)
-  createdById String?
-  updatedById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  stock            Int      @default(0) // control manual de stock
+  isComposite      Boolean  @default(false) // conjunto (true) / individual (false)
+  /// Cantidad base a la que corresponde el costo (ej. 100). Default 1.
+  baseQuantity     Float    @default(1)
+  /// Unidad de la cantidad base: u, g, kg, ml, l
+  unit             String   @default("u")
+  photoUrl         String?
+  active           Boolean  @default(true)
+  sortOrder        Int      @default(0) // orden en catálogo / menú
+  showInPriceMenu  Boolean  @default(false) // publicar en menú de precios
+  createdById      String?
+  updatedById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   club          Club              @relation(fields: [clubId], references: [id], onDelete: Cascade)
   type          ProductType?      @relation(fields: [typeId], references: [id])
   saleMovements AccountMovement[]
+  components    ProductComponent[] @relation("ProductComponents")
+  usedIn        ProductComponent[] @relation("ComponentOf")
 
   @@unique([clubId, code])
   @@index([clubId])
+  @@index([clubId, sortOrder])
   @@map("products")
+}
+
+/// Línea de receta: un conjunto (parent) usa quantity de un producto simple (component).
+model ProductComponent {
+  id          String @id @default(cuid())
+  parentId    String
+  componentId String
+  quantity    Float
+
+  parent    Product @relation("ProductComponents", fields: [parentId], references: [id], onDelete: Cascade)
+  component Product @relation("ComponentOf", fields: [componentId], references: [id], onDelete: Restrict)
+
+  @@unique([parentId, componentId])
+  @@index([parentId])
+  @@index([componentId])
+  @@map("product_components")
 }
 
 enum MovementType {

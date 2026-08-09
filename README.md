@@ -16,6 +16,22 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Acceso inicial e invitaciones
+
+Además de copiar `.env.example` a `.env`, configurá
+`SUPABASE_SERVICE_ROLE_KEY` y `NEXT_PUBLIC_SITE_URL`.
+
+En Supabase, usá `http://localhost:3000` como **Site URL** y agregá
+`http://localhost:3000/auth/confirm` en **Authentication > URL Configuration >
+Redirect URLs**. La aplicación acepta la plantilla predeterminada de
+**Invite user**, por lo que no es necesario configurar SMTP para desarrollo.
+
+Para vincular e invitar al propietario existente del club:
+
+```bash
+npm run auth:invite-owner -- club-demo propietario@ejemplo.com
+```
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

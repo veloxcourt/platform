@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { requireClubModuleAccess } from "@/lib/auth/access";
 import {
   cloneEcoItems,
   cloneSimulationName,
@@ -19,6 +20,7 @@ type Result<T = undefined> =
   | { ok: false; error: string };
 
 async function resolveClub(clubSlug: string) {
+  await requireClubModuleAccess(clubSlug, "herramientas");
   const repo = getHerramientasRepository();
   const club = await repo.getClubBySlug(clubSlug);
   return { repo, club };

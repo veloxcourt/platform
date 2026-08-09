@@ -20,8 +20,8 @@ export default async function JugadoresPage({
   if (!data) notFound();
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
-      <div>
+    <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-4">
+      <div className="shrink-0">
         <h1 className="text-xl font-semibold">Jugadores</h1>
         <p className="text-sm text-muted-foreground">
           {data.club.name} · {data.players.length} jugadores

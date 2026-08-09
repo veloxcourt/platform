@@ -2,6 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 
+import {
+  requireClubAnyModuleAccess,
+  requireClubModuleAccess,
+} from "@/lib/auth/access";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import {
   createSupabaseAdminClient,
@@ -49,6 +53,7 @@ export async function createBookingAction(
   clubSlug: string,
   values: CreateBookingValues,
 ): Promise<CommandResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   const parsed = createBookingSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: "Datos de reserva inválidos" };
 
@@ -62,6 +67,7 @@ export async function createPlayerAction(
   clubSlug: string,
   values: NewPlayerValues,
 ): Promise<CreatePlayerResult> {
+  await requireClubAnyModuleAccess(clubSlug, ["jugadores", "turnos"]);
   const parsed = newPlayerSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: "Datos del jugador inválidos" };
 
@@ -75,6 +81,7 @@ export async function getPlayerProfileAction(
   clubSlug: string,
   userId: string,
 ): Promise<PlayerProfileResult> {
+  await requireClubAnyModuleAccess(clubSlug, ["jugadores", "turnos"]);
   const repo = getBookingRepository();
   return getPlayerProfile(repo, clubSlug, userId);
 }
@@ -84,6 +91,7 @@ export async function uploadPlayerPhotoAction(
   userId: string,
   formData: FormData,
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  await requireClubAnyModuleAccess(clubSlug, ["jugadores", "turnos"]);
   const repo = getBookingRepository();
   const club = await repo.getClubBySlug(clubSlug);
   if (!club) return { ok: false, error: "Club no encontrado" };
@@ -122,6 +130,7 @@ export async function removePlayerPhotoAction(
   clubSlug: string,
   userId: string,
 ): Promise<CommandResult> {
+  await requireClubAnyModuleAccess(clubSlug, ["jugadores", "turnos"]);
   const repo = getBookingRepository();
   const club = await repo.getClubBySlug(clubSlug);
   if (!club) return { ok: false, error: "Club no encontrado" };
@@ -137,6 +146,7 @@ export async function updatePlayerAction(
   userId: string,
   values: NewPlayerValues,
 ): Promise<CommandResult> {
+  await requireClubAnyModuleAccess(clubSlug, ["jugadores", "turnos"]);
   const parsed = newPlayerSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: "Datos del jugador inválidos" };
   const repo = getBookingRepository();
@@ -152,6 +162,7 @@ export async function deletePlayerAction(
   clubSlug: string,
   userId: string,
 ): Promise<CommandResult> {
+  await requireClubAnyModuleAccess(clubSlug, ["jugadores", "turnos"]);
   const repo = getBookingRepository();
   const result = await deletePlayer(repo, clubSlug, userId);
   if (result.ok) {
@@ -166,6 +177,7 @@ export async function confirmBookingAction(
   clubSlug: string,
   bookingId: string,
 ): Promise<CommandResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
   const result = await confirmBooking(repo, clubSlug, bookingId);
   if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
@@ -176,6 +188,7 @@ export async function cancelBookingAction(
   clubSlug: string,
   bookingId: string,
 ): Promise<CommandResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
   const result = await cancelBooking(repo, clubSlug, bookingId);
   if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
@@ -186,6 +199,7 @@ export async function cancelFixedBookingAction(
   clubSlug: string,
   fixedBookingId: string,
 ): Promise<CommandResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
   const result = await cancelFixedBooking(repo, clubSlug, fixedBookingId);
   if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
@@ -197,6 +211,7 @@ export async function updateBookingAction(
   bookingId: string,
   data: UpdateBookingData,
 ): Promise<CommandResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
   const result = await updateBooking(repo, clubSlug, bookingId, data);
   if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
@@ -207,6 +222,7 @@ export async function getPlayerAccountAction(
   clubSlug: string,
   userId: string,
 ): Promise<AccountResult> {
+  await requireClubAnyModuleAccess(clubSlug, ["jugadores", "turnos"]);
   const repo = getBookingRepository();
   return getPlayerAccount(repo, clubSlug, userId);
 }
@@ -216,6 +232,7 @@ export async function addMovementAction(
   userId: string,
   values: AddMovementValues,
 ): Promise<CommandResult> {
+  await requireClubAnyModuleAccess(clubSlug, ["jugadores", "turnos"]);
   const parsed = addMovementSchema.safeParse(values);
   if (!parsed.success) {
     return { ok: false, error: "Datos del movimiento inválidos" };
@@ -231,6 +248,7 @@ export async function setBookingStatusAction(
   bookingId: string,
   status: "PRE_RESERVA" | "RESERVADO",
 ): Promise<CommandResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
   const result = await setBookingStatus(repo, clubSlug, bookingId, status);
   if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
@@ -242,6 +260,7 @@ export async function setBookingPaymentAction(
   bookingId: string,
   status: PaymentStatus,
 ): Promise<CommandResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
   const result = await setBookingPayment(repo, clubSlug, bookingId, status);
   if (result.ok) revalidatePath(`/${clubSlug}/turnos`);

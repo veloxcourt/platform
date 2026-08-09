@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { requireClubModuleAccess } from "@/lib/auth/access";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import {
   turnosConfigSchema,
@@ -19,6 +20,7 @@ export async function saveTurnosConfig(
   clubSlug: string,
   values: TurnosConfigValues,
 ): Promise<SaveConfigResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   const parsed = turnosConfigSchema.safeParse(values);
   if (!parsed.success) {
     return { ok: false, error: "Datos de configuración inválidos" };
@@ -44,6 +46,7 @@ export async function saveCategoriesAction(
   clubSlug: string,
   categories: string[],
 ): Promise<SaveConfigResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
   const result = await saveClubCategories(repo, clubSlug, categories);
   if (result.ok) {

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ListOrdered } from "lucide-react";
 
+import { enforceClubModulePage } from "@/lib/auth/access";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import { CatalogView } from "@/components/features/catalog/catalog-view";
 import { buttonVariants } from "@/components/ui/button";
@@ -17,6 +18,7 @@ export default async function CatalogoPage({
   params: Promise<{ clubSlug: string }>;
 }) {
   const { clubSlug } = await params;
+  await enforceClubModulePage(clubSlug, "catalogo");
 
   const repo = getBookingRepository();
   const club = await repo.getClubBySlug(clubSlug);

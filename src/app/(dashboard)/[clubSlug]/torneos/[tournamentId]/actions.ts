@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { requireClubModuleAccess } from "@/lib/auth/access";
 import { getZonasTournamentDetail } from "@/modules/tournaments/application/get-zonas-tournament-detail";
 import { addPairSchema, updatePairSchema } from "@/modules/tournaments/domain/pair-schema";
 import type { AddPairValues, UpdatePairValues } from "@/modules/tournaments/domain/pair-schema";
@@ -27,6 +28,7 @@ type AddPairResult =
   | { ok: false; error: string };
 
 async function resolveClubId(clubSlug: string) {
+  await requireClubModuleAccess(clubSlug, "torneos");
   const repo = getTournamentRepository();
   const club = await repo.getClubBySlug(clubSlug);
   return { repo, clubId: club?.id ?? null };

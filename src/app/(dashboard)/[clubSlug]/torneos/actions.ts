@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { requireClubModuleAccess } from "@/lib/auth/access";
 import { createTournament } from "@/modules/tournaments/application/create-tournament";
 import { updateTournament } from "@/modules/tournaments/application/update-tournament";
 import {
@@ -25,6 +26,7 @@ type UpdateTournamentInput = Omit<UpdateTournamentValues, "fee"> & {
 };
 
 async function resolveClubId(clubSlug: string) {
+  await requireClubModuleAccess(clubSlug, "torneos");
   const repo = getTournamentRepository();
   const club = await repo.getClubBySlug(clubSlug);
   return { repo, clubId: club?.id ?? null };
