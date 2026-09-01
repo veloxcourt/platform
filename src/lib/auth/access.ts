@@ -3,8 +3,12 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 
-import type { AdminModuleKey } from "@/config/modules";
-import { ALL_PRIVILEGES } from "@/config/modules";
+import {
+  ALL_PRIVILEGES,
+  firstControlUsuariosSlug,
+  firstHerramientasSlug,
+  type AdminModuleKey,
+} from "@/config/modules";
 import { prisma } from "@/lib/prisma";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -91,6 +95,7 @@ export const getClubAccess = cache(async (clubSlug: string) => {
           id: true,
           role: true,
           allowedModules: true,
+          navOrder: true,
           staffStatus: true,
           userTypeId: true,
           userType: {
@@ -139,6 +144,7 @@ export const getClubAccess = cache(async (clubSlug: string) => {
       membership.role === "OWNER" ||
       privilegesFromType.includes("tipos-usuario"),
     allowedModules: privilegesFromType,
+    navOrder: membership.navOrder ?? [],
   };
 });
 
@@ -193,17 +199,21 @@ export async function enforceClubModulePage(
       (item) =>
         item !== "tipos-usuario" &&
         item !== "usuarios" &&
-        item !== "menu-precios",
+        item !== "menu-precios" &&
+        item !== "eco-torneo" &&
+        item !== "calendario",
     );
     if (fallback) redirect(`/${clubSlug}/${fallback}`);
     if (access.allowedModules.includes("menu-precios")) {
       redirect(`/${clubSlug}/catalogo/menu`);
     }
-    if (access.allowedModules.includes("usuarios")) {
-      redirect(`/${clubSlug}/administradores`);
+    const herramientasSlug = firstHerramientasSlug(access.allowedModules);
+    if (herramientasSlug) {
+      redirect(`/${clubSlug}/herramientas/${herramientasSlug}`);
     }
-    if (access.allowedModules.includes("tipos-usuario")) {
-      redirect(`/${clubSlug}/tipos-usuario`);
+    const controlSlug = firstControlUsuariosSlug(access.allowedModules);
+    if (controlSlug) {
+      redirect(`/${clubSlug}/control-usuarios/${controlSlug}`);
     }
     redirect("/login");
   }

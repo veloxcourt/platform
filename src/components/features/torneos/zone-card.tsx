@@ -98,6 +98,7 @@ export function ZoneCard({
   dayOptions,
   dayOpenByDate,
   slotMinutes,
+  readOnly = false,
   onChange,
   className,
 }: {
@@ -111,6 +112,7 @@ export function ZoneCard({
   dayOpenByDate?: Record<string, string>;
   /// Duración de celda (partido + intervalo) para detectar falta de descanso.
   slotMinutes?: number;
+  readOnly?: boolean;
   onChange: (next: ZoneDraft) => void;
   className?: string;
 }) {
@@ -302,6 +304,7 @@ export function ZoneCard({
                   <select
                     className={cn(SELECT_CLASS, "min-w-[8.5rem]")}
                     value={match.playDate}
+                    disabled={readOnly}
                     onChange={(e) =>
                       updateMatch(match.id, { playDate: e.target.value })
                     }
@@ -320,6 +323,8 @@ export function ZoneCard({
                     value={match.startTime}
                     placeholder="17:00"
                     className="h-8 w-[5.5rem] text-xs"
+                    disabled={readOnly}
+                    readOnly={readOnly}
                     onChange={(e) =>
                       updateMatch(match.id, { startTime: e.target.value })
                     }
@@ -330,6 +335,7 @@ export function ZoneCard({
                   <select
                     className={cn(SELECT_CLASS, "w-[6.5rem]")}
                     value={match.courtIndex ?? ""}
+                    disabled={readOnly}
                     onChange={(e) =>
                       updateMatch(match.id, {
                         courtIndex:
@@ -352,6 +358,7 @@ export function ZoneCard({
                   <select
                     className={SELECT_CLASS}
                     value={match.pair1Id ?? ""}
+                    disabled={readOnly}
                     onChange={(e) =>
                       updateMatch(match.id, {
                         pair1Id: e.target.value || null,
@@ -371,6 +378,7 @@ export function ZoneCard({
                   <select
                     className={SELECT_CLASS}
                     value={match.pair2Id ?? ""}
+                    disabled={readOnly}
                     onChange={(e) =>
                       updateMatch(match.id, {
                         pair2Id: e.target.value || null,
@@ -394,6 +402,8 @@ export function ZoneCard({
                         className={SCORE_CLASS}
                         inputMode="numeric"
                         value={match.scores[col.key] ?? ""}
+                        disabled={readOnly}
+                        readOnly={readOnly}
                         onChange={(e) =>
                           updateScore(match.id, col.key, e.target.value)
                         }

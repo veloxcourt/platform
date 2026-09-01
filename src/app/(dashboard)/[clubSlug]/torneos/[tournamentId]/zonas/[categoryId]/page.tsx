@@ -3,6 +3,10 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 
 import { TournamentZonesPanel } from "@/components/features/torneos/tournament-zones-panel";
+import {
+  parseTournamentMode,
+  withTournamentMode,
+} from "@/lib/tournament-mode";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import { getZonasTournamentDetail } from "@/modules/tournaments/application/get-zonas-tournament-detail";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
@@ -13,14 +17,18 @@ export const metadata = {
 
 export default async function TorneoZonasCategoriaPage({
   params,
+  searchParams,
 }: {
   params: Promise<{
     clubSlug: string;
     tournamentId: string;
     categoryId: string;
   }>;
+  searchParams: Promise<{ modo?: string }>;
 }) {
   const { clubSlug, tournamentId, categoryId } = await params;
+  const { modo } = await searchParams;
+  const mode = parseTournamentMode(modo);
 
   const repo = getTournamentRepository();
   const data = await getZonasTournamentDetail(repo, clubSlug, tournamentId);
@@ -41,7 +49,10 @@ export default async function TorneoZonasCategoriaPage({
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
       <div className="flex flex-col gap-1">
         <Link
-          href={`/${clubSlug}/torneos/${tournamentId}`}
+          href={withTournamentMode(
+            `/${clubSlug}/torneos/${tournamentId}`,
+            mode,
+          )}
           className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ChevronLeft className="size-4" />

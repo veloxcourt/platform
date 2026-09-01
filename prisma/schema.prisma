@@ -38,6 +38,11 @@ model Club {
   products             Product[]
   tournaments          Tournament[]
   ecoTorneoSimulations EcoTorneoSimulation[]
+  calendarPlannerVenues      CalendarPlannerVenue[]
+  calendarPlannerCategories  CalendarPlannerCategory[]
+  calendarPlannedTournaments CalendarPlannedTournament[]
+  calendarPlannerSettings    CalendarPlannerSettings?
+  calendarSearchLinks        CalendarSearchLink[]
 
   @@map("clubs")
 }
@@ -140,6 +145,8 @@ model Membership {
   userTypeId     String?
   /// Legado: preferir privilegios del ClubUserType asignado.
   allowedModules AdminModule[]     @default([])
+  /// Orden personalizado de pestañas del dashboard (ids de nav). Vacío = orden por defecto.
+  navOrder       String[]          @default([])
   staffStatus    StaffAccessStatus?
   invitedAt      DateTime?
   acceptedAt     DateTime?
@@ -172,6 +179,8 @@ enum AdminModule {
   BOOKINGS
   TOURNAMENTS
   TOOLS
+  TOOLS_ECO_TORNEO
+  TOOLS_CALENDARIO
   USER_TYPES
   USERS
 }
@@ -505,6 +514,8 @@ model TournamentSettings {
   intervalMin           Int         @default(0)
   /// Parejas / participantes por zona (t?picamente 3).
   pairsPerZone          Int         @default(3)
+  /// En zona de 4: 3 = Federacion FAP, 2 = Asociacion APA.
+  zone4Advancers        Int         @default(3)
   /// Fechas (YYYY-MM-DD) asignadas a cada fase, referenciando d?as de juego del torneo.
   zonesPlayDates        String[]    @default([])
   knockoutPlayDates     String[]    @default([])
@@ -665,4 +676,103 @@ model EcoTorneoSimulation {
 
   @@index([clubId])
   @@map("eco_torneo_simulations")
+}
+
+// ---------------------------------------------------------------------------
+// Calendario de torneos (planificador de fechas entre clubes)
+// ---------------------------------------------------------------------------
+
+/// Fila del timeline (un club vecino o el propio). No es el tenant Club.
+model CalendarPlannerVenue {
+  id        String   @id @default(cuid())
+  clubId    String
+  name      String
+  color     String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  club        Club                       @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  tournaments CalendarPlannedTournament[]
+
+  @@index([clubId])
+  @@map("calendar_planner_venues")
+}
+
+/// Catálogo de categorías del planificador.
+model CalendarPlannerCategory {
+  id           String   @id @default(cuid())
+  clubId       String
+  name         String
+  abbreviation String
+  color        String
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  club        Club                               @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  tournaments CalendarPlannedTournamentCategory[]
+
+  @@unique([clubId, abbreviation])
+  @@index([clubId])
+  @@map("calendar_planner_categories")
+}
+
+model CalendarPlannedTournament {
+  id        String   @id @default(cuid())
+  clubId    String
+  venueId   String
+  name      String
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  club       Club                               @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  venue      CalendarPlannerVenue               @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  categories CalendarPlannedTournamentCategory[]
+
+  @@index([clubId])
+  @@index([venueId])
+  @@map("calendar_planned_tournaments")
+}
+
+model CalendarPlannedTournamentCategory {
+  tournamentId String
+  categoryId   String
+
+  tournament CalendarPlannedTournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  category   CalendarPlannerCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([tournamentId, categoryId])
+  @@map("calendar_planned_tournament_categories")
+}
+
+/// Enlaces del club para buscar torneos de la zona (además de los oficiales).
+model CalendarSearchLink {
+  id          String   @id @default(cuid())
+  clubId      String
+  name        String
+  url         String
+  description String   @default("")
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@index([clubId])
+  @@map("calendar_search_links")
+}
+
+/// Colores de marcas "Disponibles" (un registro por club tenant).
+model CalendarPlannerSettings {
+  clubId      String   @id
+  libreFill   String   @default("#fde68a")
+  libreBorder String   @default("#d97706")
+  updatedAt   DateTime @updatedAt
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@map("calendar_planner_settings")
 }

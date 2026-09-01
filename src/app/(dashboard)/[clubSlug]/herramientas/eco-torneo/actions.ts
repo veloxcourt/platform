@@ -20,7 +20,7 @@ type Result<T = undefined> =
   | { ok: false; error: string };
 
 async function resolveClub(clubSlug: string) {
-  await requireClubModuleAccess(clubSlug, "herramientas");
+  await requireClubModuleAccess(clubSlug, "eco-torneo");
   const repo = getHerramientasRepository();
   const club = await repo.getClubBySlug(clubSlug);
   return { repo, club };

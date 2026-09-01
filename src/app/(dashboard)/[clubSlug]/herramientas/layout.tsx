@@ -1,8 +1,8 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
 
-import { EcoTorneoHeaderActions } from "@/components/features/herramientas/eco-torneo-header-actions";
 import { HerramientasSubnav } from "@/components/features/herramientas/herramientas-subnav";
-import { enforceClubModulePage } from "@/lib/auth/access";
+import { firstHerramientasSlug } from "@/config/modules";
+import { getClubAccess } from "@/lib/auth/access";
 
 export default async function HerramientasLayout({
   children,
@@ -12,23 +12,24 @@ export default async function HerramientasLayout({
   params: Promise<{ clubSlug: string }>;
 }) {
   const { clubSlug } = await params;
-  await enforceClubModulePage(clubSlug, "herramientas");
+  const access = await getClubAccess(clubSlug);
+  if (!access) redirect(`/login?next=/${clubSlug}/herramientas`);
+  if (!firstHerramientasSlug(access.allowedModules)) {
+    const fallback = access.allowedModules[0];
+    redirect(fallback ? `/${clubSlug}/${fallback}` : "/login");
+  }
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">Herramientas</h1>
-          <p className="text-sm text-muted-foreground">
-            Utilidades de apoyo para la operación del club
-          </p>
-        </div>
-        <Suspense fallback={null}>
-          <EcoTorneoHeaderActions clubSlug={clubSlug} />
-        </Suspense>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <HerramientasSubnav
+          clubSlug={clubSlug}
+          allowedModules={access.allowedModules}
+        />
+        <p className="shrink-0 text-sm text-muted-foreground">
+          Utilidades de apoyo para la operación del club
+        </p>
       </div>
-
-      <HerramientasSubnav clubSlug={clubSlug} />
 
       {children}
     </div>

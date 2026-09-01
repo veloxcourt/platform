@@ -1,36 +1,57 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
+import { Calculator, CalendarDays } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-import { HERRAMIENTAS_TABS } from "@/config/modules";
-import { cn } from "@/lib/utils";
+import {
+  HERRAMIENTAS_TABS,
+  type AdminModuleKey,
+} from "@/config/modules";
+import { StableTabButton } from "@/components/ui/stable-tab-button";
 
-export function HerramientasSubnav({ clubSlug }: { clubSlug: string }) {
+const TAB_ICONS: Record<(typeof HERRAMIENTAS_TABS)[number]["slug"], LucideIcon> =
+  {
+    "eco-torneo": Calculator,
+    calendario: CalendarDays,
+  };
+
+export function HerramientasSubnav({
+  clubSlug,
+  allowedModules,
+}: {
+  clubSlug: string;
+  allowedModules: AdminModuleKey[];
+}) {
   const pathname = usePathname();
+  const router = useRouter();
   const base = `/${clubSlug}/herramientas`;
+  const tabs = HERRAMIENTAS_TABS.filter((tab) =>
+    allowedModules.includes(tab.privilege),
+  );
 
   return (
-    <nav className="flex gap-1 border-b">
-      {HERRAMIENTAS_TABS.map((tab) => {
+    <div
+      className="flex min-w-0 items-center gap-2 overflow-x-auto"
+      role="tablist"
+      aria-label="Herramientas"
+    >
+      {tabs.map((tab) => {
         const href = `${base}/${tab.slug}`;
         const active = pathname === href || pathname.startsWith(`${href}/`);
+        const Icon = TAB_ICONS[tab.slug];
 
         return (
-          <Link key={tab.slug} href={href}>
-            <span
-              className={cn(
-                "inline-block whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-                active
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:border-primary/40 hover:text-foreground",
-              )}
-            >
-              {tab.label}
-            </span>
-          </Link>
+          <StableTabButton
+            key={tab.slug}
+            active={active}
+            onSelect={() => router.push(href)}
+          >
+            <Icon />
+            {tab.label}
+          </StableTabButton>
         );
       })}
-    </nav>
+    </div>
   );
 }

@@ -18,8 +18,8 @@ function normalizePrivileges(privileges: AdminModuleKey[]) {
 }
 
 function revalidate(clubSlug: string) {
-  revalidatePath(`/${clubSlug}/tipos-usuario`);
-  revalidatePath(`/${clubSlug}/administradores`);
+  revalidatePath(`/${clubSlug}/control-usuarios/tipo-usuario`);
+  revalidatePath(`/${clubSlug}/control-usuarios/usuarios`);
 }
 
 export async function createUserTypeAction(

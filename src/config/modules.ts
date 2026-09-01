@@ -1,3 +1,73 @@
+/** Ids estables de las pestañas principales del dashboard (ordenables). */
+export const NAV_TAB_IDS = [
+  "jugadores",
+  "catalogo",
+  "menu-precios",
+  "turnos",
+  "torneos",
+  "socios",
+  "caja",
+  "bar",
+  "ranking",
+  "clases",
+  "videos",
+  "notificaciones",
+  "pagos",
+  "reportes",
+  "estadisticas",
+  "herramientas",
+  "control-usuarios",
+] as const;
+
+export type NavTabId = (typeof NAV_TAB_IDS)[number];
+
+export const NAV_TAB_LABELS: Record<NavTabId, string> = {
+  jugadores: "Jugadores",
+  catalogo: "Catálogo",
+  "menu-precios": "Menú de precios",
+  turnos: "Gestión de Turnos",
+  torneos: "Torneos",
+  socios: "Socios",
+  caja: "Caja",
+  bar: "Bar",
+  ranking: "Ranking",
+  clases: "Clases",
+  videos: "Videos",
+  notificaciones: "Notificaciones",
+  pagos: "Pagos",
+  reportes: "Reportes",
+  estadisticas: "Estadísticas",
+  herramientas: "Herramientas",
+  "control-usuarios": "Control Usuarios",
+};
+
+export function navTabHref(clubSlug: string, tabId: NavTabId): string {
+  switch (tabId) {
+    case "catalogo":
+      return `/${clubSlug}/catalogo`;
+    case "menu-precios":
+      return `/${clubSlug}/catalogo/menu`;
+    case "control-usuarios":
+      return `/${clubSlug}/control-usuarios`;
+    default:
+      return `/${clubSlug}/${tabId}`;
+  }
+}
+
+/** Aplica un orden guardado sobre las pestañas disponibles; las nuevas van al final. */
+export function applyNavOrder(
+  available: NavTabId[],
+  saved: string[] | null | undefined,
+): NavTabId[] {
+  if (!saved?.length) return available;
+  const avail = new Set(available);
+  const ordered = saved.filter((id): id is NavTabId =>
+    avail.has(id as NavTabId),
+  );
+  const remaining = available.filter((id) => !ordered.includes(id));
+  return [...ordered, ...remaining];
+}
+
 /// Módulos de la plataforma. Se habilitan por club (feature flags) sin tocar código.
 export const MODULES = [
   "turnos",
@@ -35,8 +105,39 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
 
 /// Sub-pestañas del módulo Herramientas.
 export const HERRAMIENTAS_TABS = [
-  { slug: "eco-torneo", label: "Eco-Torneo" },
+  { slug: "eco-torneo", label: "Eco-Torneo", privilege: "eco-torneo" },
+  { slug: "calendario", label: "Calendario", privilege: "calendario" },
 ] as const;
+
+export function firstHerramientasSlug(
+  allowedModules: readonly string[],
+): (typeof HERRAMIENTAS_TABS)[number]["slug"] | null {
+  const tab = HERRAMIENTAS_TABS.find((item) =>
+    allowedModules.includes(item.privilege),
+  );
+  return tab?.slug ?? null;
+}
+
+/// Sub-pestañas del módulo Control Usuarios.
+export const CONTROL_USUARIOS_TABS = [
+  { slug: "tipo-usuario", label: "Tipo Usuario", privilege: "tipos-usuario" },
+  { slug: "usuarios", label: "Usuarios", privilege: "usuarios" },
+] as const;
+
+/// Sub-pestañas del módulo Torneos (mismo privilegio; listado queda en /torneos).
+export const TORNEOS_TABS = [
+  { slug: "listado", label: "Listado" },
+  { slug: "soporte", label: "Soporte" },
+] as const;
+
+export function firstControlUsuariosSlug(
+  allowedModules: readonly string[],
+): (typeof CONTROL_USUARIOS_TABS)[number]["slug"] | null {
+  const tab = CONTROL_USUARIOS_TABS.find((item) =>
+    allowedModules.includes(item.privilege),
+  );
+  return tab?.slug ?? null;
+}
 
 /// Módulos ya implementados / en desarrollo (para navegación).
 export const ACTIVE_MODULES: ModuleKey[] = ["turnos", "torneos", "herramientas"];
@@ -48,7 +149,8 @@ export const ADMIN_MODULES = [
   "menu-precios",
   "turnos",
   "torneos",
-  "herramientas",
+  "eco-torneo",
+  "calendario",
   "tipos-usuario",
   "usuarios",
 ] as const;
@@ -61,8 +163,9 @@ export const ADMIN_MODULE_LABELS: Record<AdminModuleKey, string> = {
   "menu-precios": "Catálogo · Menú de precios",
   turnos: "Gestión de Turnos",
   torneos: "Torneos",
-  herramientas: "Herramientas",
-  "tipos-usuario": "Tipos de usuario",
+  "eco-torneo": "Eco-Torneo",
+  calendario: "Calendario",
+  "tipos-usuario": "Tipo Usuario",
   usuarios: "Usuarios",
 };
 
@@ -107,17 +210,18 @@ export const PRIVILEGE_GROUPS: PrivilegeGroup[] = [
   {
     id: "herramientas",
     label: "Herramientas",
-    options: [{ key: "herramientas", label: "Acceso" }],
+    options: [
+      { key: "eco-torneo", label: "Eco-Torneo" },
+      { key: "calendario", label: "Calendario" },
+    ],
   },
   {
-    id: "tipos-usuario",
-    label: "Tipos de usuario",
-    options: [{ key: "tipos-usuario", label: "Acceso" }],
-  },
-  {
-    id: "usuarios",
-    label: "Usuarios",
-    options: [{ key: "usuarios", label: "Acceso" }],
+    id: "control-usuarios",
+    label: "Control Usuarios",
+    options: [
+      { key: "tipos-usuario", label: "Tipo Usuario" },
+      { key: "usuarios", label: "Usuarios" },
+    ],
   },
 ];
 

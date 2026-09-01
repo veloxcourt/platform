@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -36,8 +36,13 @@ import {
 } from "@/modules/tournaments/domain/court-day-slots";
 import type { SimulationCategoryLoad } from "@/modules/tournaments/domain/court-day-slots";
 import { SlotRuleGrid } from "./slot-rule-grid";
-import { updateCategorySimulationAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/categorias/actions";
+import {
+  deleteCategoryAction,
+  renameCategoryAction,
+  updateCategorySimulationAction,
+} from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/categorias/actions";
 import { AddCategoryDialog } from "./add-category-dialog";
+import { useTournamentReadOnly } from "./tournament-mode-context";
 
 type SimulationDraft = {
   enabled: boolean;
@@ -80,11 +85,15 @@ export function TournamentCategoriesPanel({
   compact?: boolean;
 }) {
   const router = useRouter();
+  const readOnly = useTournamentReadOnly();
   const [addOpen, setAddOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
   const [drafts, setDrafts] = useState<Record<string, SimulationDraft>>(() =>
     Object.fromEntries(categories.map((c) => [c.id, draftFromCategory(c)])),
   );
   const [, startTransition] = useTransition();
+  const [, startCategoryMutation] = useTransition();
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
@@ -119,6 +128,7 @@ export function TournamentCategoriesPanel({
     draft: SimulationDraft,
     options?: { debounceMs?: number },
   ) {
+    if (readOnly) return;
     const debounceMs = options?.debounceMs ?? 0;
     const existingTimer = saveTimers.current[category.id];
     if (existingTimer) clearTimeout(existingTimer);
@@ -174,6 +184,72 @@ export function TournamentCategoriesPanel({
     persist(category, next, { debounceMs: 500 });
   }
 
+  function startRename(category: TournamentCategoryItem) {
+    setEditingId(category.id);
+    setEditingName(category.name);
+  }
+
+  function cancelRename() {
+    setEditingId(null);
+    setEditingName("");
+  }
+
+  function saveRename(category: TournamentCategoryItem) {
+    const name = editingName.trim();
+    if (!name) {
+      toast.error("Escribí el nombre");
+      return;
+    }
+    if (name === category.name) {
+      cancelRename();
+      return;
+    }
+
+    startCategoryMutation(async () => {
+      const result = await renameCategoryAction(
+        clubSlug,
+        tournamentId,
+        category.id,
+        { name },
+      );
+      if (result.ok) {
+        toast.success("Nombre actualizado");
+        cancelRename();
+        router.refresh();
+      } else {
+        toast.error("No se pudo renombrar", { description: result.error });
+      }
+    });
+  }
+
+  function removeCategory(category: TournamentCategoryItem) {
+    if (category.pairCount > 0) {
+      const ok = window.confirm(
+        `«${category.name}» tiene ${category.pairCount} inscripción${category.pairCount === 1 ? "" : "es"}.\n\nSi confirmás, se eliminará la categoría y todas sus parejas. Esta acción no se puede deshacer.`,
+      );
+      if (!ok) return;
+    }
+
+    startCategoryMutation(async () => {
+      const result = await deleteCategoryAction(
+        clubSlug,
+        tournamentId,
+        category.id,
+      );
+      if (result.ok) {
+        toast.success(
+          category.pairCount > 0
+            ? "Categoría e inscripciones eliminadas"
+            : "Categoría eliminada",
+        );
+        if (editingId === category.id) cancelRename();
+        router.refresh();
+      } else {
+        toast.error("No se pudo eliminar", { description: result.error });
+      }
+    });
+  }
+
   return (
     <>
       <Card className={compact ? "border-0 shadow-none" : undefined}>
@@ -191,10 +267,12 @@ export function TournamentCategoriesPanel({
                 : "Cada categoría compite con parejas y fixture propios. Activá Simulación para estimar partidos y tiempos con N confirmadas."}
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="size-4" />
-            Agregar categoría
-          </Button>
+          {!readOnly && (
+            <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="size-4" />
+              Agregar categoría
+            </Button>
+          )}
         </CardHeader>
         <CardContent className={compact ? "px-0" : undefined}>
           {categories.length === 0 ? (
@@ -337,10 +415,89 @@ export function TournamentCategoriesPanel({
                             )}
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="font-medium">{category.name}</p>
+                              <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                {editingId === category.id ? (
+                                  <>
+                                    <Input
+                                      value={editingName}
+                                      onChange={(e) =>
+                                        setEditingName(e.target.value)
+                                      }
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          e.preventDefault();
+                                          saveRename(category);
+                                        }
+                                        if (e.key === "Escape") {
+                                          e.preventDefault();
+                                          cancelRename();
+                                        }
+                                      }}
+                                      className="h-8 max-w-xs"
+                                      autoFocus
+                                      aria-label={`Nombre de ${category.name}`}
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="size-7 shrink-0"
+                                      onClick={() => saveRename(category)}
+                                      title="Guardar nombre"
+                                    >
+                                      <Check className="size-3.5" />
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="size-7 shrink-0"
+                                      onClick={cancelRename}
+                                      title="Cancelar"
+                                    >
+                                      <X className="size-3.5" />
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <p className="min-w-0 truncate font-medium">
+                                      {category.name}
+                                    </p>
+                                    {!readOnly && (
+                                      <div className="flex shrink-0 items-center">
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          className="size-7"
+                                          onClick={() => startRename(category)}
+                                          title="Editar nombre"
+                                          aria-label={`Editar nombre de ${category.name}`}
+                                        >
+                                          <Pencil className="size-3.5" />
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          className="size-7 text-muted-foreground hover:text-destructive"
+                                          onClick={() =>
+                                            removeCategory(category)
+                                          }
+                                          title="Eliminar categoría"
+                                          aria-label={`Eliminar ${category.name}`}
+                                        >
+                                          <Trash2 className="size-3.5" />
+                                        </Button>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
                               <label className="flex cursor-pointer items-center gap-2 text-sm">
                                 <Checkbox
                                   checked={sim.enabled}
+                                  disabled={readOnly}
                                   onCheckedChange={(v) =>
                                     setEnabled(category, v === true)
                                   }
@@ -360,7 +517,7 @@ export function TournamentCategoriesPanel({
                                   <CategoryStat
                                     label="Confirmadas"
                                     value={category.confirmedCount}
-                                    editable={sim.enabled}
+                                    editable={sim.enabled && !readOnly}
                                     editValue={sim.confirmed}
                                     onEditChange={(value) =>
                                       setConfirmed(category, value)
@@ -379,7 +536,7 @@ export function TournamentCategoriesPanel({
                                 <CategoryStat
                                   label="Confirmadas (simulación)"
                                   value={category.confirmedCount}
-                                  editable={sim.enabled}
+                                  editable={sim.enabled && !readOnly}
                                   editValue={sim.confirmed}
                                   onEditChange={(value) =>
                                     setConfirmed(category, value)
@@ -589,6 +746,8 @@ function SimulationResult({
           : ""}
         {" · "}
         objetivo {categoryConfig?.pairsPerZone ?? 3}/zona
+        {" · "}
+        zonas de 4: pasan {categoryConfig?.zone4Advancers === 2 ? 2 : 3}
         {" · "}
         {displayResult.advancers} avanzan a llave
         {displayResult.bracketSize > 0

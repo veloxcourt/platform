@@ -105,6 +105,8 @@ export const categoryPhaseConfigSchema = z.object({
     .int()
     .min(2, "Mínimo 2 por zona")
     .max(8, "Máximo 8 por zona"),
+  /// En zona de 4: 3 = Federación (FAP), 2 = Asociación (APA).
+  zone4Advancers: z.union([z.literal(2), z.literal(3)]),
 });
 
 export const tournamentConfigSchema = z.object({
@@ -118,6 +120,22 @@ export const tournamentConfigSchema = z.object({
     .array(categoryPhaseConfigSchema)
     .min(1, "Agregá al menos una categoría"),
 });
+
+export const ZONE4_ADVANCERS_VALUES = [3, 2] as const;
+export type Zone4Advancers = (typeof ZONE4_ADVANCERS_VALUES)[number];
+
+export const DEFAULT_ZONE4_ADVANCERS: Zone4Advancers = 3;
+
+export const ZONE4_ADVANCERS_LABELS: Record<Zone4Advancers, string> = {
+  3: "Pasan 3 · Federación (FAP)",
+  2: "Pasan 2 · Asociación (APA)",
+};
+
+export function normalizeZone4Advancers(
+  value: number | null | undefined,
+): Zone4Advancers {
+  return value === 2 ? 2 : 3;
+}
 
 export type PhaseConfigValues = z.infer<typeof phaseConfigSchema>;
 export type FinalPhaseConfigValues = z.infer<typeof finalPhaseConfigSchema>;

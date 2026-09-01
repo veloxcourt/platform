@@ -120,6 +120,8 @@ export interface CategoryPhaseConfig {
   };
   intervalMin: number;
   pairsPerZone: number;
+  /// En zona de 4: 3 = FAP, 2 = APA.
+  zone4Advancers: 2 | 3;
   /// Fixture armado de zonas (si ya se generó).
   zonesFixture: ZonesFixturePersisted | null;
 }

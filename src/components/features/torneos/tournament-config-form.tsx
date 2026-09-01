@@ -26,6 +26,8 @@ import {
   FINAL_PHASE_START_ROUND_VALUES,
   TOURNAMENT_PHASE_KEYS,
   TOURNAMENT_PHASE_META,
+  ZONE4_ADVANCERS_LABELS,
+  ZONE4_ADVANCERS_VALUES,
   tournamentConfigSchema,
   type TournamentConfigValues,
   type TournamentPhaseKey,
@@ -36,6 +38,7 @@ import {
 } from "@/modules/tournaments/domain/bracket-rounds";
 import { saveTournamentConfigAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/configuracion/actions";
 import { playDayEndHint, formatPlayDayDuration, playDayWindowMinutes } from "@/modules/tournaments/domain/play-day";
+import { useTournamentReadOnly } from "./tournament-mode-context";
 
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -94,8 +97,10 @@ function PhaseFields({
       name: `${base}.playDates`,
     }) ?? [];
 
+  const readOnly = useTournamentReadOnly();
+
   function togglePlayDate(date: string, checked: boolean) {
-    if (!date) return;
+    if (readOnly || !date) return;
     const current = Array.isArray(selectedDates) ? selectedDates : [];
     const next = checked
       ? current.includes(date)
@@ -131,6 +136,7 @@ function PhaseFields({
             <Label>Comienza en</Label>
             <select
               className={SELECT_CLASS}
+              disabled={readOnly}
               {...register(`categories.${categoryIndex}.phases.final.startsAtRound`)}
             >
               {FINAL_PHASE_START_ROUND_VALUES.map((round) => (
@@ -158,6 +164,7 @@ function PhaseFields({
           <Label>Formato</Label>
           <select
             className={SELECT_CLASS}
+            disabled={readOnly}
             {...register(`${base}.matchFormat`)}
           >
             {MATCH_FORMAT_VALUES.map((f) => (
@@ -174,6 +181,8 @@ function PhaseFields({
             min={30}
             max={180}
             step={15}
+            disabled={readOnly}
+            readOnly={readOnly}
             {...register(`${base}.matchDurationMin`, { valueAsNumber: true })}
           />
           {phaseErrors?.matchDurationMin && (
@@ -201,7 +210,7 @@ function PhaseFields({
                   >
                     <Checkbox
                       checked={checked}
-                      disabled={!date}
+                      disabled={readOnly || !date}
                       onCheckedChange={(value) =>
                         togglePlayDate(date, value === true)
                       }
@@ -261,15 +270,21 @@ function PlayDayRow({
     startTime && endTime ? formatPlayDayDuration(startTime, endTime) : null;
   const windowMinutes =
     startTime && endTime ? playDayWindowMinutes(startTime, endTime) : 0;
+  const readOnly = useTournamentReadOnly();
   const courts = Number.isFinite(courtCount) && courtCount > 0 ? courtCount : 0;
   const totalMinutes = windowMinutes > 0 && courts > 0 ? windowMinutes * courts : 0;
   const totalHoursLabel = totalMinutes > 0 ? formatCourtHours(totalMinutes) : null;
 
   return (
-    <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-[1fr_1fr_1fr_6.5rem_7.5rem_auto]">
+    <div className="grid min-w-0 gap-3 rounded-lg border p-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_6.5rem_7.5rem_auto]">
       <div className="flex flex-col gap-1.5">
         <Label>Fecha</Label>
-        <Input type="date" {...register(`playDays.${index}.date`)} />
+        <Input
+          type="date"
+          disabled={readOnly}
+          readOnly={readOnly}
+          {...register(`playDays.${index}.date`)}
+        />
         {errors.playDays?.[index]?.date && (
           <p className="text-xs text-destructive">
             {errors.playDays[index]?.date?.message}
@@ -281,11 +296,21 @@ function PlayDayRow({
       </div>
       <div className="flex flex-col gap-1.5">
         <Label>Desde</Label>
-        <Input type="time" {...register(`playDays.${index}.startTime`)} />
+        <Input
+          type="time"
+          disabled={readOnly}
+          readOnly={readOnly}
+          {...register(`playDays.${index}.startTime`)}
+        />
       </div>
       <div className="flex flex-col gap-1.5">
         <Label>Hasta</Label>
-        <Input type="time" {...register(`playDays.${index}.endTime`)} />
+        <Input
+          type="time"
+          disabled={readOnly}
+          readOnly={readOnly}
+          {...register(`playDays.${index}.endTime`)}
+        />
         {endHint && (
           <p className="text-xs text-muted-foreground">{endHint}</p>
         )}
@@ -322,18 +347,20 @@ function PlayDayRow({
           Horas × canchas.
         </p>
       </div>
-      <div className="flex items-end">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onClick={onRemove}
-          disabled={!canRemove}
-          title="Quitar día"
-        >
-          <Trash2 className="size-4" />
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="flex items-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={onRemove}
+            disabled={!canRemove}
+            title="Quitar día"
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -357,6 +384,7 @@ function CategoryPhaseCard({
   >["formState"]["errors"];
   playDays: TournamentConfigValues["playDays"];
 }) {
+  const readOnly = useTournamentReadOnly();
   const finalStartsAtRound = useWatch({
     control,
     name: `categories.${categoryIndex}.phases.final.startsAtRound`,
@@ -389,25 +417,77 @@ function CategoryPhaseCard({
             finalStartsAtRound={finalStartsAtRound}
           />
         ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SharedParametersCard({
+  register,
+  errors,
+  categoryCount,
+}: {
+  register: ReturnType<typeof useForm<TournamentConfigValues>>["register"];
+  errors: ReturnType<
+    typeof useForm<TournamentConfigValues>
+  >["formState"]["errors"];
+  categoryCount: number;
+}) {
+  const readOnly = useTournamentReadOnly();
+  // Por ahora pairs/interval son comunes: editamos la 1ª categoría y al guardar
+  // se copian al resto.
+  const firstErrors = errors.categories?.[0];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Parámetros comunes</CardTitle>
+        <CardDescription>
+          Aplican a todas las categorías del torneo.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
         <div className="grid gap-3 rounded-lg border border-muted-foreground/15 bg-muted/40 p-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`pairs-per-zone-${categoryIndex}`}>
-              Parejas por zona
-            </Label>
+            <Label htmlFor="court-count">Canchas disponibles</Label>
             <Input
-              id={`pairs-per-zone-${categoryIndex}`}
+              id="court-count"
+              type="number"
+              min={1}
+              max={32}
+              step={1}
+              className="max-w-[200px]"
+              disabled={readOnly}
+              readOnly={readOnly}
+              {...register("courtCount", { valueAsNumber: true })}
+            />
+            {errors.courtCount && (
+              <p className="text-xs text-destructive">
+                {errors.courtCount.message}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Capacidad en paralelo (días × horarios × canchas).
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pairs-per-zone-shared">Parejas por zona</Label>
+            <Input
+              id="pairs-per-zone-shared"
               type="number"
               min={2}
               max={8}
               step={1}
               className="max-w-[200px]"
-              {...register(`categories.${categoryIndex}.pairsPerZone`, {
+              disabled={readOnly || categoryCount === 0}
+              readOnly={readOnly}
+              {...register("categories.0.pairsPerZone", {
                 valueAsNumber: true,
               })}
             />
-            {errors.categories?.[categoryIndex]?.pairsPerZone && (
+            {firstErrors?.pairsPerZone && (
               <p className="text-xs text-destructive">
-                {errors.categories[categoryIndex]?.pairsPerZone?.message}
+                {firstErrors.pairsPerZone.message}
               </p>
             )}
             <p className="text-xs text-muted-foreground">
@@ -415,23 +495,52 @@ function CategoryPhaseCard({
             </p>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`interval-${categoryIndex}`}>
+            <Label htmlFor="zone4-advancers-shared">
+              Avance en zonas de 4
+            </Label>
+            <select
+              id="zone4-advancers-shared"
+              className={`${SELECT_CLASS} max-w-[280px]`}
+              disabled={readOnly || categoryCount === 0}
+              {...register("categories.0.zone4Advancers", {
+                valueAsNumber: true,
+              })}
+            >
+              {ZONE4_ADVANCERS_VALUES.map((value) => (
+                <option key={value} value={value}>
+                  {ZONE4_ADVANCERS_LABELS[value]}
+                </option>
+              ))}
+            </select>
+            {firstErrors?.zone4Advancers && (
+              <p className="text-xs text-destructive">
+                {firstErrors.zone4Advancers.message}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Federación (FAP) pasa 3; Asociación (APA) pasa 2.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="interval-shared">
               Intervalo entre partidos (min)
             </Label>
             <Input
-              id={`interval-${categoryIndex}`}
+              id="interval-shared"
               type="number"
               min={0}
               max={60}
               step={5}
               className="max-w-[200px]"
-              {...register(`categories.${categoryIndex}.intervalMin`, {
+              disabled={readOnly || categoryCount === 0}
+              readOnly={readOnly}
+              {...register("categories.0.intervalMin", {
                 valueAsNumber: true,
               })}
             />
-            {errors.categories?.[categoryIndex]?.intervalMin && (
+            {firstErrors?.intervalMin && (
               <p className="text-xs text-destructive">
-                {errors.categories[categoryIndex]?.intervalMin?.message}
+                {firstErrors.intervalMin.message}
               </p>
             )}
           </div>
@@ -445,11 +554,22 @@ export function TournamentConfigForm({
   clubSlug,
   tournamentId,
   initial,
+  /** Si se indica, muestra solo el formato de esa categoría. */
+  focusCategoryId,
+  /**
+   * parameters: parejas/intervalo + días/canchas
+   * category: solo formato por fase
+   * all: todo (ruta standalone)
+   */
+  panel = "all",
 }: {
   clubSlug: string;
   tournamentId: string;
   initial: TournamentConfig;
+  focusCategoryId?: string;
+  panel?: "parameters" | "category" | "all";
 }) {
+  const readOnly = useTournamentReadOnly();
   const [isPending, startTransition] = useTransition();
 
   const {
@@ -481,6 +601,7 @@ export function TournamentConfigForm({
         },
         intervalMin: category.intervalMin,
         pairsPerZone: category.pairsPerZone ?? 3,
+        zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
       })),
     },
   });
@@ -500,14 +621,25 @@ export function TournamentConfigForm({
     return minutes > 0 ? sum + minutes * courts : sum;
   }, 0);
 
+  const showParameters = panel === "parameters" || panel === "all";
+  const showCategories = panel === "category" || panel === "all";
+
   function onSubmit(values: TournamentConfigValues) {
     const validDates = new Set(
       values.playDays.map((d) => d.date).filter(Boolean),
     );
+    const sharedPairs = values.categories[0]?.pairsPerZone ?? 3;
+    const sharedZone4Advancers =
+      values.categories[0]?.zone4Advancers === 2 ? 2 : 3;
+    const sharedInterval = values.categories[0]?.intervalMin ?? 0;
     const sanitized: TournamentConfigValues = {
       ...values,
       categories: values.categories.map((category) => ({
         ...category,
+        // Comunes a todas las categorías (por ahora).
+        pairsPerZone: sharedPairs,
+        zone4Advancers: sharedZone4Advancers,
+        intervalMin: sharedInterval,
         phases: {
           zones: {
             ...category.phases.zones,
@@ -531,6 +663,8 @@ export function TournamentConfigForm({
       })),
     };
 
+    if (readOnly) return;
+
     startTransition(async () => {
       const result = await saveTournamentConfigAction(
         clubSlug,
@@ -545,122 +679,139 @@ export function TournamentConfigForm({
   if (initial.categories.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-        Agregá al menos una categoría al torneo antes de configurar el formato
-        por fase.
+        Agregá al menos una categoría en la sub-pestaña Categorías antes de
+        configurar parámetros y formato por fase.
+      </div>
+    );
+  }
+
+  const focusedCategories = focusCategoryId
+    ? initial.categories
+        .map((category, index) => ({ category, index }))
+        .filter(({ category }) => category.categoryId === focusCategoryId)
+    : initial.categories.map((category, index) => ({ category, index }));
+
+  if (showCategories && focusCategoryId && focusedCategories.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+        No se encontró la configuración de esta categoría. Probá guardar o
+        volver a Categorías.
       </div>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
-      {initial.categories.map((category, index) => (
-        <CategoryPhaseCard
-          key={category.categoryId}
-          categoryIndex={index}
-          categoryName={category.categoryName}
-          control={control}
+    <form
+      onSubmit={handleSubmit(onSubmit)}
+      className="flex w-full min-w-0 flex-col gap-4"
+    >
+      {showParameters ? (
+        <SharedParametersCard
           register={register}
-          setValue={setValue}
           errors={errors}
-          playDays={playDaysWatch}
+          categoryCount={initial.categories.length}
         />
-      ))}
+      ) : null}
 
-      <Card>
-        <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
-          <div>
-            <CardTitle>Días y horarios de juego</CardTitle>
-            <CardDescription>
-              Común a todas las categorías: canchas, fechas y horarios
-              habilitados para jugar durante el torneo.
-            </CardDescription>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              append({
-                date: initial.startDate,
-                startTime: "09:00",
-                endTime: "22:00",
-              })
-            }
-          >
-            <Plus className="size-4" />
-            Agregar día
-          </Button>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="court-count">Canchas disponibles</Label>
-            <Input
-              id="court-count"
-              type="number"
-              min={1}
-              max={32}
-              step={1}
-              className="max-w-[200px]"
-              {...register("courtCount", { valueAsNumber: true })}
-            />
-            {errors.courtCount && (
-              <p className="text-xs text-destructive">
-                {errors.courtCount.message}
-              </p>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Define la capacidad en paralelo para la simulación y el armado de
-              fixture (tiempo disponible = días × horarios × canchas).
-            </p>
-          </div>
-
-          {fields.map((field, index) => (
-            <PlayDayRow
-              key={field.id}
-              index={index}
+      {showCategories
+        ? focusedCategories.map(({ category, index }) => (
+            <CategoryPhaseCard
+              key={category.categoryId}
+              categoryIndex={index}
+              categoryName={category.categoryName}
               control={control}
               register={register}
+              setValue={setValue}
               errors={errors}
-              courtCount={courts}
-              onRemove={() => remove(index)}
-              canRemove={fields.length > 1}
+              playDays={playDaysWatch}
             />
-          ))}
-          {errors.playDays?.message && (
-            <p className="text-xs text-destructive">{errors.playDays.message}</p>
-          )}
-          {tournamentTotalMinutes > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-              <span className="text-muted-foreground">
-                Capacidad total del torneo (todas las franjas × canchas)
-              </span>
-              <span className="font-semibold tabular-nums">
-                {formatCourtHours(tournamentTotalMinutes)}
-              </span>
-            </div>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Si el horario de cierre es anterior al de inicio (ej. 18:00 a 02:00),
-            se interpreta como madrugada del día siguiente. Las horas totales
-            por día se comparan con las horas de partidos programados ese día.
-          </p>
-        </CardContent>
-      </Card>
+          ))
+        : null}
 
-      <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-        Periodo del torneo: {formatShortDate(initial.startDate)}
-        {initial.endDate && initial.endDate !== initial.startDate
-          ? ` – ${formatShortDate(initial.endDate)}`
-          : ""}
-        . Los días y horarios valen para todo el torneo; al armar el fixture se
-        reparten los partidos de cada categoría dentro de esas franjas.
-      </div>
+      {showParameters ? (
+        <>
+          <Card>
+            <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
+              <div>
+                <CardTitle>Días y horarios de juego</CardTitle>
+                <CardDescription>
+                  Fechas y horarios habilitados para jugar durante el torneo
+                  (comunes a todas las categorías).
+                </CardDescription>
+              </div>
+              {!readOnly && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    append({
+                      date: initial.startDate,
+                      startTime: "09:00",
+                      endTime: "22:00",
+                    })
+                  }
+                >
+                  <Plus className="size-4" />
+                  Agregar día
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent className="flex min-w-0 flex-col gap-3 overflow-x-auto">
+              {fields.map((field, index) => (
+                <PlayDayRow
+                  key={field.id}
+                  index={index}
+                  control={control}
+                  register={register}
+                  errors={errors}
+                  courtCount={courts}
+                  onRemove={() => remove(index)}
+                  canRemove={fields.length > 1}
+                />
+              ))}
+              {errors.playDays?.message && (
+                <p className="text-xs text-destructive">
+                  {errors.playDays.message}
+                </p>
+              )}
+              {tournamentTotalMinutes > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">
+                    Capacidad total del torneo (todas las franjas × canchas)
+                  </span>
+                  <span className="font-semibold tabular-nums">
+                    {formatCourtHours(tournamentTotalMinutes)}
+                  </span>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Si el horario de cierre es anterior al de inicio (ej. 18:00 a
+                02:00), se interpreta como madrugada del día siguiente. Las
+                horas totales por día se comparan con las horas de partidos
+                programados ese día.
+              </p>
+            </CardContent>
+          </Card>
 
-      <div className="flex justify-end">
-        <Button type="submit" disabled={isPending}>
-          {isPending ? "Guardando..." : "Guardar configuración"}
-        </Button>
-      </div>
+          <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+            Periodo del torneo: {formatShortDate(initial.startDate)}
+            {initial.endDate && initial.endDate !== initial.startDate
+              ? ` – ${formatShortDate(initial.endDate)}`
+              : ""}
+            . Los días y horarios valen para todo el torneo; al armar el fixture
+            se reparten los partidos de cada categoría dentro de esas franjas.
+          </div>
+        </>
+      ) : null}
+
+      {!readOnly && (
+        <div className="flex justify-end">
+          <Button type="submit" disabled={isPending}>
+            {isPending ? "Guardando..." : "Guardar configuración"}
+          </Button>
+        </div>
+      )}
     </form>
   );
 }

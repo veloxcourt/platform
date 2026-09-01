@@ -1,4 +1,8 @@
-import type { MatchFormat } from "./config-schema";
+import {
+  normalizeZone4Advancers,
+  type MatchFormat,
+  type Zone4Advancers,
+} from "./config-schema";
 import { distributeZoneSizes } from "./simulate-category-schedule";
 
 export type ZoneResultColumn = {
@@ -85,7 +89,7 @@ export function roundRobinPairings<T>(items: T[]): [T, T][] {
  * Fixture de zona:
  * - 3 parejas: round-robin (3 partidos). Pasan 2.
  * - 4 parejas: 2 de apertura + ganador/ganador + perdedor/perdedor (4 partidos).
- *   Cada pareja juega 2; pasan 3.
+ *   Cada pareja juega 2; avanzan 3 (FAP) o 2 (APA).
  */
 export function zonePairings<T>(items: T[]): ZonePairing<T>[] {
   if (items.length === 3) {
@@ -133,8 +137,11 @@ export function roundRobinMatchCount(zoneSize: number): number {
 }
 
 /// Cuántas parejas avanzan desde una zona.
-export function advancersFromZoneSize(zoneSize: number): number {
-  if (zoneSize >= 4) return 3;
+export function advancersFromZoneSize(
+  zoneSize: number,
+  zone4Advancers: Zone4Advancers | number = 3,
+): number {
+  if (zoneSize >= 4) return normalizeZone4Advancers(zone4Advancers);
   if (zoneSize === 3) return 2;
   if (zoneSize === 2) return 1;
   return 0;

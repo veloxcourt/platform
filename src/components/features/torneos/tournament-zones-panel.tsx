@@ -38,6 +38,7 @@ import {
   type ZoneDraft,
   type ZonePairOption,
 } from "./zone-card";
+import { useTournamentReadOnly } from "./tournament-mode-context";
 
 function pairOptionLabel(pair: PairListItem): string {
   return formatAbbreviatedPairLabel(
@@ -224,6 +225,7 @@ export function TournamentZonesPanel({
   reservations?: SlotReservationItem[];
 }) {
   const router = useRouter();
+  const readOnly = useTournamentReadOnly();
   const [isPending, startTransition] = useTransition();
   const [categoryId, setCategoryId] = useState(
     initialCategoryId && categories.some((c) => c.id === initialCategoryId)
@@ -245,6 +247,7 @@ export function TournamentZonesPanel({
   const matchFormat: MatchFormat =
     categoryConfig?.phases.zones.matchFormat ?? "ONE_SET_6";
   const pairsPerZone = categoryConfig?.pairsPerZone ?? 3;
+  const zone4Advancers = categoryConfig?.zone4Advancers === 2 ? 2 : 3;
   const savedFixture = categoryConfig?.zonesFixture ?? null;
 
   const categoryPairs = useMemo(
@@ -398,7 +401,9 @@ export function TournamentZonesPanel({
           </CardTitle>
           <CardDescription>
             Zonas de 3 (round-robin, pasan 2) o de 4 (cada pareja juega 2:
-            apertura y luego ganador/ganador y perdedor/perdedor; pasan 3).{" "}
+            apertura y luego ganador/ganador y perdedor/perdedor; pasan{" "}
+            {zone4Advancers}
+            {zone4Advancers === 2 ? " · APA" : " · FAP"}).{" "}
             <span className="font-medium text-foreground">Actualizar</span>{" "}
             asigna parejas y completa día, horario y cancha según preferencias.
             Después podés ajustar a mano.
@@ -408,17 +413,19 @@ export function TournamentZonesPanel({
           </CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            onClick={handleActualizar}
-            disabled={isPending || !activeCategoryId}
-          >
-            <RefreshCw
-              className={`size-4 ${isPending ? "animate-spin" : ""}`}
-            />
-            Actualizar
-          </Button>
+          {!readOnly && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleActualizar}
+              disabled={isPending || !activeCategoryId}
+            >
+              <RefreshCw
+                className={`size-4 ${isPending ? "animate-spin" : ""}`}
+              />
+              Actualizar
+            </Button>
+          )}
           {!lockCategory && categories.length > 0 ? (
             <select
               className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
@@ -458,6 +465,7 @@ export function TournamentZonesPanel({
               dayOptions={dayOptions}
               dayOpenByDate={dayOpenByDate}
               slotMinutes={slotMinutes}
+              readOnly={readOnly}
               onChange={(next) => updateZone(zone.id, next)}
             />
           ))

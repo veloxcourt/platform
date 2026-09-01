@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { TorneosHubShell } from "@/components/features/torneos/torneos-hub-shell";
 import { TournamentsTable } from "@/components/features/torneos/tournaments-table";
 import { getTournamentsList } from "@/modules/tournaments/application/get-tournaments-list";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
@@ -20,19 +21,15 @@ export default async function TorneosPage({
   if (!data) notFound();
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
-      <div>
-        <h1 className="text-xl font-semibold">Torneos</h1>
-        <p className="text-sm text-muted-foreground">
-          {data.club.name} · {data.tournaments.length} torneos
-        </p>
-      </div>
-
+    <TorneosHubShell
+      clubSlug={clubSlug}
+      subtitle={`${data.club.name} · ${data.tournaments.length} torneos`}
+    >
       <TournamentsTable
         clubSlug={clubSlug}
         currency={data.club.currency}
         tournaments={data.tournaments}
       />
-    </div>
+    </TorneosHubShell>
   );
 }

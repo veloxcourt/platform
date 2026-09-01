@@ -1,9 +1,9 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { $Enums, Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 30;
+const PRISMA_SCHEMA_REVISION = 35;
 
 /** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
 const PG_POOL_MAX = 1;
@@ -35,6 +35,7 @@ function schemaFingerprint(): string {
     "simulationEnabled" in categoryFields ? "1" : "0",
     "simulationConfirmedCount" in categoryFields ? "1" : "0",
     "pairsPerZone" in settingsFields ? "1" : "0",
+    "zone4Advancers" in settingsFields ? "1" : "0",
     "zonesPlayDates" in settingsFields ? "1" : "0",
     "zonesFixture" in settingsFields ? "1" : "0",
     "courtCount" in Prisma.TournamentScalarFieldEnum ? "1" : "0",
@@ -48,6 +49,12 @@ function schemaFingerprint(): string {
     "userTypeId" in Prisma.MembershipScalarFieldEnum ? "1" : "0",
     "isSuperAdmin" in Prisma.UserScalarFieldEnum ? "1" : "0",
     "clubRequest" in Prisma.ModelName ? "1" : "0",
+    "navOrder" in Prisma.MembershipScalarFieldEnum ? "1" : "0",
+    "calendarPlannerVenue" in Prisma.ModelName ? "1" : "0",
+    "calendarPlannerSettings" in Prisma.ModelName ? "1" : "0",
+    "calendarSearchLink" in Prisma.ModelName ? "1" : "0",
+    "TOOLS_ECO_TORNEO" in $Enums.AdminModule ? "1" : "0",
+    "TOOLS_CALENDARIO" in $Enums.AdminModule ? "1" : "0",
   ].join(":");
 }
 
@@ -67,7 +74,13 @@ function clientHasCurrentDelegates(client: PrismaClient): boolean {
       ?.findMany === "function" &&
     "clubRequest" in client &&
     typeof (client as { clubRequest?: { findMany?: unknown } }).clubRequest
-      ?.findMany === "function"
+      ?.findMany === "function" &&
+    "calendarPlannerVenue" in client &&
+    typeof (client as { calendarPlannerVenue?: { findMany?: unknown } })
+      .calendarPlannerVenue?.findMany === "function" &&
+    "calendarSearchLink" in client &&
+    typeof (client as { calendarSearchLink?: { findMany?: unknown } })
+      .calendarSearchLink?.findMany === "function"
   );
 }
 

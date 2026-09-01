@@ -35,6 +35,14 @@ export function getWeekStartISO(dateISO: string): string {
   return format(addDays(d, diff), "yyyy-MM-dd");
 }
 
+/// Devuelve el domingo de la semana que contiene la fecha dada ("YYYY-MM-DD").
+export function getWeekEndISO(dateISO: string): string {
+  const d = parseISO(dateISO);
+  const day = d.getDay(); // 0 (dom) .. 6 (sáb)
+  const diff = day === 0 ? 0 : 7 - day;
+  return format(addDays(d, diff), "yyyy-MM-dd");
+}
+
 /// Día de la semana (0 dom .. 6 sáb) de una fecha "YYYY-MM-DD".
 export function dowOf(dateISO: string): number {
   return parseISO(dateISO).getDay();

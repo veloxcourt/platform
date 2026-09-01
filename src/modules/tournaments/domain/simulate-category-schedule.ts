@@ -1,12 +1,11 @@
 import type { CategoryPhaseConfig } from "./types";
-import type {
-  FinalPhaseStartRound,
-  PlayDayValues,
-  TournamentPhaseKey,
-} from "./config-schema";
 import {
   FINAL_PHASE_START_ROUND_VALUES,
   TOURNAMENT_PHASE_META,
+  normalizeZone4Advancers,
+  type FinalPhaseStartRound,
+  type PlayDayValues,
+  type TournamentPhaseKey,
 } from "./config-schema";
 import { intermediateMatchCount } from "./bracket-rounds";
 import { playDayWindowMinutes } from "./play-day";
@@ -113,9 +112,12 @@ function matchesForZoneSize(zoneSize: number): number {
   return (zoneSize * (zoneSize - 1)) / 2;
 }
 
-function advancersFromZones(zoneSizes: number[]): number {
+function advancersFromZones(
+  zoneSizes: number[],
+  zone4Advancers: 2 | 3 = 3,
+): number {
   return zoneSizes.reduce((sum, size) => {
-    if (size >= 4) return sum + 3;
+    if (size >= 4) return sum + zone4Advancers;
     if (size === 3) return sum + 2;
     if (size === 2) return sum + 1;
     return sum;
@@ -516,7 +518,10 @@ export function simulateCategorySchedule(
     (sum, size) => sum + matchesForZoneSize(size),
     0,
   );
-  const advancers = advancersFromZones(zoneSizes);
+  const advancers = advancersFromZones(
+    zoneSizes,
+    normalizeZone4Advancers(categoryConfig.zone4Advancers),
+  );
   const bracketSize = nextPowerOfTwo(Math.max(advancers, 1));
   const startsAt = categoryConfig.phases.final.startsAtRound;
 

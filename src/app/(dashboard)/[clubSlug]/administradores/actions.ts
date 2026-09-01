@@ -133,7 +133,7 @@ export async function inviteAdministratorAction(
     });
   });
 
-  revalidatePath(`/${clubSlug}/administradores`);
+  revalidatePath(`/${clubSlug}/control-usuarios/usuarios`);
 
   if (status === "ACTIVE") {
     return {
@@ -184,7 +184,7 @@ export async function updateAdministratorTypeAction(
     return { ok: false, error: "No se encontró el usuario." };
   }
 
-  revalidatePath(`/${clubSlug}/administradores`);
+  revalidatePath(`/${clubSlug}/control-usuarios/usuarios`);
   return { ok: true };
 }
 
@@ -206,7 +206,7 @@ export async function disableAdministratorAction(
     return { ok: false, error: "No se encontró el usuario." };
   }
 
-  revalidatePath(`/${clubSlug}/administradores`);
+  revalidatePath(`/${clubSlug}/control-usuarios/usuarios`);
   return { ok: true };
 }
 
@@ -244,7 +244,7 @@ export async function resendAdministratorInviteAction(
         where: { id: membership.id },
         data: { invitedAt: new Date() },
       });
-      revalidatePath(`/${clubSlug}/administradores`);
+      revalidatePath(`/${clubSlug}/control-usuarios/usuarios`);
       return { ok: true };
     }
     if (existing.user && !existing.user.last_sign_in_at) {
@@ -276,6 +276,6 @@ export async function resendAdministratorInviteAction(
       data: { invitedAt: new Date() },
     }),
   ]);
-  revalidatePath(`/${clubSlug}/administradores`);
+  revalidatePath(`/${clubSlug}/control-usuarios/usuarios`);
   return { ok: true };
 }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, Pencil, Plus, Search, Trophy, Users } from "lucide-react";
+import { Copy, Eye, Pencil, Plus, Search, Trophy, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -48,9 +48,11 @@ export function TournamentsTable({
   const [formOpen, setFormOpen] = useState(false);
   const [selectedType, setSelectedType] = useState<TournamentType | null>(null);
   const [editing, setEditing] = useState<TournamentListItem | null>(null);
+  const [formReadOnly, setFormReadOnly] = useState(false);
 
   function openNewTournament() {
     setEditing(null);
+    setFormReadOnly(false);
     setSelectedType(null);
     setPickerOpen(true);
   }
@@ -67,6 +69,14 @@ export function TournamentsTable({
 
   function openEditTournament(tournament: TournamentListItem) {
     setEditing(tournament);
+    setFormReadOnly(false);
+    setSelectedType(tournament.type);
+    setFormOpen(true);
+  }
+
+  function openViewTournament(tournament: TournamentListItem) {
+    setEditing(tournament);
+    setFormReadOnly(true);
     setSelectedType(tournament.type);
     setFormOpen(true);
   }
@@ -185,14 +195,40 @@ export function TournamentsTable({
               </dl>
 
               <div className="flex justify-end gap-2 border-t pt-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openEditTournament(t)}
-                >
-                  <Pencil className="size-4" />
-                  Editar
-                </Button>
+                {t.type === "ZONAS" ? (
+                  <Link
+                    href={`/${clubSlug}/torneos/${t.id}?modo=ver`}
+                    className={cn(
+                      buttonVariants({ variant: "outline", size: "sm" }),
+                    )}
+                  >
+                    <Eye className="size-4" />
+                    Ver
+                  </Link>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openViewTournament(t)}
+                  >
+                    <Eye className="size-4" />
+                    Ver
+                  </Button>
+                )}
+                {t.type === "ZONAS" ? (
+                  <Link
+                    href={`/${clubSlug}/torneos/${t.id}?modo=editar`}
+                    className={cn(buttonVariants({ size: "sm" }))}
+                  >
+                    <Pencil className="size-4" />
+                    Editar
+                  </Link>
+                ) : (
+                  <Button size="sm" onClick={() => openEditTournament(t)}>
+                    <Pencil className="size-4" />
+                    Editar
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -201,24 +237,6 @@ export function TournamentsTable({
                   <Copy className="size-4" />
                   Copiar link
                 </Button>
-                {t.type === "ZONAS" ? (
-                  <Link
-                    href={`/${clubSlug}/torneos/${t.id}`}
-                    className={cn(buttonVariants({ size: "sm" }))}
-                  >
-                    Gestionar
-                  </Link>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className={cn("opacity-60")}
-                    disabled
-                    title="Próximamente"
-                  >
-                    Gestionar
-                  </Button>
-                )}
               </div>
             </article>
           ))}
@@ -235,10 +253,14 @@ export function TournamentsTable({
         clubSlug={clubSlug}
         tournamentType={selectedType}
         tournament={editing}
+        readOnly={formReadOnly}
         open={formOpen}
         onOpenChange={(open) => {
           setFormOpen(open);
-          if (!open) setEditing(null);
+          if (!open) {
+            setEditing(null);
+            setFormReadOnly(false);
+          }
         }}
         onBack={editing ? undefined : handleFormBack}
         onSaved={() => router.refresh()}

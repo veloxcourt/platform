@@ -61,3 +61,13 @@ export const createCategorySchema = z
   });
 
 export type CreateCategoryValues = z.infer<typeof createCategorySchema>;
+
+export const renameCategorySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Escribí el nombre")
+    .max(80, "Máximo 80 caracteres"),
+});
+
+export type RenameCategoryValues = z.infer<typeof renameCategorySchema>;

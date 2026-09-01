@@ -11,7 +11,8 @@ const DEFAULT_ADMIN_PRIVILEGES = [
   "menu-precios",
   "turnos",
   "torneos",
-  "herramientas",
+  "eco-torneo",
+  "calendario",
 ] as const;
 
 /** Crea tipos base del club y vincula membresías staff existentes. */

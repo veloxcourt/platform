@@ -78,7 +78,7 @@ export function AdminManagement({
         <CardContent>
           {userTypes.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Primero creá un tipo de usuario en la solapa Tipos de usuario.
+              Primero creá un tipo de usuario en la solapa Tipo Usuario.
             </p>
           ) : (
             <form onSubmit={submitInvite} className="space-y-5">

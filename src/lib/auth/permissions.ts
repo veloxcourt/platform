@@ -1,6 +1,11 @@
-import type { AdminModule } from "@prisma/client";
+import { $Enums, type AdminModule } from "@prisma/client";
 
-import type { AdminModuleKey } from "@/config/modules";
+import {
+  ADMIN_MODULES,
+  firstControlUsuariosSlug,
+  firstHerramientasSlug,
+  type AdminModuleKey,
+} from "@/config/modules";
 
 export const MODULE_TO_DATABASE: Record<AdminModuleKey, AdminModule> = {
   jugadores: "PLAYERS",
@@ -8,29 +13,67 @@ export const MODULE_TO_DATABASE: Record<AdminModuleKey, AdminModule> = {
   "menu-precios": "PRICE_MENU",
   turnos: "BOOKINGS",
   torneos: "TOURNAMENTS",
-  herramientas: "TOOLS",
+  "eco-torneo": "TOOLS_ECO_TORNEO",
+  calendario: "TOOLS_CALENDARIO",
   "tipos-usuario": "USER_TYPES",
   usuarios: "USERS",
 };
 
-export const DATABASE_TO_MODULE: Record<AdminModule, AdminModuleKey> = {
+const DATABASE_TO_MODULE: Partial<Record<AdminModule, AdminModuleKey>> = {
   PLAYERS: "jugadores",
   CATALOG: "catalogo",
   PRICE_MENU: "menu-precios",
   BOOKINGS: "turnos",
   TOURNAMENTS: "torneos",
-  TOOLS: "herramientas",
+  TOOLS_ECO_TORNEO: "eco-torneo",
+  TOOLS_CALENDARIO: "calendario",
   USER_TYPES: "tipos-usuario",
   USERS: "usuarios",
 };
 
 export function toDatabaseModules(modules: AdminModuleKey[]): AdminModule[] {
-  return modules.map((module) => MODULE_TO_DATABASE[module]);
+  const known = new Set<string>(Object.values($Enums.AdminModule));
+  const result: AdminModule[] = [];
+
+  for (const module of modules) {
+    const value = MODULE_TO_DATABASE[module];
+    if (known.has(value)) {
+      result.push(value);
+      continue;
+    }
+    // Cliente Prisma cacheado (webpack/HMR) aún no conoce los enums nuevos.
+    if (
+      (module === "eco-torneo" || module === "calendario") &&
+      known.has("TOOLS")
+    ) {
+      result.push("TOOLS");
+    }
+  }
+
+  return [...new Set(result)];
 }
 
 export function toModuleKeys(modules: AdminModule[]): AdminModuleKey[] {
-  return modules.map((module) => DATABASE_TO_MODULE[module]);
+  const keys = new Set<AdminModuleKey>();
+  for (const module of modules) {
+    if (module === "TOOLS") {
+      keys.add("eco-torneo");
+      keys.add("calendario");
+      continue;
+    }
+    const key = DATABASE_TO_MODULE[module];
+    if (key) keys.add(key);
+  }
+  return ADMIN_MODULES.filter((key) => keys.has(key));
 }
+
+const NESTED_PRIVILEGES = new Set<AdminModuleKey>([
+  "tipos-usuario",
+  "usuarios",
+  "menu-precios",
+  "eco-torneo",
+  "calendario",
+]);
 
 /** Primera solapa navegable tras login. */
 export function firstDestinationModule(
@@ -39,15 +82,12 @@ export function firstDestinationModule(
 ): string {
   if (role === "OWNER") return "turnos";
   const keys = toModuleKeys(privileges);
-  const operational = keys.find(
-    (key) =>
-      key !== "tipos-usuario" &&
-      key !== "usuarios" &&
-      key !== "menu-precios",
-  );
+  const operational = keys.find((key) => !NESTED_PRIVILEGES.has(key));
   if (operational) return operational;
   if (keys.includes("menu-precios")) return "catalogo/menu";
-  if (keys.includes("usuarios")) return "administradores";
-  if (keys.includes("tipos-usuario")) return "tipos-usuario";
+  const herramientasSlug = firstHerramientasSlug(keys);
+  if (herramientasSlug) return `herramientas/${herramientasSlug}`;
+  const controlSlug = firstControlUsuariosSlug(keys);
+  if (controlSlug) return `control-usuarios/${controlSlug}`;
   return "turnos";
 }

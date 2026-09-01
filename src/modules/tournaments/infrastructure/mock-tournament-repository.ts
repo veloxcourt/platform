@@ -5,9 +5,13 @@ import type {
 import type { AddPairValues, UpdatePairValues } from "../domain/pair-schema";
 import { derivePairPaymentStatus } from "../domain/pair-payment";
 import { derivePairRegistrationStatus } from "../domain/pair-confirmation";
-import type { CreateCategoryValues } from "../domain/category-schema";
+import type {
+  CreateCategoryValues,
+  RenameCategoryValues,
+} from "../domain/category-schema";
 import type { UpdateCategorySimulationValues } from "../domain/category-simulation-schema";
 import { buildCategoryName } from "../domain/category-schema";
+import { normalizeCategoryLabel } from "../domain/category-level";
 import type { TournamentConfigValues } from "../domain/config-schema";
 import { defaultPhaseConfigs, defaultPlayDays } from "../domain/config-defaults";
 import type {
@@ -238,6 +242,7 @@ function demoConfigs(): Map<string, TournamentConfig> {
             phases: defaults,
             intervalMin: 0,
             pairsPerZone: 3,
+            zone4Advancers: 3,
             zonesFixture: null,
           },
           {
@@ -246,6 +251,7 @@ function demoConfigs(): Map<string, TournamentConfig> {
             phases: defaults,
             intervalMin: 0,
             pairsPerZone: 3,
+            zone4Advancers: 3,
             zonesFixture: null,
           },
         ],
@@ -280,6 +286,7 @@ function buildTournamentConfig(
           phases: defaults,
           intervalMin: 0,
           pairsPerZone: 3,
+          zone4Advancers: 3,
           zonesFixture: null,
         }
       );
@@ -424,6 +431,51 @@ export class MockTournamentRepository implements TournamentRepository {
       return { ok: true, id };
     }
     return { ok: false, error: "Club no encontrado" };
+  }
+
+  async renameTournamentCategory(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+    input: RenameCategoryValues,
+  ): Promise<MutationResult> {
+    const name = normalizeCategoryLabel(input.name.trim());
+    if (!name) return { ok: false, error: "Escribí el nombre" };
+
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const categories = record.categories.get(tournamentId) ?? [];
+      const category = categories.find((c) => c.id === categoryId);
+      if (!category) return { ok: false, error: "Categoría no encontrada" };
+      if (category.name === name) return { ok: true };
+      if (categories.some((c) => c.id !== categoryId && c.name === name)) {
+        return { ok: false, error: "Ya existe una categoría con ese nombre" };
+      }
+      category.name = name;
+      return { ok: true };
+    }
+    return { ok: false, error: "Categoría no encontrada" };
+  }
+
+  async deleteTournamentCategory(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+  ): Promise<MutationResult> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const categories = record.categories.get(tournamentId) ?? [];
+      const index = categories.findIndex((c) => c.id === categoryId);
+      if (index < 0) return { ok: false, error: "Categoría no encontrada" };
+      categories.splice(index, 1);
+      record.categories.set(tournamentId, categories);
+      const pairs = (record.pairs.get(tournamentId) ?? []).filter(
+        (p) => p.categoryId !== categoryId,
+      );
+      record.pairs.set(tournamentId, pairs);
+      return { ok: true };
+    }
+    return { ok: false, error: "Categoría no encontrada" };
   }
 
   async updateCategorySimulation(
@@ -1134,6 +1186,7 @@ export class MockTournamentRepository implements TournamentRepository {
           phases: category.phases,
           intervalMin: category.intervalMin,
           pairsPerZone: category.pairsPerZone,
+          zone4Advancers: category.zone4Advancers,
           zonesFixture:
             previous?.categories.find(
               (c) => c.categoryId === category.categoryId,

@@ -70,7 +70,8 @@ async function main() {
     "PRICE_MENU",
     "BOOKINGS",
     "TOURNAMENTS",
-    "TOOLS",
+    "TOOLS_ECO_TORNEO",
+    "TOOLS_CALENDARIO",
     "USER_TYPES",
     "USERS",
   ] as const;
@@ -99,7 +100,8 @@ async function main() {
         "PRICE_MENU",
         "BOOKINGS",
         "TOURNAMENTS",
-        "TOOLS",
+        "TOOLS_ECO_TORNEO",
+        "TOOLS_CALENDARIO",
       ],
     },
   });

@@ -47,21 +47,21 @@ type EditableTournament = Pick<
   | "fee"
 >;
 
-export function TournamentFormDialog({
+export function TournamentEditForm({
   clubSlug,
   tournamentType,
   tournament = null,
-  open,
-  onOpenChange,
-  onBack,
+  readOnly = false,
+  showTypeBadge = true,
+  onCancel,
   onSaved,
 }: {
   clubSlug: string;
   tournamentType: TournamentType | null;
   tournament?: EditableTournament | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onBack?: () => void;
+  readOnly?: boolean;
+  showTypeBadge?: boolean;
+  onCancel?: () => void;
   onSaved: () => void;
 }) {
   const isEdit = Boolean(tournament);
@@ -77,7 +77,6 @@ export function TournamentFormDialog({
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
-    if (!open) return;
     if (tournament) {
       setName(tournament.name);
       setDescription(tournament.description ?? "");
@@ -93,7 +92,7 @@ export function TournamentFormDialog({
     setEndDate("");
     setFeePesos(0);
     setStatus("DRAFT");
-  }, [open, tournamentType, tournament]);
+  }, [tournamentType, tournament]);
 
   function submit() {
     if (!effectiveType) return;
@@ -104,21 +103,16 @@ export function TournamentFormDialog({
 
     startTransition(async () => {
       if (isEdit && tournament) {
-        const result = await updateTournamentAction(
-          clubSlug,
-          tournament.id,
-          {
-            name: name.trim(),
-            description: description.trim(),
-            startDate,
-            endDate: endDate || null,
-            feePesos,
-            status,
-          },
-        );
+        const result = await updateTournamentAction(clubSlug, tournament.id, {
+          name: name.trim(),
+          description: description.trim(),
+          startDate,
+          endDate: endDate || null,
+          feePesos,
+          status,
+        });
         if (result.ok) {
           toast.success("Torneo actualizado");
-          onOpenChange(false);
           onSaved();
         } else {
           toast.error("No se pudo actualizar el torneo", {
@@ -139,15 +133,162 @@ export function TournamentFormDialog({
       });
       if (result.ok) {
         toast.success("Torneo creado");
-        onOpenChange(false);
         onSaved();
       } else {
-        toast.error("No se pudo crear el torneo", { description: result.error });
+        toast.error("No se pudo crear el torneo", {
+          description: result.error,
+        });
       }
     });
   }
 
   if (!effectiveType || !typeMeta) return null;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {showTypeBadge ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">{typeMeta.label}</Badge>
+          <span className="text-sm text-muted-foreground">
+            {typeMeta.registrationHint}
+          </span>
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="tournament-name">Nombre</Label>
+        <Input
+          id="tournament-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Ej. Torneo de Verano 2026"
+          disabled={readOnly}
+          readOnly={readOnly}
+        />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="tournament-description">Descripción</Label>
+        <Input
+          id="tournament-description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Opcional"
+          disabled={readOnly}
+          readOnly={readOnly}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="tournament-start">Fecha inicio</Label>
+          <Input
+            id="tournament-start"
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            disabled={readOnly}
+            readOnly={readOnly}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="tournament-end">Fecha fin</Label>
+          <Input
+            id="tournament-end"
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            disabled={readOnly}
+            readOnly={readOnly}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="tournament-fee">Inscripción ($)</Label>
+          <Input
+            id="tournament-fee"
+            type="number"
+            min={0}
+            step={1}
+            value={feePesos || ""}
+            onChange={(e) => setFeePesos(Number(e.target.value) || 0)}
+            placeholder="0"
+            disabled={readOnly}
+            readOnly={readOnly}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="tournament-status">Estado</Label>
+          <select
+            id="tournament-status"
+            className={SELECT_CLASS}
+            value={status}
+            disabled={readOnly}
+            onChange={(e) =>
+              setStatus(e.target.value as CreateTournamentValues["status"])
+            }
+          >
+            {TOURNAMENT_STATUS_VALUES.map((s) => (
+              <option key={s} value={s}>
+                {TOURNAMENT_STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        {onCancel ? (
+          <Button
+            variant="outline"
+            onClick={onCancel}
+            disabled={isPending}
+          >
+            {readOnly ? "Cerrar" : "Cancelar"}
+          </Button>
+        ) : null}
+        {!readOnly && (
+          <Button onClick={submit} disabled={isPending}>
+            {isPending
+              ? isEdit
+                ? "Guardando..."
+                : "Creando..."
+              : isEdit
+                ? "Guardar cambios"
+                : "Crear torneo"}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function TournamentFormDialog({
+  clubSlug,
+  tournamentType,
+  tournament = null,
+  readOnly = false,
+  open,
+  onOpenChange,
+  onBack,
+  onSaved,
+}: {
+  clubSlug: string;
+  tournamentType: TournamentType | null;
+  tournament?: EditableTournament | null;
+  readOnly?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onBack?: () => void;
+  onSaved: () => void;
+}) {
+  const isEdit = Boolean(tournament);
+  const effectiveType = tournament?.type ?? tournamentType;
+  const typeMeta = effectiveType ? getTournamentTypeMeta(effectiveType) : null;
+
+  if (!open || !effectiveType || !typeMeta) return null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -164,114 +305,28 @@ export function TournamentFormDialog({
             </button>
           )}
           <DialogTitle>
-            {isEdit ? "Editar torneo" : "Nuevo torneo"}
+            {readOnly ? "Ver torneo" : isEdit ? "Editar torneo" : "Nuevo torneo"}
           </DialogTitle>
           <DialogDescription>
-            {isEdit
-              ? "Corregí nombre, fechas, inscripción o estado."
-              : "Completá los datos del torneo."}
+            {readOnly
+              ? "Datos del torneo. En este modo no se puede modificar nada."
+              : isEdit
+                ? "Corregí nombre, fechas, inscripción o estado."
+                : "Completá los datos del torneo."}
           </DialogDescription>
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <Badge variant="secondary">{typeMeta.label}</Badge>
-            <span className="text-sm text-muted-foreground">
-              {typeMeta.registrationHint}
-            </span>
-          </div>
         </DialogHeader>
 
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="tournament-name">Nombre</Label>
-            <Input
-              id="tournament-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ej. Torneo de Verano 2026"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="tournament-description">Descripción</Label>
-            <Input
-              id="tournament-description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Opcional"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="tournament-start">Fecha inicio</Label>
-              <Input
-                id="tournament-start"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="tournament-end">Fecha fin</Label>
-              <Input
-                id="tournament-end"
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="tournament-fee">Inscripción ($)</Label>
-              <Input
-                id="tournament-fee"
-                type="number"
-                min={0}
-                step={1}
-                value={feePesos || ""}
-                onChange={(e) => setFeePesos(Number(e.target.value) || 0)}
-                placeholder="0"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="tournament-status">Estado</Label>
-              <select
-                id="tournament-status"
-                className={SELECT_CLASS}
-                value={status}
-                onChange={(e) =>
-                  setStatus(e.target.value as CreateTournamentValues["status"])
-                }
-              >
-                {TOURNAMENT_STATUS_VALUES.map((s) => (
-                  <option key={s} value={s}>
-                    {TOURNAMENT_STATUS_LABELS[s]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isPending}
-            >
-              Cancelar
-            </Button>
-            <Button onClick={submit} disabled={isPending}>
-              {isPending
-                ? isEdit
-                  ? "Guardando..."
-                  : "Creando..."
-                : isEdit
-                  ? "Guardar cambios"
-                  : "Crear torneo"}
-            </Button>
-          </div>
-        </div>
+        <TournamentEditForm
+          clubSlug={clubSlug}
+          tournamentType={tournamentType}
+          tournament={tournament}
+          readOnly={readOnly}
+          onCancel={() => onOpenChange(false)}
+          onSaved={() => {
+            onOpenChange(false);
+            onSaved();
+          }}
+        />
       </DialogContent>
     </Dialog>
   );

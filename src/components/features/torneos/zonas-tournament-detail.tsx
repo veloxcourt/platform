@@ -1,21 +1,18 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ChevronDown,
   ClipboardList,
   Copy,
   Grid3x3,
   Info,
-  Pencil,
   Settings2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -23,21 +20,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { formatMoney } from "@/lib/money";
 import { formatShortDate } from "@/lib/date";
 import type { PlayerRef } from "@/modules/bookings/domain/types";
@@ -51,9 +33,11 @@ import {
   type CreateTournamentValues,
 } from "@/modules/tournaments/domain/tournament-schema";
 import { PairsTable } from "./pairs-table";
-import { TournamentCategoriesPanel } from "./tournament-categories-panel";
-import { TournamentFormDialog } from "./tournament-form-dialog";
-import { cn } from "@/lib/utils";
+import { StableTabButton } from "@/components/ui/stable-tab-button";
+import { TournamentConfigTabs } from "./tournament-config-tabs";
+import { TournamentEditForm } from "./tournament-form-dialog";
+import { TournamentZonesPanel } from "./tournament-zones-panel";
+import { useTournamentReadOnly } from "./tournament-mode-context";
 
 const STATUS_VARIANT: Record<
   CreateTournamentValues["status"],
@@ -64,6 +48,23 @@ const STATUS_VARIANT: Record<
   CLOSED: "outline",
   FINISHED: "outline",
 };
+
+type TournamentTab =
+  | "info"
+  | "inscripciones"
+  | "zonas"
+  | "configuracion";
+
+const TABS: {
+  id: TournamentTab;
+  label: string;
+  icon: typeof Info;
+}[] = [
+  { id: "info", label: "Info", icon: Info },
+  { id: "configuracion", label: "Configuración", icon: Settings2 },
+  { id: "inscripciones", label: "Inscripciones", icon: ClipboardList },
+  { id: "zonas", label: "Zonas", icon: Grid3x3 },
+];
 
 export function ZonasTournamentDetail({
   clubSlug,
@@ -83,8 +84,8 @@ export function ZonasTournamentDetail({
   courtCount: number;
 }) {
   const router = useRouter();
-  const [editOpen, setEditOpen] = useState(false);
-  const [infoOpen, setInfoOpen] = useState(false);
+  const readOnly = useTournamentReadOnly();
+  const [activeTab, setActiveTab] = useState<TournamentTab>("inscripciones");
   const [categoryFilterId, setCategoryFilterId] = useState<string>(
     () => tournament.categories[0]?.id ?? "",
   );
@@ -113,15 +114,16 @@ export function ZonasTournamentDetail({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex w-full min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold">{tournament.name}</h1>
             <Badge variant="outline">Por zonas</Badge>
             <Badge variant={STATUS_VARIANT[tournament.status]}>
               {TOURNAMENT_STATUS_LABELS[tournament.status]}
             </Badge>
+            {readOnly && <Badge variant="secondary">Solo lectura</Badge>}
           </div>
           {tournament.description && (
             <p className="mt-1 text-sm text-muted-foreground">
@@ -139,158 +141,144 @@ export function ZonasTournamentDetail({
               : "Sin cargo"}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setEditOpen(true)}
-          >
-            <Pencil className="size-4" />
-            Editar
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setInfoOpen(true)}
-          >
-            <Info className="size-4" />
-            Info
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={tournament.categories.length === 0}
-            onClick={() =>
-              document
-                .getElementById("inscripciones")
-                ?.scrollIntoView({ behavior: "smooth", block: "start" })
-            }
-          >
-            <ClipboardList className="size-4" />
-            Inscripciones
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              disabled={tournament.categories.length === 0}
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-            >
-              <Grid3x3 className="size-4" />
-              Zonas
-              <ChevronDown className="size-4 opacity-60" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-52">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Zonas por categoría</DropdownMenuLabel>
-                {tournament.categories.length === 0 ? (
-                  <DropdownMenuItem disabled>
-                    Sin categorías cargadas
-                  </DropdownMenuItem>
-                ) : (
-                  tournament.categories.map((category) => (
-                    <DropdownMenuItem
-                      key={category.id}
-                      onClick={() =>
-                        router.push(
-                          `/${clubSlug}/torneos/${tournament.id}/zonas/${category.id}`,
-                        )
-                      }
-                    >
-                      {category.name}
-                    </DropdownMenuItem>
-                  ))
-                )}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Link
-            href={`/${clubSlug}/torneos/${tournament.id}/configuracion`}
-            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-          >
-            <Settings2 className="size-4" />
-            Configuración
-          </Link>
-          <Button variant="outline" size="sm" onClick={copyPublicLink}>
-            <Copy className="size-4" />
-            Copiar link
-          </Button>
-        </div>
       </div>
 
-      <Card id="inscripciones">
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1.5">
-            <CardTitle>
-              {selectedCategory
-                ? `Inscripciones · ${selectedCategory.name}`
-                : "Inscripciones"}
-            </CardTitle>
+      <div
+        className="w-full min-w-0 flex items-center gap-2 overflow-x-auto"
+        role="tablist"
+        aria-label="Secciones del torneo"
+      >
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const active = activeTab === tab.id;
+          return (
+            <StableTabButton
+              key={tab.id}
+              active={active}
+              onSelect={() => setActiveTab(tab.id)}
+            >
+              <Icon />
+              {tab.label}
+            </StableTabButton>
+          );
+        })}
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={copyPublicLink}
+        >
+          <Copy className="size-4" />
+          Copiar link
+        </Button>
+      </div>
+
+      <div className="w-full min-w-0 overflow-x-clip">
+      {activeTab === "info" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Info del torneo</CardTitle>
             <CardDescription>
-              Solo esta categoría. Cambiá con los chips. Para dar de alta usá +
-              Inscribir. La pareja queda confirmada cuando ambos jugadores
-              confirman.
+              Datos generales del torneo. Las categorías se gestionan en
+              Configuración.
             </CardDescription>
-          </div>
-          {selectedCategory ? (
-            <CategoryInscriptionStats category={selectedCategory} />
-          ) : null}
-        </CardHeader>
-        <CardContent>
-          {tournament.categories.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Agregá una categoría en Info para empezar a inscribir parejas.
-            </p>
-          ) : (
-            <PairsTable
+          </CardHeader>
+          <CardContent>
+            <TournamentEditForm
               clubSlug={clubSlug}
-              tournamentId={tournament.id}
-              currency={currency}
-              pairs={tournament.pairs}
-              players={players}
-              categories={tournament.categories}
-              config={config}
-              courtCount={courtCount}
-              reservations={tournament.slotReservations}
-              categoryFilterId={categoryFilterId || null}
-              onCategoryFilterChange={(id) => {
-                if (id) setCategoryFilterId(id);
-              }}
+              tournamentType={tournament.type}
+              tournament={tournament}
+              readOnly={readOnly}
+              showTypeBadge
+              onSaved={() => router.refresh()}
             />
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
-        <DialogContent className="flex max-h-[90vh] w-[min(96vw,56rem)] max-w-[56rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[56rem]">
-          <DialogHeader className="shrink-0 border-b px-6 py-4">
-            <DialogTitle>Info del torneo</DialogTitle>
-            <DialogDescription>
-              Simulación de capacidad y categorías. Para dar de alta usá +
-              Inscribir.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-            <TournamentCategoriesPanel
-              clubSlug={clubSlug}
-              tournamentId={tournament.id}
-              categories={tournament.categories}
-              levels={levels}
-              config={config}
-              courtCount={courtCount}
-              showInscriptionStats={false}
-              compact
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+      {activeTab === "inscripciones" ? (
+        <Card id="inscripciones">
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1.5">
+              <CardTitle>
+                {selectedCategory
+                  ? `Inscripciones · ${selectedCategory.name}`
+                  : "Inscripciones"}
+              </CardTitle>
+              <CardDescription>
+                Solo esta categoría. Cambiá con los chips. Para dar de alta usá
+                + Inscribir. La pareja queda confirmada cuando ambos jugadores
+                confirman.
+              </CardDescription>
+            </div>
+            {selectedCategory ? (
+              <CategoryInscriptionStats category={selectedCategory} />
+            ) : null}
+          </CardHeader>
+          <CardContent>
+            {tournament.categories.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Agregá una categoría en Configuración → Categorías para empezar
+                a inscribir parejas.
+              </p>
+            ) : (
+              <PairsTable
+                clubSlug={clubSlug}
+                tournamentId={tournament.id}
+                currency={currency}
+                pairs={tournament.pairs}
+                players={players}
+                categories={tournament.categories}
+                config={config}
+                courtCount={courtCount}
+                reservations={tournament.slotReservations}
+                categoryFilterId={categoryFilterId || null}
+                onCategoryFilterChange={(id) => {
+                  if (id) setCategoryFilterId(id);
+                }}
+              />
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <TournamentFormDialog
-        clubSlug={clubSlug}
-        tournamentType={tournament.type}
-        tournament={tournament}
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        onSaved={() => router.refresh()}
-      />
+      {activeTab === "zonas" ? (
+        tournament.categories.length === 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Zonas</CardTitle>
+              <CardDescription>
+                Agregá una categoría en Configuración → Categorías para armar
+                las zonas.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        ) : (
+          <TournamentZonesPanel
+            clubSlug={clubSlug}
+            tournamentId={tournament.id}
+            categories={tournament.categories}
+            pairs={tournament.pairs}
+            config={config}
+            courtCount={courtCount}
+            initialCategoryId={categoryFilterId || undefined}
+            lockCategory={false}
+            reservations={tournament.slotReservations}
+          />
+        )
+      ) : null}
+
+      {activeTab === "configuracion" ? (
+        <TournamentConfigTabs
+          clubSlug={clubSlug}
+          tournamentId={tournament.id}
+          categories={tournament.categories}
+          levels={levels}
+          config={config}
+          courtCount={courtCount}
+        />
+      ) : null}
+      </div>
     </div>
   );
 }
@@ -328,4 +316,3 @@ function CategoryInscriptionStats({
     </div>
   );
 }
-

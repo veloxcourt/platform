@@ -63,13 +63,15 @@ export default async function Home() {
           ) : null}
           {clubHomes.length > 0 ? (
             clubHomes.map((club) => (
-              <Link
+              // <a> fuerza navegación completa: evita 404 fantasma del soft-nav
+              // con caché Turbopack en carpetas Dropbox.
+              <a
                 key={club.href}
                 href={club.href}
                 className={cn(buttonVariants({ size: "sm" }))}
               >
                 {clubHomes.length === 1 ? "Ir a mi club" : club.name}
-              </Link>
+              </a>
             ))
           ) : (
             <Link

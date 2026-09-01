@@ -10,7 +10,10 @@ import {
   isPlayerEligibleForCategory,
   parseCategoryGenderFromName,
 } from "../domain/category-player-filter";
-import type { CreateCategoryValues } from "../domain/category-schema";
+import type {
+  CreateCategoryValues,
+  RenameCategoryValues,
+} from "../domain/category-schema";
 import type { UpdateCategorySimulationValues } from "../domain/category-simulation-schema";
 import { buildCategoryName } from "../domain/category-schema";
 import type { TournamentConfigValues } from "../domain/config-schema";
@@ -173,6 +176,7 @@ function mapCategoryPhaseConfig(
     finalStartsAtRound: string;
     intervalMin: number;
     pairsPerZone?: number;
+    zone4Advancers?: number;
     zonesPlayDates?: string[];
     knockoutPlayDates?: string[];
     finalPlayDates?: string[];
@@ -206,6 +210,7 @@ function mapCategoryPhaseConfig(
     phases,
     intervalMin: settings?.intervalMin ?? 0,
     pairsPerZone: settings?.pairsPerZone ?? 3,
+    zone4Advancers: settings?.zone4Advancers === 2 ? 2 : 3,
     zonesFixture: parseZonesFixture(settings?.zonesFixture ?? null),
   };
 }
@@ -452,6 +457,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
             finalStartsAtRound: defaults.final.startsAtRound,
             intervalMin: 0,
             pairsPerZone: 3,
+            zone4Advancers: 3,
             zonesPlayDates: [],
             knockoutPlayDates: [],
             finalPlayDates: [],
@@ -462,6 +468,69 @@ export class PrismaTournamentRepository implements TournamentRepository {
     });
 
     return { ok: true, id: category.id };
+  }
+
+  async renameTournamentCategory(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+    input: RenameCategoryValues,
+  ): Promise<MutationResult> {
+    const name = normalizeCategoryLabel(input.name.trim());
+    if (!name) return { ok: false, error: "Escribí el nombre" };
+
+    const category = await prisma.tournamentCategory.findFirst({
+      where: {
+        id: categoryId,
+        tournamentId,
+        tournament: { clubId, type: "ZONAS" },
+      },
+      select: { id: true, name: true },
+    });
+    if (!category) return { ok: false, error: "Categoría no encontrada" };
+    if (category.name === name) return { ok: true };
+
+    const duplicate = await prisma.tournamentCategory.findFirst({
+      where: {
+        tournamentId,
+        name,
+        id: { not: categoryId },
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      return { ok: false, error: "Ya existe una categoría con ese nombre" };
+    }
+
+    try {
+      await prisma.tournamentCategory.update({
+        where: { id: categoryId },
+        data: { name },
+      });
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "No se pudo renombrar la categoría" };
+    }
+  }
+
+  async deleteTournamentCategory(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+  ): Promise<MutationResult> {
+    const category = await prisma.tournamentCategory.findFirst({
+      where: {
+        id: categoryId,
+        tournamentId,
+        tournament: { clubId, type: "ZONAS" },
+      },
+      select: { id: true },
+    });
+    if (!category) return { ok: false, error: "Categoría no encontrada" };
+
+    // Cascade: settings, pairs e inscripciones asociadas.
+    await prisma.tournamentCategory.delete({ where: { id: categoryId } });
+    return { ok: true };
   }
 
   async updateCategorySimulation(
@@ -1335,6 +1404,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
               finalStartsAtRound: "SEMI_FINALS",
               intervalMin: 0,
               pairsPerZone: 3,
+              zone4Advancers: 3,
               zonesPlayDates: [] as string[],
               knockoutPlayDates: [] as string[],
               finalPlayDates: [] as string[],
@@ -1392,6 +1462,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
             finalStartsAtRound: category.phases.final.startsAtRound,
             intervalMin: category.intervalMin,
             pairsPerZone: category.pairsPerZone,
+            zone4Advancers: category.zone4Advancers,
             zonesPlayDates: category.phases.zones.playDates,
             knockoutPlayDates: category.phases.knockout.playDates,
             finalPlayDates: category.phases.final.playDates,
@@ -1406,6 +1477,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
             finalStartsAtRound: category.phases.final.startsAtRound,
             intervalMin: category.intervalMin,
             pairsPerZone: category.pairsPerZone,
+            zone4Advancers: category.zone4Advancers,
             zonesPlayDates: category.phases.zones.playDates,
             knockoutPlayDates: category.phases.knockout.playDates,
             finalPlayDates: category.phases.final.playDates,

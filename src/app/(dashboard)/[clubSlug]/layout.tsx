@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { CalendarClock, LogOut } from "lucide-react";
 
 import { logoutAction } from "@/app/(auth)/login/actions";
@@ -73,14 +74,17 @@ export default async function DashboardLayout({
           </div>
         </div>
 
-        <DashboardNav
-          clubSlug={clubSlug}
-          allowedModules={access.allowedModules}
-          isOwner={access.isOwner}
-        />
+        <Suspense fallback={null}>
+          <DashboardNav
+            clubSlug={clubSlug}
+            allowedModules={access.allowedModules}
+            navOrder={access.navOrder}
+            isOwner={access.isOwner}
+          />
+        </Suspense>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-4">
         {children}
       </main>
     </div>

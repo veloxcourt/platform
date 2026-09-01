@@ -1,5 +1,5 @@
 import type { AddPairValues, UpdatePairValues } from "../domain/pair-schema";
-import type { CreateCategoryValues } from "../domain/category-schema";
+import type { CreateCategoryValues, RenameCategoryValues } from "../domain/category-schema";
 import type { UpdateCategorySimulationValues } from "../domain/category-simulation-schema";
 import type { TournamentConfigValues } from "../domain/config-schema";
 import type { TogglePairSlotValues } from "../domain/slot-reservation-schema";
@@ -38,6 +38,17 @@ export interface TournamentRepository {
     tournamentId: string,
     input: CreateCategoryValues,
   ): Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+  renameTournamentCategory(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+    input: RenameCategoryValues,
+  ): Promise<MutationResult>;
+  deleteTournamentCategory(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+  ): Promise<MutationResult>;
   updateCategorySimulation(
     clubId: string,
     tournamentId: string,

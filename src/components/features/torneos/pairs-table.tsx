@@ -25,6 +25,7 @@ import {
   updatePairStatusAction,
 } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 import { EditPairDialog } from "./edit-pair-dialog";
+import { useTournamentReadOnly } from "./tournament-mode-context";
 
 type RowFilter = "all" | "incomplete" | "pending";
 
@@ -67,6 +68,7 @@ export function PairsTable({
   onCategoryFilterChange?: (categoryId: string | null) => void;
 }) {
   const router = useRouter();
+  const readOnly = useTournamentReadOnly();
   const [query, setQuery] = useState("");
   const [rowFilter, setRowFilter] = useState<RowFilter>("all");
   const [addOpen, setAddOpen] = useState(false);
@@ -176,13 +178,15 @@ export function PairsTable({
               </Button>
             ))}
           </div>
-          <Button
-            onClick={() => openAdd()}
-            disabled={categories.length === 0 || !categoryFilterId}
-          >
-            <Plus className="size-4" />
-            Inscribir
-          </Button>
+          {!readOnly && (
+            <Button
+              onClick={() => openAdd()}
+              disabled={categories.length === 0 || !categoryFilterId}
+            >
+              <Plus className="size-4" />
+              Inscribir
+            </Button>
+          )}
         </div>
       </div>
 
@@ -212,7 +216,7 @@ export function PairsTable({
             ) : (
               filtered.map((pair) => {
                 const inactive = pair.status === "CANCELLED";
-                const toggleDisabled = isPending || inactive;
+                const toggleDisabled = isPending || inactive || readOnly;
                 const rowState = pairRowState(pair);
 
                 return (
@@ -227,21 +231,27 @@ export function PairsTable({
                       <div className="flex flex-col gap-1.5">
                         <PairPlayerRow
                           name={pair.player1.name}
-                          onAccount={() =>
-                            setAccountPlayer({
-                              id: pair.player1.id,
-                              name: pair.player1.name,
-                            })
+                          onAccount={
+                            readOnly
+                              ? undefined
+                              : () =>
+                                  setAccountPlayer({
+                                    id: pair.player1.id,
+                                    name: pair.player1.name,
+                                  })
                           }
                         />
                         {pair.player2 ? (
                           <PairPlayerRow
                             name={pair.player2.name}
-                            onAccount={() =>
-                              setAccountPlayer({
-                                id: pair.player2!.id,
-                                name: pair.player2!.name,
-                              })
+                            onAccount={
+                              readOnly
+                                ? undefined
+                                : () =>
+                                    setAccountPlayer({
+                                      id: pair.player2!.id,
+                                      name: pair.player2!.name,
+                                    })
                             }
                           />
                         ) : (
@@ -341,7 +351,7 @@ export function PairsTable({
                       </div>
                     </td>
                     <td className="px-3 py-2">
-                      {!inactive && (
+                      {!inactive && !readOnly && (
                         <div className="flex justify-end gap-1.5">
                           <Button
                             variant="outline"
@@ -440,21 +450,23 @@ function PairPlayerRow({
   onAccount,
 }: {
   name: string;
-  onAccount: () => void;
+  onAccount?: () => void;
 }) {
   return (
     <div className="flex items-center gap-2">
       <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon-sm"
-        onClick={onAccount}
-        aria-label={`Cuenta de ${name}`}
-        title="Cuenta corriente: cargar inscripción o pago"
-      >
-        <Wallet className="size-4" />
-      </Button>
+      {onAccount && (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          onClick={onAccount}
+          aria-label={`Cuenta de ${name}`}
+          title="Cuenta corriente: cargar inscripción o pago"
+        >
+          <Wallet className="size-4" />
+        </Button>
+      )}
     </div>
   );
 }

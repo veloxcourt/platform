@@ -3,6 +3,10 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 
 import { TournamentCategoriesPanel } from "@/components/features/torneos/tournament-categories-panel";
+import {
+  parseTournamentMode,
+  withTournamentMode,
+} from "@/lib/tournament-mode";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import { getTournamentCategories } from "@/modules/tournaments/application/get-tournament-categories";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
@@ -13,10 +17,14 @@ export const metadata = {
 
 export default async function TorneoCategoriasPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ clubSlug: string; tournamentId: string }>;
+  searchParams: Promise<{ modo?: string }>;
 }) {
   const { clubSlug, tournamentId } = await params;
+  const { modo } = await searchParams;
+  const mode = parseTournamentMode(modo);
 
   const repo = getTournamentRepository();
   const data = await getTournamentCategories(repo, clubSlug, tournamentId);
@@ -34,7 +42,10 @@ export default async function TorneoCategoriasPage({
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       <div className="flex flex-col gap-1">
         <Link
-          href={`/${clubSlug}/torneos/${tournamentId}`}
+          href={withTournamentMode(
+            `/${clubSlug}/torneos/${tournamentId}`,
+            mode,
+          )}
           className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ChevronLeft className="size-4" />
