@@ -65,11 +65,12 @@ import {
   updateCalendarVenueAction,
   updatePlannedTournamentAction,
 } from "@/app/(dashboard)/[clubSlug]/herramientas/calendario/actions";
+import { CatalogCategoryCreateForm } from "@/components/features/categorias/catalog-category-create-form";
 import { addDaysISO, formatShortDate, getWeekEndISO, todayISO } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import {
-  CALENDAR_PALETTE,
   DEFAULT_TOURNAMENT_SEARCH_LINKS,
+  nextPaletteColor,
   type CalendarClub,
   type CalendarSearchLink,
   type CatalogCategory,
@@ -132,12 +133,6 @@ function sortCategoriesAlpha(categories: CatalogCategory[]): CatalogCategory[] {
   return [...categories].sort((a, b) =>
     a.name.localeCompare(b.name, "es", { sensitivity: "base" }),
   );
-}
-
-function nextPaletteColor(usedColors: string[]): string {
-  const used = new Set(usedColors.map((c) => c.toLowerCase()));
-  const free = CALENDAR_PALETTE.find((c) => !used.has(c.toLowerCase()));
-  return free ?? CALENDAR_PALETTE[usedColors.length % CALENDAR_PALETTE.length]!;
 }
 
 const SELECT_CLASS =
@@ -1879,56 +1874,10 @@ function CategoriesCrud({
   ) => Promise<boolean>;
   onDelete: (id: string) => Promise<void>;
 }) {
-  const [name, setName] = useState("");
-  const [abbreviation, setAbbreviation] = useState("");
-  const [color, setColor] = useState(() =>
-    nextPaletteColor(categories.map((c) => c.color)),
-  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editAbbreviation, setEditAbbreviation] = useState("");
   const [editColor, setEditColor] = useState("");
-
-  async function addCategory() {
-    const trimmedName = name.trim();
-    const trimmedAbbr = abbreviation.trim().toUpperCase();
-    if (!trimmedName) {
-      toast.error("Escribí el nombre de la categoría");
-      return;
-    }
-    if (!trimmedAbbr) {
-      toast.error("Escribí la abreviación");
-      return;
-    }
-    if (
-      categories.some(
-        (c) => c.name.toLowerCase() === trimmedName.toLowerCase(),
-      )
-    ) {
-      toast.error("Ya existe una categoría con ese nombre");
-      return;
-    }
-    if (
-      categories.some(
-        (c) => c.abbreviation.toLowerCase() === trimmedAbbr.toLowerCase(),
-      )
-    ) {
-      toast.error("Ya existe una categoría con esa abreviación");
-      return;
-    }
-    const created = await onCreate({
-      name: trimmedName,
-      abbreviation: trimmedAbbr,
-      color,
-    });
-    if (!created) return;
-    setName("");
-    setAbbreviation("");
-    setColor(
-      nextPaletteColor([...categories.map((c) => c.color), color]),
-    );
-    toast.success("Categoría agregada");
-  }
 
   async function saveEdit(id: string) {
     const trimmedName = editName.trim();
@@ -1972,44 +1921,15 @@ function CategoriesCrud({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-xl border p-3">
-        <p className="mb-3 text-sm font-medium">Nueva categoría</p>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex min-w-[10rem] flex-1 flex-col gap-1.5">
-            <Label htmlFor="cat-name">Nombre</Label>
-            <Input
-              id="cat-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ej. Masculina 5ta"
-            />
-          </div>
-          <div className="flex w-28 flex-col gap-1.5">
-            <Label htmlFor="cat-abbr">Abreviación</Label>
-            <Input
-              id="cat-abbr"
-              value={abbreviation}
-              onChange={(e) => setAbbreviation(e.target.value)}
-              placeholder="M5"
-              maxLength={6}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="cat-color">Color</Label>
-            <Input
-              id="cat-color"
-              type="color"
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-              className="h-8 w-14 cursor-pointer p-1"
-            />
-          </div>
-          <Button type="button" onClick={addCategory}>
-            <Plus className="size-4" />
-            Agregar
-          </Button>
-        </div>
-      </div>
+      <CatalogCategoryCreateForm
+        existingCategories={categories}
+        onCreate={async (input) => {
+          const created = await onCreate(input);
+          if (!created) return false;
+          toast.success("Categoría agregada");
+          return true;
+        }}
+      />
 
       <ul className="divide-y rounded-xl border">
         {categories.length === 0 ? (

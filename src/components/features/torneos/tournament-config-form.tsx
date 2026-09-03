@@ -3,7 +3,6 @@
 import { useTransition } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -37,8 +36,18 @@ import {
   intermediateRoundLabels,
 } from "@/modules/tournaments/domain/bracket-rounds";
 import { saveTournamentConfigAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/configuracion/actions";
-import { playDayEndHint, formatPlayDayDuration, playDayWindowMinutes } from "@/modules/tournaments/domain/play-day";
+import {
+  materializePlayDaySelection,
+  playDayRulerSelectedMinutes,
+  toPlayDayValues,
+  zonesPlaySlotMinutes,
+} from "@/modules/tournaments/domain/play-day-slots";
 import { useTournamentReadOnly } from "./tournament-mode-context";
+import {
+  PlayDaySlotRuler,
+  PlayDaysRulerToolbar,
+  playDayRulerState,
+} from "./play-day-slot-ruler";
 
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -57,6 +66,12 @@ function formatCourtHours(totalMinutes: number): string {
   if (minutes === 0) return `${hours} h`;
   if (hours === 0) return `${minutes} min`;
   return `${hours} h ${minutes} min`;
+}
+
+function formatSlotsWithClock(slotCount: number, totalMinutes: number): string {
+  const label = `${slotCount} slot${slotCount === 1 ? "" : "s"}`;
+  if (totalMinutes <= 0) return label;
+  return `${label} (${formatCourtHours(totalMinutes)})`;
 }
 
 function PhaseFields({
@@ -195,7 +210,7 @@ function PhaseFields({
           <Label>Días de juego de esta fase</Label>
           {playDays.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              Agregá días de juego abajo para poder asignarlos a esta fase.
+              Definí inicio y fin del torneo en Info para ver los días de juego.
             </p>
           ) : (
             <div className="flex flex-wrap gap-3">
@@ -233,134 +248,6 @@ function PhaseFields({
           </p>
         </div>
       </div>
-    </div>
-  );
-}
-
-function PlayDayRow({
-  index,
-  control,
-  register,
-  errors,
-  courtCount,
-  onRemove,
-  canRemove,
-}: {
-  index: number;
-  control: ReturnType<typeof useForm<TournamentConfigValues>>["control"];
-  register: ReturnType<typeof useForm<TournamentConfigValues>>["register"];
-  errors: ReturnType<
-    typeof useForm<TournamentConfigValues>
-  >["formState"]["errors"];
-  courtCount: number;
-  onRemove: () => void;
-  canRemove: boolean;
-}) {
-  const startTime = useWatch({
-    control,
-    name: `playDays.${index}.startTime`,
-  });
-  const endTime = useWatch({
-    control,
-    name: `playDays.${index}.endTime`,
-  });
-  const endHint =
-    startTime && endTime ? playDayEndHint(startTime, endTime) : null;
-  const durationLabel =
-    startTime && endTime ? formatPlayDayDuration(startTime, endTime) : null;
-  const windowMinutes =
-    startTime && endTime ? playDayWindowMinutes(startTime, endTime) : 0;
-  const readOnly = useTournamentReadOnly();
-  const courts = Number.isFinite(courtCount) && courtCount > 0 ? courtCount : 0;
-  const totalMinutes = windowMinutes > 0 && courts > 0 ? windowMinutes * courts : 0;
-  const totalHoursLabel = totalMinutes > 0 ? formatCourtHours(totalMinutes) : null;
-
-  return (
-    <div className="grid min-w-0 gap-3 rounded-lg border p-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_6.5rem_7.5rem_auto]">
-      <div className="flex flex-col gap-1.5">
-        <Label>Fecha</Label>
-        <Input
-          type="date"
-          disabled={readOnly}
-          readOnly={readOnly}
-          {...register(`playDays.${index}.date`)}
-        />
-        {errors.playDays?.[index]?.date && (
-          <p className="text-xs text-destructive">
-            {errors.playDays[index]?.date?.message}
-          </p>
-        )}
-        <p className="text-xs text-muted-foreground">
-          Día de inicio del bloque habilitado.
-        </p>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label>Desde</Label>
-        <Input
-          type="time"
-          disabled={readOnly}
-          readOnly={readOnly}
-          {...register(`playDays.${index}.startTime`)}
-        />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label>Hasta</Label>
-        <Input
-          type="time"
-          disabled={readOnly}
-          readOnly={readOnly}
-          {...register(`playDays.${index}.endTime`)}
-        />
-        {endHint && (
-          <p className="text-xs text-muted-foreground">{endHint}</p>
-        )}
-        {errors.playDays?.[index]?.endTime && (
-          <p className="text-xs text-destructive">
-            {errors.playDays[index]?.endTime?.message}
-          </p>
-        )}
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label>Horas</Label>
-        <div
-          className="flex h-8 items-center rounded-lg border border-dashed bg-muted/40 px-2.5 text-sm tabular-nums"
-          aria-live="polite"
-        >
-          {durationLabel ?? "—"}
-        </div>
-        <p className="text-xs text-muted-foreground">Duración del bloque.</p>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label>Horas totales</Label>
-        <div
-          className="flex h-8 items-center rounded-lg border border-dashed bg-muted/40 px-2.5 text-sm font-medium tabular-nums"
-          aria-live="polite"
-          title={
-            courts > 0 && durationLabel
-              ? `${durationLabel} × ${courts} cancha${courts === 1 ? "" : "s"}`
-              : undefined
-          }
-        >
-          {totalHoursLabel ?? "—"}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Horas × canchas.
-        </p>
-      </div>
-      {!readOnly && (
-        <div className="flex items-end">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={onRemove}
-            disabled={!canRemove}
-            title="Quitar día"
-          >
-            <Trash2 className="size-4" />
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
@@ -582,7 +469,7 @@ export function TournamentConfigForm({
     resolver: zodResolver(tournamentConfigSchema),
     defaultValues: {
       courtCount: initial.courtCount ?? 1,
-      playDays: initial.playDays,
+      playDays: initial.playDays.map((day) => toPlayDayValues(day)),
       categories: initial.categories.map((category) => ({
         categoryId: category.categoryId,
         phases: {
@@ -606,20 +493,38 @@ export function TournamentConfigForm({
     },
   });
 
-  const { fields, append, remove } = useFieldArray({
+  const { fields } = useFieldArray({
     control,
     name: "playDays",
   });
 
   const courtCount = useWatch({ control, name: "courtCount" }) ?? 1;
   const playDaysWatch = useWatch({ control, name: "playDays" }) ?? [];
+  const zonesDuration =
+    useWatch({
+      control,
+      name: "categories.0.phases.zones.matchDurationMin",
+    }) ?? 75;
+  const intervalMin = useWatch({ control, name: "categories.0.intervalMin" }) ?? 0;
+  const slotMinutes = zonesPlaySlotMinutes(zonesDuration, intervalMin);
   const courts =
     Number.isFinite(courtCount) && courtCount > 0 ? Number(courtCount) : 0;
   const tournamentTotalMinutes = playDaysWatch.reduce((sum, day) => {
-    if (!day?.startTime || !day?.endTime) return sum;
-    const minutes = playDayWindowMinutes(day.startTime, day.endTime);
+    if (!day?.startTime) return sum;
+    const minutes = playDayRulerSelectedMinutes(day, slotMinutes);
     return minutes > 0 ? sum + minutes * courts : sum;
   }, 0);
+  const tournamentTotalSlots =
+    slotMinutes > 0 ? Math.round(tournamentTotalMinutes / slotMinutes) : 0;
+  const rulerTotals = playDaysWatch.reduce(
+    (acc, day) => {
+      const { ruler, enabled } = playDayRulerState(day, slotMinutes);
+      acc.total += ruler.length;
+      acc.marked += enabled.length;
+      return acc;
+    },
+    { total: 0, marked: 0 },
+  );
 
   const showParameters = panel === "parameters" || panel === "all";
   const showCategories = panel === "category" || panel === "all";
@@ -632,8 +537,15 @@ export function TournamentConfigForm({
     const sharedZone4Advancers =
       values.categories[0]?.zone4Advancers === 2 ? 2 : 3;
     const sharedInterval = values.categories[0]?.intervalMin ?? 0;
+    const slotMin = zonesPlaySlotMinutes(
+      values.categories[0]?.phases.zones.matchDurationMin,
+      sharedInterval,
+    );
     const sanitized: TournamentConfigValues = {
       ...values,
+      playDays: values.playDays.map((day) =>
+        materializePlayDaySelection(toPlayDayValues(day), slotMin),
+      ),
       categories: values.categories.map((category) => ({
         ...category,
         // Comunes a todas las categorías (por ahora).
@@ -731,65 +643,140 @@ export function TournamentConfigForm({
       {showParameters ? (
         <>
           <Card>
-            <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
-              <div>
-                <CardTitle>Días y horarios de juego</CardTitle>
-                <CardDescription>
-                  Fechas y horarios habilitados para jugar durante el torneo
-                  (comunes a todas las categorías).
-                </CardDescription>
-              </div>
-              {!readOnly && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    append({
-                      date: initial.startDate,
-                      startTime: "09:00",
-                      endTime: "22:00",
-                    })
-                  }
-                >
-                  <Plus className="size-4" />
-                  Agregar día
-                </Button>
-              )}
+            <CardHeader className="space-y-1.5">
+              <CardTitle>Días y horarios de juego</CardTitle>
+              <CardDescription>
+                Los días salen de Info (inicio y fin del torneo). Usá +/− a
+                izquierda y derecha para sumar o quitar slots (el nuevo queda
+                en juego). Podés desmarcar celdas sueltas. El tamaño de cada
+                slot es la duración de zonas más el intervalo.
+              </CardDescription>
             </CardHeader>
             <CardContent className="flex min-w-0 flex-col gap-3 overflow-x-auto">
-              {fields.map((field, index) => (
-                <PlayDayRow
-                  key={field.id}
-                  index={index}
-                  control={control}
-                  register={register}
-                  errors={errors}
-                  courtCount={courts}
-                  onRemove={() => remove(index)}
-                  canRemove={fields.length > 1}
-                />
-              ))}
+              {fields.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Definí inicio y fin del torneo en Info.
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className="inline-block size-3 rounded-sm border border-emerald-300/80 bg-emerald-50"
+                        aria-hidden
+                      />
+                      Libre
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className="inline-block size-3 rounded-sm border border-sky-400 bg-sky-100"
+                        aria-hidden
+                      />
+                      En juego
+                    </span>
+                  </div>
+                  <PlayDaysRulerToolbar
+                    markedCount={rulerTotals.marked}
+                    allMarked={
+                      rulerTotals.total > 0 &&
+                      rulerTotals.marked === rulerTotals.total
+                    }
+                    noneMarked={rulerTotals.marked === 0}
+                    readOnly={readOnly}
+                    slotMinutes={slotMinutes}
+                    onMarkAll={() => {
+                      fields.forEach((_, index) => {
+                        const day = playDaysWatch[index];
+                        const { ruler, overnight } = playDayRulerState(
+                          day,
+                          slotMinutes,
+                        );
+                        setValue(
+                          `playDays.${index}.enabledSlotIndexes`,
+                          ruler.map((slot) => slot.slotIndex),
+                          { shouldDirty: true },
+                        );
+                        setValue(`playDays.${index}.hasSlotSelection`, true, {
+                          shouldDirty: true,
+                        });
+                        setValue(
+                          `playDays.${index}.overnightExtraSlots`,
+                          overnight,
+                          { shouldDirty: true },
+                        );
+                        const endTime = ruler[ruler.length - 1]?.endTime;
+                        if (endTime) {
+                          setValue(`playDays.${index}.endTime`, endTime, {
+                            shouldDirty: true,
+                            shouldValidate: true,
+                          });
+                        }
+                      });
+                    }}
+                    onClearAll={() => {
+                      fields.forEach((_, index) => {
+                        const day = playDaysWatch[index];
+                        const { ruler, overnight } = playDayRulerState(
+                          day,
+                          slotMinutes,
+                        );
+                        setValue(`playDays.${index}.enabledSlotIndexes`, [], {
+                          shouldDirty: true,
+                        });
+                        setValue(`playDays.${index}.hasSlotSelection`, true, {
+                          shouldDirty: true,
+                        });
+                        setValue(
+                          `playDays.${index}.overnightExtraSlots`,
+                          overnight,
+                          { shouldDirty: true },
+                        );
+                        const endTime = ruler[ruler.length - 1]?.endTime;
+                        if (endTime) {
+                          setValue(`playDays.${index}.endTime`, endTime, {
+                            shouldDirty: true,
+                            shouldValidate: true,
+                          });
+                        }
+                      });
+                    }}
+                  />
+                  {fields.map((field, index) => (
+                    <PlayDaySlotRuler
+                      key={field.id}
+                      index={index}
+                      control={control}
+                      setValue={setValue}
+                      errors={errors}
+                      courtCount={courts}
+                      slotMinutes={slotMinutes}
+                      readOnly={readOnly}
+                    />
+                  ))}
+                </>
+              )}
               {errors.playDays?.message && (
                 <p className="text-xs text-destructive">
                   {errors.playDays.message}
                 </p>
               )}
-              {tournamentTotalMinutes > 0 && (
+              {tournamentTotalSlots > 0 && (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
                   <span className="text-muted-foreground">
                     Capacidad total del torneo (todas las franjas × canchas)
                   </span>
                   <span className="font-semibold tabular-nums">
-                    {formatCourtHours(tournamentTotalMinutes)}
+                    {formatSlotsWithClock(
+                      tournamentTotalSlots,
+                      tournamentTotalMinutes,
+                    )}
                   </span>
                 </div>
               )}
               <p className="text-xs text-muted-foreground">
-                Si el horario de cierre es anterior al de inicio (ej. 18:00 a
-                02:00), se interpreta como madrugada del día siguiente. Las
-                horas totales por día se comparan con las horas de partidos
-                programados ese día.
+                A la izquierda +/− mueve el inicio; a la derecha +/− alarga o
+                acorta el final (incluso después de las 0 hs). La capacidad se
+                expresa en slots (horas reloj entre paréntesis).
               </p>
             </CardContent>
           </Card>
@@ -799,8 +786,9 @@ export function TournamentConfigForm({
             {initial.endDate && initial.endDate !== initial.startDate
               ? ` – ${formatShortDate(initial.endDate)}`
               : ""}
-            . Los días y horarios valen para todo el torneo; al armar el fixture
-            se reparten los partidos de cada categoría dentro de esas franjas.
+            . Para cambiar las fechas, usá la pestaña Info. Los horarios valen
+            para todo el torneo; al armar el fixture se reparten los partidos
+            de cada categoría dentro de esas franjas.
           </div>
         </>
       ) : null}

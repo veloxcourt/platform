@@ -61,7 +61,7 @@ export default async function TorneoCategoriasPage({
         clubSlug={clubSlug}
         tournamentId={tournamentId}
         categories={data.categories}
-        levels={data.levels}
+        catalogCategories={data.catalogCategories}
         config={config}
         courtCount={courtCount}
       />

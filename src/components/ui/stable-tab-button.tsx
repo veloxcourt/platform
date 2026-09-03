@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -9,21 +9,29 @@ export function StableTabButton({
   active,
   children,
   onSelect,
+  onContextMenu,
   className,
+  title,
 }: {
   active: boolean;
   children: ReactNode;
   onSelect: () => void;
+  onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
   className?: string;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       role="tab"
       aria-selected={active}
+      title={title}
       // Evita que el foco desplace el scroll horizontal de la fila.
-      onMouseDown={(event) => event.preventDefault()}
+      onMouseDown={(event) => {
+        if (event.button === 0) event.preventDefault();
+      }}
       onClick={onSelect}
+      onContextMenu={onContextMenu}
       className={cn(
         "inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-lg border px-2.5 text-[0.8rem] font-medium whitespace-nowrap",
         "outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",

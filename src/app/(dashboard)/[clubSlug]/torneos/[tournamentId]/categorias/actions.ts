@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 
 import { requireClubModuleAccess } from "@/lib/auth/access";
+import { calendarCategorySchema } from "@/modules/herramientas/domain/calendario-schema";
+import type { CalendarCategoryValues } from "@/modules/herramientas/domain/calendario-schema";
 import {
   createCategorySchema,
   renameCategorySchema,
@@ -28,6 +30,7 @@ function revalidateTournament(clubSlug: string, tournamentId: string) {
   revalidatePath(`/${clubSlug}/torneos/${tournamentId}`);
   revalidatePath(`/${clubSlug}/torneos/${tournamentId}/categorias`);
   revalidatePath(`/${clubSlug}/torneos/${tournamentId}/configuracion`);
+  revalidatePath(`/${clubSlug}/herramientas/calendario`);
 }
 
 export async function createCategoryAction(
@@ -49,6 +52,30 @@ export async function createCategoryAction(
     tournamentId,
     parsed.data,
   );
+  if (result.ok) revalidateTournament(clubSlug, tournamentId);
+  return result;
+}
+
+export async function createCatalogAndAddCategoryAction(
+  clubSlug: string,
+  tournamentId: string,
+  values: CalendarCategoryValues,
+): Promise<Result> {
+  const parsed = calendarCategorySchema.safeParse(values);
+  if (!parsed.success) {
+    const msg = parsed.error.issues[0]?.message ?? "Datos inválidos";
+    return { ok: false, error: msg };
+  }
+
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+
+  const created = await repo.createCatalogCategory(clubId, parsed.data);
+  if ("error" in created) return { ok: false, error: created.error };
+
+  const result = await repo.createTournamentCategory(clubId, tournamentId, {
+    catalogCategoryId: created.id,
+  });
   if (result.ok) revalidateTournament(clubSlug, tournamentId);
   return result;
 }

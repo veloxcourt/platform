@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, Eye, Pencil, Plus, Search, Trophy, Users } from "lucide-react";
+import { Copy, CopyPlus, Eye, Pencil, Plus, Search, Trash2, Trophy, Users, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ import { TOURNAMENT_TYPE_LABELS } from "@/modules/tournaments/domain/tournament-
 import { TournamentFormDialog } from "./tournament-form-dialog";
 import { TournamentTypePicker } from "./tournament-type-picker";
 import type { TournamentType } from "@/modules/tournaments/domain/tournament-types";
+import { cloneTournamentAction, deleteTournamentAction } from "@/app/(dashboard)/[clubSlug]/torneos/actions";
 
 const STATUS_VARIANT: Record<
   CreateTournamentValues["status"],
@@ -49,6 +50,10 @@ export function TournamentsTable({
   const [selectedType, setSelectedType] = useState<TournamentType | null>(null);
   const [editing, setEditing] = useState<TournamentListItem | null>(null);
   const [formReadOnly, setFormReadOnly] = useState(false);
+  const [cloningId, setCloningId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isCloning, startClone] = useTransition();
+  const [isDeleting, startDelete] = useTransition();
 
   function openNewTournament() {
     setEditing(null);
@@ -97,6 +102,57 @@ export function TournamentsTable({
     void navigator.clipboard.writeText(url);
     toast.success("Link copiado", {
       description: "El enlace público de inscripción está en el portapapeles.",
+    });
+  }
+
+  function cloneTournament(tournament: TournamentListItem, includePairs: boolean) {
+    setCloningId(tournament.id);
+    startClone(async () => {
+      const result = await cloneTournamentAction(
+        clubSlug,
+        tournament.id,
+        includePairs,
+      );
+      setCloningId(null);
+      if (!result.ok) {
+        toast.error("No se pudo clonar el torneo", {
+          description: result.error,
+        });
+        return;
+      }
+      toast.success(
+        includePairs ? "Torneo clonado completo" : "Torneo clonado sin parejas",
+        { description: `${tournament.name} (copia)` },
+      );
+      router.refresh();
+    });
+  }
+
+  function removeTournament(tournament: TournamentListItem) {
+    const pairsLabel =
+      tournament.type === "ZONAS" ? "pareja" : "inscripción";
+    const count = tournament.registrationCount;
+    const extra =
+      count > 0
+        ? `\n\nTambién se eliminarán ${count} ${pairsLabel}${count === 1 ? "" : "s"} y toda la configuración.`
+        : "\n\nSe eliminará el torneo y su configuración.";
+    const ok = window.confirm(
+      `¿Eliminar «${tournament.name}»?${extra}\nEsta acción no se puede deshacer.`,
+    );
+    if (!ok) return;
+
+    setDeletingId(tournament.id);
+    startDelete(async () => {
+      const result = await deleteTournamentAction(clubSlug, tournament.id);
+      setDeletingId(null);
+      if (!result.ok) {
+        toast.error("No se pudo eliminar el torneo", {
+          description: result.error,
+        });
+        return;
+      }
+      toast.success("Torneo eliminado");
+      router.refresh();
     });
   }
 
@@ -194,7 +250,36 @@ export function TournamentsTable({
                 </div>
               </dl>
 
-              <div className="flex justify-end gap-2 border-t pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      (isCloning && cloningId === t.id) ||
+                      (isDeleting && deletingId === t.id)
+                    }
+                    onClick={() => cloneTournament(t, true)}
+                    title="Copia el torneo con categorías, configuración y parejas"
+                  >
+                    <CopyPlus className="size-4" />
+                    Clonar completo
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      (isCloning && cloningId === t.id) ||
+                      (isDeleting && deletingId === t.id)
+                    }
+                    onClick={() => cloneTournament(t, false)}
+                    title="Copia el torneo con categorías y configuración, sin inscripciones"
+                  >
+                    <UsersRound className="size-4" />
+                    Clonar sin parejas
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
                 {t.type === "ZONAS" ? (
                   <Link
                     href={`/${clubSlug}/torneos/${t.id}?modo=ver`}
@@ -237,6 +322,22 @@ export function TournamentsTable({
                   <Copy className="size-4" />
                   Copiar link
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-muted-foreground hover:text-destructive"
+                  disabled={
+                    (isCloning && cloningId === t.id) ||
+                    (isDeleting && deletingId === t.id)
+                  }
+                  onClick={() => removeTournament(t)}
+                  title="Eliminar torneo"
+                  aria-label={`Eliminar ${t.name}`}
+                >
+                  <Trash2 className="size-4" />
+                  Eliminar
+                </Button>
+                </div>
               </div>
             </article>
           ))}

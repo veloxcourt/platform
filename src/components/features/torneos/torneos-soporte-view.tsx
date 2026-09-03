@@ -185,7 +185,7 @@ export function TorneosSoporteView() {
           </p>
         </div>
 
-        <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
           <SummaryStat
             label="Zonas"
             value={
@@ -196,6 +196,16 @@ export function TorneosSoporteView() {
           />
           <SummaryStat label="Partidos de zona" value={String(draw.zoneMatches)} />
           <SummaryStat label="Avanzan a llave" value={String(draw.advancers)} />
+          <SummaryStat
+            label="Etapas después de zona"
+            value={
+              draw.rounds.length === 0
+                ? "—"
+                : draw.rounds
+                    .map((round) => `${round.label} ${round.matches}`)
+                    .join(" · ")
+            }
+          />
           <SummaryStat
             label="Cuadro"
             value={
@@ -393,7 +403,7 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border bg-muted/30 px-3 py-2">
       <dt className="text-[11px] text-muted-foreground">{label}</dt>
-      <dd className="text-sm font-medium">{value}</dd>
+      <dd className="text-sm font-medium leading-snug">{value}</dd>
     </div>
   );
 }

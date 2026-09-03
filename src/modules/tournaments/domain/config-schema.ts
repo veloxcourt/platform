@@ -85,6 +85,9 @@ export const playDaySchema = z
     date: z.string().regex(DATE_REGEX, "Fecha inválida"),
     startTime: z.string().regex(TIME_REGEX, "Hora inválida (HH:mm)"),
     endTime: z.string().regex(TIME_REGEX, "Hora inválida (HH:mm)"),
+    overnightExtraSlots: z.number().int().min(-12).max(12),
+    enabledSlotIndexes: z.array(z.number().int().min(0)),
+    hasSlotSelection: z.boolean(),
   })
   .refine((d) => isValidPlayDayWindow(d.startTime, d.endTime), {
     message:
@@ -115,7 +118,7 @@ export const tournamentConfigSchema = z.object({
     .int()
     .min(1, "Mínimo 1 cancha")
     .max(32, "Máximo 32 canchas"),
-  playDays: z.array(playDaySchema).min(1, "Agregá al menos un día de juego"),
+  playDays: z.array(playDaySchema).min(1, "Definí las fechas del torneo en Info"),
   categories: z
     .array(categoryPhaseConfigSchema)
     .min(1, "Agregá al menos una categoría"),

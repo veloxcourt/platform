@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
+import { FileDown, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import {
+  CALENDAR_PALETTE,
+  type CatalogCategory,
+} from "@/modules/herramientas/domain/calendario-torneos";
 import type {
   CategoryPhaseConfig,
   TournamentCategoryItem,
@@ -23,22 +27,30 @@ import type {
 } from "@/modules/tournaments/domain/types";
 import type { PlayDayValues } from "@/modules/tournaments/domain/config-schema";
 import {
-  applySharedCourtCapacity,
-  availableCourtMinutes,
+  canShiftPlayDayVisibleWindow,
+  setPlayDayStartMinutes,
+  shiftPlayDayVisibleWindow,
+  type PlayDayStartMinutes,
+  type PlayDayWindowDelta,
+  type PlayDayWindowEdge,
+} from "@/modules/tournaments/domain/play-day-slots";
+import {
+  breakdownCategorySimulation,
   formatSimulationDuration,
-  playDaysForDates,
   simulateCategorySchedule,
   type CategoryScheduleSimulation,
 } from "@/modules/tournaments/domain/simulate-category-schedule";
+import { updatePlayDaysAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/configuracion/actions";
 import {
-  applyPackedSlotsToSimulation,
   buildSimulationRuleGrid,
+  slotMinutesForSimulationDate,
+  summarizeIntegralSimulation,
 } from "@/modules/tournaments/domain/court-day-slots";
 import type { SimulationCategoryLoad } from "@/modules/tournaments/domain/court-day-slots";
-import { SlotRuleGrid } from "./slot-rule-grid";
+import { downloadSimulationPdf } from "./simulation-pdf";
+import { SlotRuleGrid, type SlotRuleGridCategory } from "./slot-rule-grid";
 import {
   deleteCategoryAction,
-  renameCategoryAction,
   updateCategorySimulationAction,
 } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/categorias/actions";
 import { AddCategoryDialog } from "./add-category-dialog";
@@ -47,6 +59,14 @@ import { useTournamentReadOnly } from "./tournament-mode-context";
 type SimulationDraft = {
   enabled: boolean;
   confirmed: string;
+};
+
+/// Fila lista para simular: categoría con configuración y resultado propio.
+type SimulationRow = {
+  category: TournamentCategoryItem;
+  categoryConfig: CategoryPhaseConfig;
+  result: CategoryScheduleSimulation;
+  color: string;
 };
 
 function defaultConfirmed(category: TournamentCategoryItem): string {
@@ -63,11 +83,31 @@ function draftFromCategory(category: TournamentCategoryItem): SimulationDraft {
   };
 }
 
+function parseConfirmed(value: string): number | null {
+  const parsed = Number.parseInt(value, 10);
+  if (value.trim() === "" || !Number.isFinite(parsed)) return null;
+  return Math.min(256, Math.max(0, parsed));
+}
+
+/// Color del punto de la categoría (catálogo del club; si falta, paleta por orden).
+function categoryColor(
+  category: TournamentCategoryItem,
+  index: number,
+): string {
+  return (
+    category.color ?? CALENDAR_PALETTE[index % CALENDAR_PALETTE.length]
+  );
+}
+
+function phaseSlotMinutes(config: CategoryPhaseConfig, phase: "zones" | "knockout" | "final") {
+  return config.phases[phase].matchDurationMin + config.intervalMin;
+}
+
 export function TournamentCategoriesPanel({
   clubSlug,
   tournamentId,
   categories,
-  levels,
+  catalogCategories,
   config,
   courtCount,
   /// Si false, oculta Inscriptos / Sin compañero / Sin zona (van en Inscripciones).
@@ -78,7 +118,7 @@ export function TournamentCategoriesPanel({
   clubSlug: string;
   tournamentId: string;
   categories: TournamentCategoryItem[];
-  levels: string[];
+  catalogCategories: CatalogCategory[];
   config: TournamentConfig | null;
   courtCount: number;
   showInscriptionStats?: boolean;
@@ -87,14 +127,45 @@ export function TournamentCategoriesPanel({
   const router = useRouter();
   const readOnly = useTournamentReadOnly();
   const [addOpen, setAddOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
   const [drafts, setDrafts] = useState<Record<string, SimulationDraft>>(() =>
     Object.fromEntries(categories.map((c) => [c.id, draftFromCategory(c)])),
   );
   const [, startTransition] = useTransition();
   const [, startCategoryMutation] = useTransition();
+  const [, startPlayDaysMutation] = useTransition();
+  const [playDaysDraft, setPlayDaysDraft] = useState<PlayDayValues[] | null>(
+    null,
+  );
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const playDays = playDaysDraft ?? config?.playDays ?? [];
+  const slotMinutes = Math.max(
+    1,
+    ...(config?.categories.map(
+      (category) =>
+        category.phases.zones.matchDurationMin + category.intervalMin,
+    ) ?? [75]),
+  );
+  const phaseLoads = (config?.categories ?? []).map((category) => ({
+    zonesPlayDates: category.phases.zones.playDates,
+    knockoutPlayDates: category.phases.knockout.playDates,
+    finalPlayDates: category.phases.final.playDates,
+    zonesSlotMinutes: phaseSlotMinutes(category, "zones"),
+    knockoutSlotMinutes: phaseSlotMinutes(category, "knockout"),
+    finalSlotMinutes: phaseSlotMinutes(category, "final"),
+  }));
+
+  function slotMinutesForDate(playDate: string) {
+    return slotMinutesForSimulationDate(playDate, phaseLoads, slotMinutes);
+  }
+
+  useEffect(() => {
+    if (!playDaysDraft || !config) return;
+    if (
+      JSON.stringify(playDaysDraft) === JSON.stringify(config.playDays)
+    ) {
+      setPlayDaysDraft(null);
+    }
+  }, [config, playDaysDraft]);
 
   useEffect(() => {
     setDrafts((prev) => {
@@ -123,6 +194,13 @@ export function TournamentCategoriesPanel({
     return drafts[category.id] ?? draftFromCategory(category);
   }
 
+  function cancelPendingSaves() {
+    for (const [id, timer] of Object.entries(saveTimers.current)) {
+      clearTimeout(timer);
+      delete saveTimers.current[id];
+    }
+  }
+
   function persist(
     category: TournamentCategoryItem,
     draft: SimulationDraft,
@@ -134,12 +212,6 @@ export function TournamentCategoriesPanel({
     if (existingTimer) clearTimeout(existingTimer);
 
     const run = () => {
-      const parsed = Number.parseInt(draft.confirmed, 10);
-      const simulationConfirmedCount =
-        draft.confirmed.trim() === "" || !Number.isFinite(parsed)
-          ? null
-          : Math.min(256, Math.max(0, parsed));
-
       startTransition(async () => {
         const result = await updateCategorySimulationAction(
           clubSlug,
@@ -147,7 +219,7 @@ export function TournamentCategoriesPanel({
           category.id,
           {
             simulationEnabled: draft.enabled,
-            simulationConfirmedCount,
+            simulationConfirmedCount: parseConfirmed(draft.confirmed),
           },
         );
         if (!result.ok) {
@@ -167,58 +239,98 @@ export function TournamentCategoriesPanel({
     }
   }
 
-  function setEnabled(category: TournamentCategoryItem, enabled: boolean) {
-    const current = simulationState(category);
-    const next = {
-      enabled,
-      confirmed: current.confirmed || defaultConfirmed(category),
-    };
-    setDrafts((prev) => ({ ...prev, [category.id]: next }));
-    persist(category, next);
+  /// La simulación es integral: un solo tilde para todas las categorías del torneo.
+  const simulationEnabled = categories.some((c) => simulationState(c).enabled);
+
+  function setSimulationEnabled(enabled: boolean) {
+    const next: Record<string, SimulationDraft> = {};
+    for (const category of categories) {
+      next[category.id] = {
+        enabled,
+        confirmed:
+          simulationState(category).confirmed || defaultConfirmed(category),
+      };
+    }
+    setDrafts((prev) => ({ ...prev, ...next }));
+    if (readOnly) return;
+
+    cancelPendingSaves();
+    startTransition(async () => {
+      for (const category of categories) {
+        const result = await updateCategorySimulationAction(
+          clubSlug,
+          tournamentId,
+          category.id,
+          {
+            simulationEnabled: enabled,
+            simulationConfirmedCount: parseConfirmed(
+              next[category.id].confirmed,
+            ),
+          },
+        );
+        if (!result.ok) {
+          toast.error("No se pudo guardar la simulación", {
+            description: result.error,
+          });
+          return;
+        }
+      }
+      router.refresh();
+    });
   }
 
   function setConfirmed(category: TournamentCategoryItem, confirmed: string) {
-    const current = simulationState(category);
-    const next = { enabled: current.enabled, confirmed };
+    const next = { enabled: simulationEnabled, confirmed };
     setDrafts((prev) => ({ ...prev, [category.id]: next }));
     persist(category, next, { debounceMs: 500 });
   }
 
-  function startRename(category: TournamentCategoryItem) {
-    setEditingId(category.id);
-    setEditingName(category.name);
+  function adjustPlayDay(
+    playDate: string,
+    edge: PlayDayWindowEdge,
+    delta: PlayDayWindowDelta,
+  ) {
+    if (readOnly) return;
+    const current = playDays.find((day) => day.date === playDate);
+    if (!current) return;
+    const nextDay = shiftPlayDayVisibleWindow(
+      current,
+      slotMinutesForDate(playDate),
+      edge,
+      delta,
+    );
+    if (!nextDay) return;
+    commitPlayDays(
+      playDays.map((day) => (day.date === playDate ? nextDay : day)),
+    );
   }
 
-  function cancelRename() {
-    setEditingId(null);
-    setEditingName("");
+  function setStartMinutes(playDate: string, minutes: PlayDayStartMinutes) {
+    if (readOnly) return;
+    const current = playDays.find((day) => day.date === playDate);
+    if (!current) return;
+    const nextDay = setPlayDayStartMinutes(
+      current,
+      slotMinutesForDate(playDate),
+      minutes,
+    );
+    if (!nextDay) return;
+    commitPlayDays(
+      playDays.map((day) => (day.date === playDate ? nextDay : day)),
+    );
   }
 
-  function saveRename(category: TournamentCategoryItem) {
-    const name = editingName.trim();
-    if (!name) {
-      toast.error("Escribí el nombre");
-      return;
-    }
-    if (name === category.name) {
-      cancelRename();
-      return;
-    }
-
-    startCategoryMutation(async () => {
-      const result = await renameCategoryAction(
-        clubSlug,
-        tournamentId,
-        category.id,
-        { name },
-      );
-      if (result.ok) {
-        toast.success("Nombre actualizado");
-        cancelRename();
-        router.refresh();
-      } else {
-        toast.error("No se pudo renombrar", { description: result.error });
+  function commitPlayDays(next: PlayDayValues[]) {
+    setPlayDaysDraft(next);
+    startPlayDaysMutation(async () => {
+      const result = await updatePlayDaysAction(clubSlug, tournamentId, next);
+      if (!result.ok) {
+        toast.error("No se pudo guardar el rango", {
+          description: result.error,
+        });
+        return;
       }
+      router.refresh();
     });
   }
 
@@ -242,7 +354,6 @@ export function TournamentCategoriesPanel({
             ? "Categoría e inscripciones eliminadas"
             : "Categoría eliminada",
         );
-        if (editingId === category.id) cancelRename();
         router.refresh();
       } else {
         toast.error("No se pudo eliminar", { description: result.error });
@@ -250,322 +361,267 @@ export function TournamentCategoriesPanel({
     });
   }
 
+  const rows = categories.map((category, index) => {
+    const sim = simulationState(category);
+    const categoryConfig =
+      config?.categories.find((c) => c.categoryId === category.id) ?? null;
+    const confirmed = parseConfirmed(sim.confirmed);
+    const result =
+      simulationEnabled && config && categoryConfig && confirmed != null
+        ? simulateCategorySchedule(
+            confirmed,
+            categoryConfig,
+            playDays,
+            courtCount,
+          )
+        : null;
+    return {
+      category,
+      sim,
+      categoryConfig,
+      result,
+      color: categoryColor(category, index),
+    };
+  });
+
+  const simulationRows: SimulationRow[] = rows
+    .filter(
+      (
+        row,
+      ): row is typeof row & {
+        categoryConfig: CategoryPhaseConfig;
+        result: CategoryScheduleSimulation;
+      } => Boolean(row.categoryConfig && row.result),
+    )
+    .map(({ category, categoryConfig, result, color }) => ({
+      category,
+      categoryConfig,
+      result,
+      color,
+    }));
+
+  const unconfiguredNames = simulationEnabled
+    ? rows.filter((row) => !row.categoryConfig).map((row) => row.category.name)
+    : [];
+
+  function exportSimulation() {
+    if (simulationRows.length === 0 || playDays.length === 0) {
+      toast.error("No hay simulación para exportar", {
+        description: "Activá Simulación e ingresá confirmadas por categoría.",
+      });
+      return;
+    }
+    try {
+      const categoryLoads: SimulationCategoryLoad[] = simulationRows.map(
+        (row) => ({
+          categoryId: row.category.id,
+          zonesPlayDates: row.categoryConfig.phases.zones.playDates,
+          knockoutPlayDates: row.categoryConfig.phases.knockout.playDates,
+          finalPlayDates: row.categoryConfig.phases.final.playDates,
+          zoneMatches: row.result.zoneMatches,
+          intermediateMatches: row.result.intermediateMatches,
+          finalMatches: row.result.finalMatches,
+          zonesSlotMinutes: phaseSlotMinutes(row.categoryConfig, "zones"),
+          knockoutSlotMinutes: phaseSlotMinutes(row.categoryConfig, "knockout"),
+          finalSlotMinutes: phaseSlotMinutes(row.categoryConfig, "final"),
+        }),
+      );
+      const ruleGrid = buildSimulationRuleGrid({
+        playDays,
+        courtCount,
+        zonesSlotMinutes: slotMinutes,
+        categoryLoads,
+      });
+      const summary = summarizeIntegralSimulation(
+        ruleGrid,
+        simulationRows.map((row) => ({
+          categoryId: row.category.id,
+          result: row.result,
+          zonesPlayDates: row.categoryConfig.phases.zones.playDates,
+          knockoutPlayDates: row.categoryConfig.phases.knockout.playDates,
+          finalPlayDates: row.categoryConfig.phases.final.playDates,
+        })),
+        slotMinutes,
+      );
+      downloadSimulationPdf({
+        tournamentName: config?.tournamentName ?? "Torneo",
+        courtCount,
+        playDayCount: playDays.length,
+        rows: simulationRows.map((row) => ({
+          id: row.category.id,
+          name: row.category.name,
+          abbreviation: row.category.abbreviation,
+          color: row.color,
+          result: row.result,
+        })),
+        summary,
+        rules: ruleGrid,
+      });
+    } catch (error) {
+      toast.error("No se pudo generar el PDF", {
+        description:
+          error instanceof Error ? error.message : "Error inesperado",
+      });
+    }
+  }
+
   return (
     <>
       <Card className={compact ? "border-0 shadow-none" : undefined}>
         <CardHeader
           className={cn(
-            "flex-row items-center justify-between gap-3 space-y-0",
+            "flex flex-row flex-wrap items-center justify-between gap-3 space-y-0",
             compact && "px-0 pt-0",
           )}
         >
-          <div>
-            <CardTitle>{compact ? "Simulación por categoría" : "Categorías"}</CardTitle>
+          <div className="min-w-0 flex-1">
+            <CardTitle>{compact ? "Simulación del torneo" : "Categorías"}</CardTitle>
             <CardDescription>
               {compact
-                ? "Estimá partidos y tiempos con N confirmadas. Las inscripciones reales se ven en Inscripciones."
-                : "Cada categoría compite con parejas y fixture propios. Activá Simulación para estimar partidos y tiempos con N confirmadas."}
+                ? "Estimá partidos y tiempos con N confirmadas por categoría."
+                : "Cada categoría compite con parejas y fixture propios. Activá Simulación para estimar el torneo completo con N confirmadas por categoría."}
             </CardDescription>
           </div>
-          {!readOnly && (
-            <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="size-4" />
-              Agregar categoría
-            </Button>
-          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {categories.length > 0 && (
+              <label className="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
+                <Checkbox
+                  checked={simulationEnabled}
+                  disabled={readOnly}
+                  onCheckedChange={(v) => setSimulationEnabled(v === true)}
+                  aria-label="Simulación integral del torneo"
+                />
+                <span>Simulación</span>
+              </label>
+            )}
+            {simulationEnabled && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={exportSimulation}
+                disabled={simulationRows.length === 0}
+              >
+                <FileDown className="size-4" />
+                PDF
+              </Button>
+            )}
+            {!readOnly && (
+              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+                <Plus className="size-4" />
+                Agregar categoría
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className={compact ? "px-0" : undefined}>
           {categories.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Sin categorías todavía. Creá al menos una para configurar el torneo
-              e inscribir parejas.
+              Sin categorías todavía. Agregá al menos una del catálogo del club
+              para configurar el torneo e inscribir parejas.
             </p>
           ) : (
-            <div className="flex flex-col gap-2">
-              {(() => {
-                const rawSims = categories.map((category) => {
-                  const sim = simulationState(category);
-                  const categoryConfig = config?.categories.find(
-                    (c) => c.categoryId === category.id,
-                  );
-                  const simulatedCount = Number.parseInt(sim.confirmed, 10);
-                  const raw =
-                    sim.enabled &&
-                    categoryConfig &&
-                    config &&
-                    Number.isFinite(simulatedCount) &&
-                    simulatedCount >= 0
-                      ? simulateCategorySchedule(
-                          simulatedCount,
-                          categoryConfig,
-                          config.playDays,
-                          courtCount,
-                        )
-                      : null;
-                  return { category, sim, categoryConfig, raw };
-                });
-
-                const sharedZonesDates = [
-                  ...new Set(
-                    rawSims.flatMap((row) =>
-                      row.raw && row.categoryConfig
-                        ? row.categoryConfig.phases.zones.playDates
-                        : [],
-                    ),
-                  ),
-                ];
-                const sharedZonesAvailable =
-                  config && sharedZonesDates.length > 0
-                    ? availableCourtMinutes(
-                        playDaysForDates(config.playDays, sharedZonesDates),
-                        courtCount,
-                      )
-                    : 0;
-
-                const totalZonesNeeded = rawSims.reduce((sum, row) => {
-                  const zones = row.raw?.phases.find((p) => p.key === "zones");
-                  return sum + (zones?.minutesNeeded ?? 0);
-                }, 0);
-                const totalZonesMatches = rawSims.reduce(
-                  (sum, row) => sum + (row.raw?.zoneMatches ?? 0),
-                  0,
-                );
-
-                const simRows = rawSims.filter(
-                  (row): row is typeof row & {
-                    raw: CategoryScheduleSimulation;
-                    categoryConfig: CategoryPhaseConfig;
-                  } => Boolean(row.raw && row.categoryConfig),
-                );
-
-                const sharedResults =
-                  simRows.length > 1 && config
-                    ? applySharedCourtCapacity(
-                        simRows.map((row) => ({
-                          result: row.raw,
-                          zonesPlayDates:
-                            row.categoryConfig.phases.zones.playDates,
-                          knockoutPlayDates:
-                            row.categoryConfig.phases.knockout.playDates,
-                          finalPlayDates:
-                            row.categoryConfig.phases.final.playDates,
-                        })),
-                        config.playDays,
-                        courtCount,
-                      )
-                    : null;
-
-                const resultByCategoryId = new Map(
-                  simRows.map((row, index) => [
-                    row.category.id,
-                    sharedResults?.[index] ?? row.raw,
-                  ]),
-                );
-
-                const categoryLoads: SimulationCategoryLoad[] = simRows.map(
-                  (row) => ({
-                    categoryId: row.category.id,
-                    zonesPlayDates:
-                      row.categoryConfig.phases.zones.playDates,
-                    knockoutPlayDates:
-                      row.categoryConfig.phases.knockout.playDates,
-                    finalPlayDates:
-                      row.categoryConfig.phases.final.playDates,
-                    zoneMatches: row.raw.zoneMatches,
-                    intermediateMatches: row.raw.intermediateMatches,
-                    finalMatches: row.raw.finalMatches,
-                  }),
-                );
-
-                return (
-                  <>
-                    {simRows.length > 1 && (
-                      <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm">
-                        <p className="font-medium">
-                          Capacidad compartida ({courtCount} cancha
-                          {courtCount === 1 ? "" : "s"} · mismas para todas las
-                          categorías)
-                        </p>
-                        <p className="text-muted-foreground">
-                          Zonas: {totalZonesMatches} partidos · necesario{" "}
-                          {formatSimulationDuration(totalZonesNeeded)} ·
-                          disponible en días de zonas{" "}
-                          {formatSimulationDuration(sharedZonesAvailable)}
-                          {totalZonesNeeded > sharedZonesAvailable
-                            ? " · no alcanza entre todas"
-                            : " · alcanza entre todas"}
-                          . A la misma hora solo hay {courtCount} partido
-                          {courtCount === 1 ? "" : "s"} en paralelo. En la
-                          regla los partidos se intercalan entre categorías.
-                        </p>
-                      </div>
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
+                {rows.map(({ category, sim, color, result }) => (
+                  <div
+                    key={category.id}
+                    className={cn(
+                      "rounded-lg border p-3",
+                      simulationEnabled &&
+                        "border-amber-300/80 bg-amber-50/30 dark:bg-amber-950/10",
                     )}
+                  >
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span
+                        className="size-3 shrink-0 rounded-full"
+                        style={{ backgroundColor: color }}
+                      />
+                      <p className="min-w-0 truncate font-medium">
+                        {category.name}
+                      </p>
+                      {category.abbreviation ? (
+                        <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
+                          {category.abbreviation}
+                        </span>
+                      ) : null}
+                      {!readOnly && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeCategory(category)}
+                          title="Quitar del torneo"
+                          aria-label={`Quitar ${category.name} del torneo`}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      )}
+                    </div>
 
-                    {rawSims.map(({ category, sim, categoryConfig, raw }) => {
-                        const result =
-                          resultByCategoryId.get(category.id) ?? raw;
+                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-6">
+                      {showInscriptionStats ? (
+                        <>
+                          <CategoryStat
+                            label="Inscriptos"
+                            value={category.pairCount}
+                          />
+                          <CategoryStat
+                            label="Confirmadas"
+                            value={category.confirmedCount}
+                            editable={simulationEnabled && !readOnly}
+                            editValue={sim.confirmed}
+                            onEditChange={(value) =>
+                              setConfirmed(category, value)
+                            }
+                          />
+                          <CategoryStat
+                            label="Sin compañero"
+                            value={category.withoutPartnerCount}
+                          />
+                          <CategoryStat
+                            label="Sin zona"
+                            value={category.withoutZoneCount}
+                          />
+                        </>
+                      ) : (
+                        <CategoryStat
+                          label="Confirmadas (simulación)"
+                          value={category.confirmedCount}
+                          editable={simulationEnabled && !readOnly}
+                          editValue={sim.confirmed}
+                          onEditChange={(value) => setConfirmed(category, value)}
+                        />
+                      )}
+                      {simulationEnabled && result ? (
+                        <CategorySimulationStats result={result} />
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
 
-                        return (
-                          <div
-                            key={category.id}
-                            className={cn(
-                              "rounded-lg border p-3",
-                              sim.enabled &&
-                                "border-amber-300/80 bg-amber-50/30 dark:bg-amber-950/10",
-                            )}
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                                {editingId === category.id ? (
-                                  <>
-                                    <Input
-                                      value={editingName}
-                                      onChange={(e) =>
-                                        setEditingName(e.target.value)
-                                      }
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter") {
-                                          e.preventDefault();
-                                          saveRename(category);
-                                        }
-                                        if (e.key === "Escape") {
-                                          e.preventDefault();
-                                          cancelRename();
-                                        }
-                                      }}
-                                      className="h-8 max-w-xs"
-                                      autoFocus
-                                      aria-label={`Nombre de ${category.name}`}
-                                    />
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      className="size-7 shrink-0"
-                                      onClick={() => saveRename(category)}
-                                      title="Guardar nombre"
-                                    >
-                                      <Check className="size-3.5" />
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      className="size-7 shrink-0"
-                                      onClick={cancelRename}
-                                      title="Cancelar"
-                                    >
-                                      <X className="size-3.5" />
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <p className="min-w-0 truncate font-medium">
-                                      {category.name}
-                                    </p>
-                                    {!readOnly && (
-                                      <div className="flex shrink-0 items-center">
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="icon"
-                                          className="size-7"
-                                          onClick={() => startRename(category)}
-                                          title="Editar nombre"
-                                          aria-label={`Editar nombre de ${category.name}`}
-                                        >
-                                          <Pencil className="size-3.5" />
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="icon"
-                                          className="size-7 text-muted-foreground hover:text-destructive"
-                                          onClick={() =>
-                                            removeCategory(category)
-                                          }
-                                          title="Eliminar categoría"
-                                          aria-label={`Eliminar ${category.name}`}
-                                        >
-                                          <Trash2 className="size-3.5" />
-                                        </Button>
-                                      </div>
-                                    )}
-                                  </>
-                                )}
-                              </div>
-                              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                                <Checkbox
-                                  checked={sim.enabled}
-                                  disabled={readOnly}
-                                  onCheckedChange={(v) =>
-                                    setEnabled(category, v === true)
-                                  }
-                                  aria-label={`Simulación ${category.name}`}
-                                />
-                                <span>Simulación</span>
-                              </label>
-                            </div>
-
-                            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                              {showInscriptionStats ? (
-                                <>
-                                  <CategoryStat
-                                    label="Inscriptos"
-                                    value={category.pairCount}
-                                  />
-                                  <CategoryStat
-                                    label="Confirmadas"
-                                    value={category.confirmedCount}
-                                    editable={sim.enabled && !readOnly}
-                                    editValue={sim.confirmed}
-                                    onEditChange={(value) =>
-                                      setConfirmed(category, value)
-                                    }
-                                  />
-                                  <CategoryStat
-                                    label="Sin compañero"
-                                    value={category.withoutPartnerCount}
-                                  />
-                                  <CategoryStat
-                                    label="Sin zona"
-                                    value={category.withoutZoneCount}
-                                  />
-                                </>
-                              ) : (
-                                <CategoryStat
-                                  label="Confirmadas (simulación)"
-                                  value={category.confirmedCount}
-                                  editable={sim.enabled && !readOnly}
-                                  editValue={sim.confirmed}
-                                  onEditChange={(value) =>
-                                    setConfirmed(category, value)
-                                  }
-                                />
-                              )}
-                            </div>
-
-                            {sim.enabled && (
-                              <SimulationResult
-                                hasConfig={Boolean(
-                                  categoryConfig && config?.playDays.length,
-                                )}
-                                result={result}
-                                categoryConfig={categoryConfig ?? null}
-                                playDays={config?.playDays ?? []}
-                                courtCount={courtCount}
-                                categoryLoads={categoryLoads}
-                                currentCategoryId={category.id}
-                                sharedCourtsNote={simRows.length > 1}
-                              />
-                            )}
-                          </div>
-                        );
-                      },
-                    )}
-                  </>
-                );
-              })()}
+              {simulationEnabled && (
+                <IntegralSimulation
+                  rows={simulationRows}
+                  playDays={playDays}
+                  courtCount={courtCount}
+                  unconfiguredNames={unconfiguredNames}
+                  slotMinutes={slotMinutes}
+                  readOnly={readOnly}
+                  onAdjustPlayDay={adjustPlayDay}
+                  onSetPlayDayStartMinutes={setStartMinutes}
+                  canAdjustPlayDay={(playDate, edge, delta) =>
+                    canShiftPlayDayVisibleWindow(
+                      playDays.find((day) => day.date === playDate),
+                      slotMinutesForDate(playDate),
+                      edge,
+                      delta,
+                    )
+                  }
+                />
+              )}
             </div>
           )}
         </CardContent>
@@ -574,7 +630,8 @@ export function TournamentCategoriesPanel({
       <AddCategoryDialog
         clubSlug={clubSlug}
         tournamentId={tournamentId}
-        levels={levels}
+        catalogCategories={catalogCategories}
+        tournamentCategories={categories}
         open={addOpen}
         onOpenChange={setAddOpen}
         onAdded={() => router.refresh()}
@@ -611,98 +668,145 @@ function CategoryStat({
           aria-label={`${label} (simulación)`}
         />
       ) : (
-        <p className="text-lg font-semibold leading-none tabular-nums">{value}</p>
+        <p className="mt-1 text-lg font-semibold leading-none tabular-nums">
+          {value}
+        </p>
       )}
     </div>
   );
 }
 
-function SimulationResult({
-  hasConfig,
+function CategorySimulationStats({
   result,
-  categoryConfig,
+}: {
+  result: CategoryScheduleSimulation;
+}) {
+  const breakdown = breakdownCategorySimulation(result);
+  return (
+    <>
+      <CategoryStat label="Partidos totales" value={breakdown.totalMatches} />
+      <CategoryStat label="Zonas de 3" value={breakdown.zonesOf3} />
+      <CategoryStat label="Zonas de 4" value={breakdown.zonesOf4} />
+      {breakdown.zonesOf2 > 0 ? (
+        <CategoryStat label="Zonas de 2" value={breakdown.zonesOf2} />
+      ) : null}
+      <CategoryStat label="Partidos zona" value={breakdown.zoneMatches} />
+      {breakdown.knockoutRounds.map((round) => (
+        <CategoryStat
+          key={round.key}
+          label={round.label}
+          value={round.matches}
+        />
+      ))}
+    </>
+  );
+}
+
+/// Simulación integral: un solo conjunto de días y canchas para todas las
+/// categorías, con los partidos intercalados entre ellas.
+function IntegralSimulation({
+  rows,
   playDays,
   courtCount,
-  categoryLoads = [],
-  currentCategoryId,
-  sharedCourtsNote = false,
+  unconfiguredNames,
+  slotMinutes: sharedSlotMinutes,
+  readOnly = false,
+  onAdjustPlayDay,
+  onSetPlayDayStartMinutes,
+  canAdjustPlayDay,
 }: {
-  hasConfig: boolean;
-  result: CategoryScheduleSimulation | null;
-  categoryConfig: CategoryPhaseConfig | null;
+  rows: SimulationRow[];
   playDays: PlayDayValues[];
   courtCount: number;
-  categoryLoads?: SimulationCategoryLoad[];
-  currentCategoryId: string;
-  sharedCourtsNote?: boolean;
+  unconfiguredNames: string[];
+  slotMinutes?: number;
+  readOnly?: boolean;
+  onAdjustPlayDay?: (
+    playDate: string,
+    edge: PlayDayWindowEdge,
+    delta: PlayDayWindowDelta,
+  ) => void;
+  onSetPlayDayStartMinutes?: (
+    playDate: string,
+    minutes: PlayDayStartMinutes,
+  ) => void;
+  canAdjustPlayDay?: (
+    playDate: string,
+    edge: PlayDayWindowEdge,
+    delta: PlayDayWindowDelta,
+  ) => boolean;
 }) {
-  const [view, setView] = useState<"lista" | "regla">("lista");
+  const [view, setView] = useState<"lista" | "regla">("regla");
 
-  if (!hasConfig) {
+  if (playDays.length === 0) {
     return (
-      <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">
+      <p className="text-sm text-amber-700 dark:text-amber-400">
         Configurá días, horarios y formatos del torneo para poder simular.
       </p>
     );
   }
 
-  if (!result) {
+  if (rows.length === 0) {
     return (
-      <p className="mt-3 text-sm text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Ingresá una cantidad de parejas confirmadas para simular.
       </p>
     );
   }
 
-  const zonesSlotMinutes =
-    (categoryConfig?.phases.zones.matchDurationMin ?? 75) +
-    (categoryConfig?.intervalMin ?? 0);
+  const slotMinutes =
+    sharedSlotMinutes ??
+    Math.max(
+      ...rows.map((row) => phaseSlotMinutes(row.categoryConfig, "zones")),
+    );
 
-  const loadsForGrid =
-    categoryLoads.length > 0
-      ? categoryLoads
-      : categoryConfig
-        ? [
-            {
-              categoryId: currentCategoryId,
-              zonesPlayDates: categoryConfig.phases.zones.playDates,
-              knockoutPlayDates: categoryConfig.phases.knockout.playDates,
-              finalPlayDates: categoryConfig.phases.final.playDates,
-              zoneMatches: result.zoneMatches,
-              intermediateMatches: result.intermediateMatches,
-              finalMatches: result.finalMatches,
-            },
-          ]
-        : [];
+  const categoryLoads: SimulationCategoryLoad[] = rows.map((row) => ({
+    categoryId: row.category.id,
+    zonesPlayDates: row.categoryConfig.phases.zones.playDates,
+    knockoutPlayDates: row.categoryConfig.phases.knockout.playDates,
+    finalPlayDates: row.categoryConfig.phases.final.playDates,
+    zoneMatches: row.result.zoneMatches,
+    intermediateMatches: row.result.intermediateMatches,
+    finalMatches: row.result.finalMatches,
+    zonesSlotMinutes: phaseSlotMinutes(row.categoryConfig, "zones"),
+    knockoutSlotMinutes: phaseSlotMinutes(row.categoryConfig, "knockout"),
+    finalSlotMinutes: phaseSlotMinutes(row.categoryConfig, "final"),
+  }));
 
-  const ruleGrid = categoryConfig
-    ? buildSimulationRuleGrid({
-        playDays,
-        courtCount,
-        zonesSlotMinutes,
-        categoryLoads: loadsForGrid,
-        currentCategoryId,
-      })
-    : [];
+  const ruleGrid = buildSimulationRuleGrid({
+    playDays,
+    courtCount,
+    zonesSlotMinutes: slotMinutes,
+    categoryLoads,
+  });
 
-  const displayResult =
-    categoryConfig && ruleGrid.length > 0
-      ? applyPackedSlotsToSimulation(
-          result,
-          ruleGrid,
-          {
-            zones: categoryConfig.phases.zones.playDates,
-            knockout: categoryConfig.phases.knockout.playDates,
-            final: categoryConfig.phases.final.playDates,
-          },
-          zonesSlotMinutes,
-        )
-      : result;
+  const summary = summarizeIntegralSimulation(
+    ruleGrid,
+    rows.map((row) => ({
+      categoryId: row.category.id,
+      result: row.result,
+      zonesPlayDates: row.categoryConfig.phases.zones.playDates,
+      knockoutPlayDates: row.categoryConfig.phases.knockout.playDates,
+      finalPlayDates: row.categoryConfig.phases.final.playDates,
+    })),
+    slotMinutes,
+  );
+
+  const gridCategories: SlotRuleGridCategory[] = rows.map((row) => ({
+    id: row.category.id,
+    name: row.category.name,
+    abbreviation: row.category.abbreviation,
+    color: row.color,
+  }));
+
+  const packedByCategory = new Map(
+    summary.categories.map((c) => [c.categoryId, c]),
+  );
 
   return (
-    <div className="mt-3 space-y-3 rounded-md border border-dashed bg-background/80 p-3 text-sm">
+    <div className="space-y-3 rounded-md border border-dashed bg-background/80 p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-medium">Resultado de la simulación</p>
+        <p className="font-medium">Simulación integral</p>
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex rounded-md border p-0.5 text-xs">
             <button
@@ -729,38 +833,43 @@ function SimulationResult({
           <span
             className={cn(
               "rounded-full px-2 py-0.5 text-xs font-medium",
-              displayResult.fits
+              summary.fits
                 ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                 : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300",
             )}
           >
-            {displayResult.fits ? "El tiempo alcanza" : "No alcanza el tiempo"}
+            {summary.fits ? "El tiempo alcanza" : "No alcanza el tiempo"}
           </span>
         </div>
       </div>
 
       <p className="text-muted-foreground">
-        {displayResult.zoneCount} zonas
-        {displayResult.zoneSizes.length > 0
-          ? ` (${displayResult.zoneSizes.join(" + ")})`
-          : ""}
+        {rows.length} categoría{rows.length === 1 ? "" : "s"}
         {" · "}
-        objetivo {categoryConfig?.pairsPerZone ?? 3}/zona
+        {summary.matchCount} partidos · {courtCount} cancha
+        {courtCount === 1 ? "" : "s"} · {playDays.length} día
+        {playDays.length === 1 ? "" : "s"} de juego · el tamaño del slot sigue la fase de cada día
         {" · "}
-        zonas de 4: pasan {categoryConfig?.zone4Advancers === 2 ? 2 : 3}
-        {" · "}
-        {displayResult.advancers} avanzan a llave
-        {displayResult.bracketSize > 0
-          ? ` (cuadro de ${displayResult.bracketSize})`
-          : ""}
-        {" · "}
-        {displayResult.courtCount} cancha
-        {displayResult.courtCount === 1 ? "" : "s"} ·{" "}
-        {playDays.length} día{playDays.length === 1 ? "" : "s"} de juego
+        {summary.usedCells}/{summary.totalCells} slots ocupados
       </p>
 
+      {unconfiguredNames.length > 0 && (
+        <p className="text-amber-700 dark:text-amber-400">
+          Sin configuración (no entran en la simulación):{" "}
+          {unconfiguredNames.join(", ")}.
+        </p>
+      )}
+
       {view === "regla" ? (
-        <SlotRuleGrid mode="simulation" rules={ruleGrid} />
+        <SlotRuleGrid
+          mode="simulation"
+          rules={ruleGrid}
+          categories={gridCategories}
+          onAdjustPlayDay={onAdjustPlayDay}
+          onSetPlayDayStartMinutes={onSetPlayDayStartMinutes}
+          canAdjustPlayDay={canAdjustPlayDay}
+          adjustDisabled={readOnly}
+        />
       ) : (
         <>
           <div className="overflow-x-auto">
@@ -776,13 +885,17 @@ function SimulationResult({
                 </tr>
               </thead>
               <tbody>
-                {displayResult.phases.map((phase) => (
+                {summary.phases.map((phase) => (
                   <tr
                     key={phase.key}
                     className="border-b border-dashed last:border-0"
                   >
                     <td className="py-2 pr-3 font-medium">{phase.label}</td>
-                    <td className="py-2 pr-3 tabular-nums">{phase.matchCount}</td>
+                    <td className="py-2 pr-3 tabular-nums">
+                      {phase.packedCount < phase.matchCount
+                        ? `${phase.packedCount}/${phase.matchCount}`
+                        : phase.matchCount}
+                    </td>
                     <td className="py-2 pr-3 tabular-nums">
                       {phase.missingPlayDates ? (
                         <span className="text-amber-700 dark:text-amber-400">
@@ -820,24 +933,86 @@ function SimulationResult({
             </table>
           </div>
 
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[28rem] border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b text-[11px] text-muted-foreground">
+                  <th className="py-1.5 pr-3 font-medium">Categoría</th>
+                  <th className="py-1.5 pr-3 font-medium">Confirmadas</th>
+                  <th className="py-1.5 pr-3 font-medium">Zonas</th>
+                  <th className="py-1.5 pr-3 font-medium">Avanzan</th>
+                  <th className="py-1.5 font-medium">Partidos</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const packed = packedByCategory.get(row.category.id);
+                  const missing =
+                    packed != null && packed.packedCount < packed.matchCount;
+                  return (
+                    <tr
+                      key={row.category.id}
+                      className="border-b border-dashed last:border-0"
+                    >
+                      <td className="py-2 pr-3">
+                        <span className="flex items-center gap-1.5">
+                          <span
+                            className="size-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: row.color }}
+                          />
+                          <span className="font-medium">
+                            {row.category.name}
+                          </span>
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3 tabular-nums">
+                        {row.result.confirmedPairs}
+                      </td>
+                      <td className="py-2 pr-3 tabular-nums">
+                        {row.result.zoneCount}
+                        {row.result.zoneSizes.length > 0
+                          ? ` (${row.result.zoneSizes.join(" + ")})`
+                          : ""}
+                      </td>
+                      <td className="py-2 pr-3 tabular-nums">
+                        {row.result.advancers}
+                        {row.result.bracketSize > 0
+                          ? ` · cuadro de ${row.result.bracketSize}`
+                          : ""}
+                      </td>
+                      <td
+                        className={cn(
+                          "py-2 tabular-nums",
+                          missing && "text-rose-700 dark:text-rose-400",
+                        )}
+                      >
+                        {missing
+                          ? `${packed?.packedCount}/${packed?.matchCount}`
+                          : row.result.totalMatches}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
           <div className="grid gap-2 sm:grid-cols-3">
             <MiniStat
               label="Total necesario"
-              value={formatSimulationDuration(displayResult.minutesNeeded)}
+              value={formatSimulationDuration(summary.minutesNeeded)}
             />
             <MiniStat
               label="Total disponible"
-              value={formatSimulationDuration(displayResult.minutesAvailable)}
+              value={formatSimulationDuration(summary.minutesAvailable)}
             />
             <MiniStat
               label={
-                displayResult.surplusMinutes >= 0
+                summary.surplusMinutes >= 0
                   ? "Sobra (según regla)"
                   : "Falta (según regla)"
               }
-              value={formatSimulationDuration(
-                Math.abs(displayResult.surplusMinutes),
-              )}
+              value={formatSimulationDuration(Math.abs(summary.surplusMinutes))}
             />
           </div>
         </>
@@ -845,10 +1020,8 @@ function SimulationResult({
 
       <p className="text-xs text-muted-foreground">
         {view === "regla"
-          ? sharedCourtsNote
-            ? `Modo regla: zonas → intermedia → final (sin solapar en el tiempo). Canchas en paralelo e intercalado entre categorías. ${courtCount} cancha${courtCount === 1 ? "" : "s"} → ${courtCount} partido${courtCount === 1 ? "" : "s"} a la misma hora.`
-            : "Modo regla: primero zonas (todas las canchas en paralelo); intermedia y final recién después del último partido de la fase anterior."
-          : "Disponible y balance salen de la misma grilla de slots que el modo Regla (celdas libres tras empaquetar)."}
+          ? `Un solo conjunto de días con ${courtCount} regla${courtCount === 1 ? "" : "s"} por día (una por cancha). Los + / − alargan o recortan el mismo rango que en Parámetros. Clic derecho en el primer slot para elegir minutos de arranque (0 / 15 / 30 / 45). Los partidos se intercalan entre categorías: zonas → intermedia → final. El punto de color indica qué categoría ocupa cada slot.`
+          : "Disponible y balance salen de la misma grilla de slots que el modo Regla (celdas libres tras empaquetar todas las categorías)."}
       </p>
     </div>
   );

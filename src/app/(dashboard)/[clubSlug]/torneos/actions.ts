@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 
 import { requireClubModuleAccess } from "@/lib/auth/access";
 import { createTournament } from "@/modules/tournaments/application/create-tournament";
+import { cloneTournament } from "@/modules/tournaments/application/clone-tournament";
+import { deleteTournament } from "@/modules/tournaments/application/delete-tournament";
 import { updateTournament } from "@/modules/tournaments/application/update-tournament";
 import {
   createTournamentSchema,
@@ -85,6 +87,39 @@ export async function updateTournamentAction(
     tournamentId,
     parsed.data,
   );
+  if (result.ok) revalidate(clubSlug, tournamentId);
+  return result.ok
+    ? { ok: true }
+    : { ok: false, error: result.error ?? "Error" };
+}
+
+export async function cloneTournamentAction(
+  clubSlug: string,
+  tournamentId: string,
+  includePairs: boolean,
+): Promise<Result> {
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+
+  const result = await cloneTournament(
+    repo,
+    clubId,
+    tournamentId,
+    includePairs,
+  );
+  if (!result.ok) return { ok: false, error: result.error };
+  revalidate(clubSlug, result.id);
+  return { ok: true, id: result.id };
+}
+
+export async function deleteTournamentAction(
+  clubSlug: string,
+  tournamentId: string,
+): Promise<UpdateResult> {
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+
+  const result = await deleteTournament(repo, clubId, tournamentId);
   if (result.ok) revalidate(clubSlug, tournamentId);
   return result.ok
     ? { ok: true }

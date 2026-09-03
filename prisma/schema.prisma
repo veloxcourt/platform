@@ -476,10 +476,13 @@ model Tournament {
 
 /// Categor?a competitiva dentro del torneo (ej. Femenina 5ta, Masculina 4ta).
 /// Cada una tiene formato por fase propio; parejas y fixture son por categor?a.
+/// El nombre/color/abreviaci?n salen del cat?logo del club (`CalendarPlannerCategory`).
 model TournamentCategory {
   id           String   @id @default(cuid())
   tournamentId String
   name         String
+  /// Categor?a del cat?logo del club. Null en filas antiguas o si se borr? el cat?logo.
+  catalogCategoryId String?
   sortOrder    Int      @default(0)
   /// Modo simulaci?n de fixture/tiempos (persistente por categor?a).
   simulationEnabled         Boolean @default(false)
@@ -488,12 +491,15 @@ model TournamentCategory {
   updatedAt    DateTime @updatedAt
 
   tournament       Tournament                  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  catalogCategory  CalendarPlannerCategory?    @relation(fields: [catalogCategoryId], references: [id], onDelete: SetNull)
   settings         TournamentSettings?
   pairs            TournamentPair[]
   slotReservations TournamentSlotReservation[]
 
   @@unique([tournamentId, name])
+  @@unique([tournamentId, catalogCategoryId])
   @@index([tournamentId])
+  @@index([catalogCategoryId])
   @@map("tournament_categories")
 }
 
@@ -536,6 +542,12 @@ model TournamentPlayDay {
   date         DateTime @db.Date
   startTime    String   // HH:mm, inicio del bloque habilitado
   endTime      String   // HH:mm; puede ser del d?a siguiente (ej. 18:00?02:00)
+  /// Slots extra despues de las 0 hs (boton + de la regla).
+  overnightExtraSlots Int @default(0)
+  /// Indices de la regla marcados para jugar. Ignorado si hasSlotSelection = false.
+  enabledSlotIndexes  Int[] @default([])
+  /// true = la regla de slots es la fuente; false = ventana startTime/endTime (legado).
+  hasSlotSelection    Boolean @default(false)
 
   tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
 
@@ -712,6 +724,7 @@ model CalendarPlannerCategory {
 
   club        Club                               @relation(fields: [clubId], references: [id], onDelete: Cascade)
   tournaments CalendarPlannedTournamentCategory[]
+  tournamentCategories TournamentCategory[]
 
   @@unique([clubId, abbreviation])
   @@index([clubId])

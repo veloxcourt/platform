@@ -15,16 +15,20 @@ import type {
   RenameCategoryValues,
 } from "../domain/category-schema";
 import type { UpdateCategorySimulationValues } from "../domain/category-simulation-schema";
-import { buildCategoryName } from "../domain/category-schema";
-import type { TournamentConfigValues } from "../domain/config-schema";
+import type { TournamentConfigValues, PlayDayValues } from "../domain/config-schema";
 import type {
   TogglePairSlotValues,
   ReplacePairSlotPreferencesValues,
 } from "../domain/slot-reservation-schema";
-import { defaultPhaseConfigs, defaultPlayDays } from "../domain/config-defaults";
-import type {
-  CreateTournamentValues,
-  UpdateTournamentValues,
+import { defaultPhaseConfigs, syncPlayDaysToRange } from "../domain/config-defaults";
+import {
+  playDayPersistFields,
+  toPlayDayValues,
+} from "../domain/play-day-slots";
+import {
+  buildCloneTournamentName,
+  type CreateTournamentValues,
+  type UpdateTournamentValues,
 } from "../domain/tournament-schema";
 import { buildTournamentPublicSlug } from "../domain/slug";
 import type {
@@ -39,6 +43,8 @@ import type {
   TournamentStatus,
   ZonasTournamentDetail,
 } from "../domain/types";
+import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
+import type { CalendarCategoryValues } from "@/modules/herramientas/domain/calendario-schema";
 import type { FinalPhaseStartRound, MatchFormat } from "../domain/config-schema";
 import type { TournamentType } from "../domain/tournament-types";
 import { normalizeCategoryLabel } from "../domain/category-level";
@@ -46,6 +52,7 @@ import { parseZonesDayPreference } from "../domain/zones-day-preference";
 import type { ZonesDayPreference } from "../domain/zones-day-preference";
 import {
   buildZonesFixture,
+  reservedSlotsFromOtherFixtures,
   type FixturePairInput,
 } from "../domain/build-zones-fixture";
 import {
@@ -67,6 +74,24 @@ function toDbDate(dateISO: string): Date {
 
 function fromDbDate(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+function mapStoredPlayDay(day: {
+  date: Date;
+  startTime: string;
+  endTime: string;
+  overnightExtraSlots?: number | null;
+  enabledSlotIndexes?: number[] | null;
+  hasSlotSelection?: boolean | null;
+}): PlayDayValues {
+  return toPlayDayValues({
+    date: fromDbDate(day.date),
+    startTime: day.startTime,
+    endTime: day.endTime,
+    overnightExtraSlots: day.overnightExtraSlots,
+    enabledSlotIndexes: day.enabledSlotIndexes,
+    hasSlotSelection: day.hasSlotSelection,
+  });
 }
 
 function mapPair(row: {
@@ -114,8 +139,15 @@ function mapCategory(
   row: {
     id: string;
     name: string;
+    catalogCategoryId?: string | null;
     simulationEnabled?: boolean;
     simulationConfirmedCount?: number | null;
+    catalogCategory?: {
+      id: string;
+      name: string;
+      abbreviation: string;
+      color: string;
+    } | null;
     pairs: {
       status: string;
       player2Id?: string | null;
@@ -124,9 +156,13 @@ function mapCategory(
   },
 ): TournamentCategoryItem {
   const activePairs = row.pairs.filter((p) => p.status !== "CANCELLED");
+  const catalog = row.catalogCategory ?? null;
   return {
     id: row.id,
-    name: normalizeCategoryLabel(row.name),
+    name: catalog?.name ?? normalizeCategoryLabel(row.name),
+    catalogCategoryId: catalog?.id ?? row.catalogCategoryId ?? null,
+    abbreviation: catalog?.abbreviation ?? null,
+    color: catalog?.color ?? null,
     pairCount: activePairs.length,
     confirmedCount: activePairs.filter((p) => p.status === "CONFIRMED").length,
     withoutPartnerCount: activePairs.filter((p) => !p.player2Id).length,
@@ -135,6 +171,16 @@ function mapCategory(
     simulationConfirmedCount: row.simulationConfirmedCount ?? null,
   };
 }
+
+const CATEGORY_INCLUDE = {
+  catalogCategory: {
+    select: { id: true, name: true, abbreviation: true, color: true },
+  },
+  pairs: {
+    where: { status: { not: "CANCELLED" as const } },
+    select: { status: true, player2Id: true, zoneLabel: true },
+  },
+} as const;
 
 function mapTournament(row: {
   id: string;
@@ -356,12 +402,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
       include: {
         categories: {
           orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-          include: {
-            pairs: {
-              where: { status: { not: "CANCELLED" } },
-              select: { status: true, player2Id: true, zoneLabel: true },
-            },
-          },
+          include: CATEGORY_INCLUDE,
         },
         pairs: {
           where: { status: { not: "CANCELLED" } },
@@ -405,15 +446,66 @@ export class PrismaTournamentRepository implements TournamentRepository {
     const rows = await prisma.tournamentCategory.findMany({
       where: { tournamentId },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      include: {
-        pairs: {
-          where: { status: { not: "CANCELLED" } },
-          select: { status: true, player2Id: true, zoneLabel: true },
-        },
-      },
+      include: CATEGORY_INCLUDE,
     });
 
     return rows.map(mapCategory);
+  }
+
+  async listCatalogCategories(clubId: string): Promise<CatalogCategory[]> {
+    const rows = await prisma.calendarPlannerCategory.findMany({
+      where: { clubId },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      abbreviation: row.abbreviation,
+      color: row.color,
+    }));
+  }
+
+  async createCatalogCategory(
+    clubId: string,
+    input: CalendarCategoryValues,
+  ): Promise<CatalogCategory | { error: string }> {
+    const clash = await prisma.calendarPlannerCategory.findFirst({
+      where: {
+        clubId,
+        abbreviation: { equals: input.abbreviation, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    if (clash) return { error: "Ya existe una categoría con esa abreviación" };
+
+    const nameClash = await prisma.calendarPlannerCategory.findFirst({
+      where: {
+        clubId,
+        name: { equals: input.name, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    if (nameClash) return { error: "Ya existe una categoría con ese nombre" };
+
+    const agg = await prisma.calendarPlannerCategory.aggregate({
+      where: { clubId },
+      _max: { sortOrder: true },
+    });
+    const row = await prisma.calendarPlannerCategory.create({
+      data: {
+        clubId,
+        name: input.name,
+        abbreviation: input.abbreviation,
+        color: input.color,
+        sortOrder: (agg._max.sortOrder ?? -1) + 1,
+      },
+    });
+    return {
+      id: row.id,
+      name: row.name,
+      abbreviation: row.abbreviation,
+      color: row.color,
+    };
   }
 
   async createTournamentCategory(
@@ -423,15 +515,34 @@ export class PrismaTournamentRepository implements TournamentRepository {
   ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
     const tournament = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId, type: "ZONAS" },
-      select: { id: true, startDate: true, endDate: true },
+      select: { id: true },
     });
     if (!tournament) return { ok: false, error: "Torneo no encontrado" };
 
-    const name = buildCategoryName(input.gender, input.level);
-    const existing = await prisma.tournamentCategory.findUnique({
-      where: { tournamentId_name: { tournamentId, name } },
+    const catalog = await prisma.calendarPlannerCategory.findFirst({
+      where: { id: input.catalogCategoryId, clubId },
     });
-    if (existing) {
+    if (!catalog) return { ok: false, error: "Categoría no encontrada" };
+
+    const alreadyLinked = await prisma.tournamentCategory.findFirst({
+      where: { tournamentId, catalogCategoryId: catalog.id },
+      select: { id: true },
+    });
+    if (alreadyLinked) {
+      return { ok: false, error: "Esa categoría ya está en el torneo" };
+    }
+
+    const existingByName = await prisma.tournamentCategory.findUnique({
+      where: { tournamentId_name: { tournamentId, name: catalog.name } },
+    });
+    if (existingByName) {
+      if (!existingByName.catalogCategoryId) {
+        await prisma.tournamentCategory.update({
+          where: { id: existingByName.id },
+          data: { catalogCategoryId: catalog.id, name: catalog.name },
+        });
+        return { ok: true, id: existingByName.id };
+      }
       return { ok: false, error: "Ya existe una categoría con ese nombre" };
     }
 
@@ -444,7 +555,8 @@ export class PrismaTournamentRepository implements TournamentRepository {
     const category = await prisma.tournamentCategory.create({
       data: {
         tournamentId,
-        name,
+        name: catalog.name,
+        catalogCategoryId: catalog.id,
         sortOrder: count,
         settings: {
           create: {
@@ -577,25 +689,246 @@ export class PrismaTournamentRepository implements TournamentRepository {
     return { id: tournament.id };
   }
 
+  async cloneTournament(
+    clubId: string,
+    tournamentId: string,
+    input: { includePairs: boolean },
+  ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+    const source = await prisma.tournament.findFirst({
+      where: { id: tournamentId, clubId },
+      include: {
+        playDays: { orderBy: { date: "asc" } },
+        categories: {
+          orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+          include: { settings: true },
+        },
+        pairs: true,
+        slotReservations: true,
+        registrations: true,
+      },
+    });
+    if (!source) return { ok: false, error: "Torneo no encontrado" };
+
+    const cloneName = buildCloneTournamentName(source.name);
+
+    try {
+      const cloneId = await prisma.$transaction(async (tx) => {
+        const clone = await tx.tournament.create({
+          data: {
+            clubId,
+            type: source.type,
+            name: cloneName,
+            description: source.description,
+            status: "DRAFT",
+            startDate: source.startDate,
+            endDate: source.endDate,
+            fee: source.fee,
+            courtCount: source.courtCount,
+            publicSlug: buildTournamentPublicSlug(cloneName),
+          },
+          select: { id: true },
+        });
+
+        if (source.playDays.length > 0) {
+          await tx.tournamentPlayDay.createMany({
+            data: source.playDays.map((day) => ({
+              tournamentId: clone.id,
+              date: day.date,
+              ...playDayPersistFields(mapStoredPlayDay(day)),
+            })),
+          });
+        }
+
+        const categoryIdMap = new Map<string, string>();
+        for (const category of source.categories) {
+          const created = await tx.tournamentCategory.create({
+            data: {
+              tournamentId: clone.id,
+              name: category.name,
+              catalogCategoryId: category.catalogCategoryId,
+              sortOrder: category.sortOrder,
+              simulationEnabled: category.simulationEnabled,
+              simulationConfirmedCount: category.simulationConfirmedCount,
+              settings: category.settings
+                ? {
+                    create: {
+                      zonesMatchFormat: category.settings.zonesMatchFormat,
+                      zonesMatchDurationMin:
+                        category.settings.zonesMatchDurationMin,
+                      knockoutMatchFormat:
+                        category.settings.knockoutMatchFormat,
+                      knockoutMatchDurationMin:
+                        category.settings.knockoutMatchDurationMin,
+                      finalMatchFormat: category.settings.finalMatchFormat,
+                      finalMatchDurationMin:
+                        category.settings.finalMatchDurationMin,
+                      finalStartsAtRound: category.settings.finalStartsAtRound,
+                      intervalMin: category.settings.intervalMin,
+                      pairsPerZone: category.settings.pairsPerZone,
+                      zone4Advancers: category.settings.zone4Advancers,
+                      zonesPlayDates: category.settings.zonesPlayDates,
+                      knockoutPlayDates: category.settings.knockoutPlayDates,
+                      finalPlayDates: category.settings.finalPlayDates,
+                    },
+                  }
+                : undefined,
+            },
+            select: { id: true },
+          });
+          categoryIdMap.set(category.id, created.id);
+        }
+
+        if (!input.includePairs) return clone.id;
+
+        const pairIdMap = new Map<string, string>();
+        for (const pair of source.pairs) {
+          if (pair.status === "CANCELLED") continue;
+          const categoryId = categoryIdMap.get(pair.categoryId);
+          if (!categoryId) continue;
+          const created = await tx.tournamentPair.create({
+            data: {
+              tournamentId: clone.id,
+              categoryId,
+              player1Id: pair.player1Id,
+              player2Id: pair.player2Id,
+              zoneLabel: pair.zoneLabel,
+              zonesDayPreference: pair.zonesDayPreference,
+              status: pair.status,
+              player1Confirmed: pair.player1Confirmed,
+              player2Confirmed: pair.player2Confirmed,
+              player1PaymentStatus: pair.player1PaymentStatus,
+              player2PaymentStatus: pair.player2PaymentStatus,
+              paymentStatus: pair.paymentStatus,
+              notes: pair.notes,
+            },
+            select: { id: true },
+          });
+          pairIdMap.set(pair.id, created.id);
+        }
+
+        const slotRows = source.slotReservations
+          .map((slot) => {
+            const categoryId = categoryIdMap.get(slot.categoryId);
+            const pairId = pairIdMap.get(slot.pairId);
+            if (!categoryId || !pairId) return null;
+            return {
+              tournamentId: clone.id,
+              categoryId,
+              pairId,
+              playDate: slot.playDate,
+              courtIndex: slot.courtIndex,
+              slotIndex: slot.slotIndex,
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+              phase: slot.phase,
+            };
+          })
+          .filter((row): row is NonNullable<typeof row> => row !== null);
+
+        if (slotRows.length > 0) {
+          await tx.tournamentSlotReservation.createMany({ data: slotRows });
+        }
+
+        if (source.registrations.length > 0) {
+          await tx.tournamentRegistration.createMany({
+            data: source.registrations.map((row) => ({
+              tournamentId: clone.id,
+              userId: row.userId,
+              status: row.status,
+              paymentStatus: row.paymentStatus,
+              category: row.category,
+              availability: row.availability ?? undefined,
+              notes: row.notes,
+            })),
+            skipDuplicates: true,
+          });
+        }
+
+        return clone.id;
+      });
+
+      return { ok: true, id: cloneId };
+    } catch {
+      return { ok: false, error: "No se pudo clonar el torneo" };
+    }
+  }
+
+  async deleteTournament(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<MutationResult> {
+    const existing = await prisma.tournament.findFirst({
+      where: { id: tournamentId, clubId },
+      select: { id: true },
+    });
+    if (!existing) return { ok: false, error: "Torneo no encontrado" };
+
+    await prisma.tournament.delete({ where: { id: tournamentId } });
+    return { ok: true };
+  }
+
   async updateTournament(
     clubId: string,
     tournamentId: string,
     input: UpdateTournamentValues,
   ): Promise<MutationResult> {
-    const updated = await prisma.tournament.updateMany({
+    const existing = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId },
-      data: {
-        name: input.name,
-        description: input.description || null,
-        status: input.status,
-        startDate: toDbDate(input.startDate),
-        endDate: input.endDate ? toDbDate(input.endDate) : null,
-        fee: input.fee,
+      select: {
+        id: true,
+        type: true,
+        playDays: {
+          orderBy: { date: "asc" },
+          select: {
+            date: true,
+            startTime: true,
+            endTime: true,
+            overnightExtraSlots: true,
+            enabledSlotIndexes: true,
+            hasSlotSelection: true,
+          },
+        },
       },
     });
-    return updated.count
-      ? { ok: true }
-      : { ok: false, error: "Torneo no encontrado" };
+    if (!existing) return { ok: false, error: "Torneo no encontrado" };
+
+    const playDays =
+      existing.type === "ZONAS"
+        ? syncPlayDaysToRange(
+            existing.playDays.map((day) => mapStoredPlayDay(day)),
+            input.startDate,
+            input.endDate ?? null,
+          )
+        : null;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.tournament.update({
+        where: { id: tournamentId },
+        data: {
+          name: input.name,
+          description: input.description || null,
+          status: input.status,
+          startDate: toDbDate(input.startDate),
+          endDate: input.endDate ? toDbDate(input.endDate) : null,
+          fee: input.fee,
+        },
+      });
+
+      if (!playDays) return;
+
+      await tx.tournamentPlayDay.deleteMany({ where: { tournamentId } });
+      if (playDays.length > 0) {
+        await tx.tournamentPlayDay.createMany({
+          data: playDays.map((day) => ({
+            tournamentId,
+            date: toDbDate(day.date),
+            ...playDayPersistFields(day),
+          })),
+        });
+      }
+    });
+
+    return { ok: true };
   }
 
   async addPair(
@@ -1289,6 +1622,10 @@ export class PrismaTournamentRepository implements TournamentRepository {
       zonesPlayDates: categoryConfig.phases.zones.playDates,
       courtCount: Math.max(1, config.courtCount || tournament.courtCount || 1),
       slotMinutes: Math.max(1, slotMinutes),
+      reservedSlots: reservedSlotsFromOtherFixtures(
+        config.categories,
+        categoryId,
+      ),
     });
 
     const persisted = toPersistedZonesFixture(result);
@@ -1354,14 +1691,8 @@ export class PrismaTournamentRepository implements TournamentRepository {
       ? fromDbDate(tournament.endDate)
       : null;
 
-    const playDays =
-      tournament.playDays.length > 0
-        ? tournament.playDays.map((d) => ({
-            date: fromDbDate(d.date),
-            startTime: d.startTime,
-            endTime: d.endTime,
-          }))
-        : defaultPlayDays(startDate, endDate);
+    const storedDays = tournament.playDays.map((d) => mapStoredPlayDay(d));
+    const playDays = syncPlayDaysToRange(storedDays, startDate, endDate);
 
     const categoryIds = tournament.categories.map((c) => c.id);
     const fixtureRows =
@@ -1421,7 +1752,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
   ): Promise<MutationResult> {
     const tournament = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId, type: "ZONAS" },
-      select: { id: true },
+      select: { id: true, startDate: true, endDate: true },
     });
     if (!tournament) return { ok: false, error: "Torneo no encontrado" };
 
@@ -1434,6 +1765,12 @@ export class PrismaTournamentRepository implements TournamentRepository {
       return { ok: false, error: "Categoría no encontrada" };
     }
 
+    const playDays = syncPlayDaysToRange(
+      input.playDays,
+      fromDbDate(tournament.startDate),
+      tournament.endDate ? fromDbDate(tournament.endDate) : null,
+    );
+
     await prisma.$transaction([
       prisma.tournament.update({
         where: { id: tournamentId },
@@ -1441,11 +1778,10 @@ export class PrismaTournamentRepository implements TournamentRepository {
       }),
       prisma.tournamentPlayDay.deleteMany({ where: { tournamentId } }),
       prisma.tournamentPlayDay.createMany({
-        data: input.playDays.map((d) => ({
+        data: playDays.map((d) => ({
           tournamentId,
           date: toDbDate(d.date),
-          startTime: d.startTime,
-          endTime: d.endTime,
+          ...playDayPersistFields(d),
         })),
       }),
       ...input.categories.map((category) =>
@@ -1485,6 +1821,76 @@ export class PrismaTournamentRepository implements TournamentRepository {
         }),
       ),
     ]);
+
+    return { ok: true };
+  }
+
+  async copyCategoryPhaseConfig(
+    clubId: string,
+    tournamentId: string,
+    sourceCategoryId: string,
+    targetCategoryId: string,
+  ): Promise<MutationResult> {
+    if (sourceCategoryId === targetCategoryId) {
+      return { ok: false, error: "Elegí otra categoría de origen" };
+    }
+
+    const tournament = await prisma.tournament.findFirst({
+      where: { id: tournamentId, clubId, type: "ZONAS" },
+      select: { id: true },
+    });
+    if (!tournament) return { ok: false, error: "Torneo no encontrado" };
+
+    const [source, target] = await Promise.all([
+      prisma.tournamentCategory.findFirst({
+        where: { id: sourceCategoryId, tournamentId },
+        include: { settings: true },
+      }),
+      prisma.tournamentCategory.findFirst({
+        where: { id: targetCategoryId, tournamentId },
+        include: { settings: true },
+      }),
+    ]);
+    if (!source?.settings) {
+      return { ok: false, error: "La categoría de origen no tiene configuración" };
+    }
+    if (!target) return { ok: false, error: "Categoría destino no encontrada" };
+
+    const s = source.settings;
+    await prisma.tournamentSettings.upsert({
+      where: { categoryId: targetCategoryId },
+      create: {
+        categoryId: targetCategoryId,
+        zonesMatchFormat: s.zonesMatchFormat,
+        zonesMatchDurationMin: s.zonesMatchDurationMin,
+        knockoutMatchFormat: s.knockoutMatchFormat,
+        knockoutMatchDurationMin: s.knockoutMatchDurationMin,
+        finalMatchFormat: s.finalMatchFormat,
+        finalMatchDurationMin: s.finalMatchDurationMin,
+        finalStartsAtRound: s.finalStartsAtRound,
+        intervalMin: s.intervalMin,
+        pairsPerZone: s.pairsPerZone,
+        zone4Advancers: s.zone4Advancers,
+        zonesPlayDates: s.zonesPlayDates,
+        knockoutPlayDates: s.knockoutPlayDates,
+        finalPlayDates: s.finalPlayDates,
+      },
+      update: {
+        zonesMatchFormat: s.zonesMatchFormat,
+        zonesMatchDurationMin: s.zonesMatchDurationMin,
+        knockoutMatchFormat: s.knockoutMatchFormat,
+        knockoutMatchDurationMin: s.knockoutMatchDurationMin,
+        finalMatchFormat: s.finalMatchFormat,
+        finalMatchDurationMin: s.finalMatchDurationMin,
+        finalStartsAtRound: s.finalStartsAtRound,
+        intervalMin: s.intervalMin,
+        pairsPerZone: s.pairsPerZone,
+        zone4Advancers: s.zone4Advancers,
+        zonesPlayDates: s.zonesPlayDates,
+        knockoutPlayDates: s.knockoutPlayDates,
+        finalPlayDates: s.finalPlayDates,
+      },
+    });
 
     return { ok: true };
   }

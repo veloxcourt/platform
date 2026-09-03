@@ -393,6 +393,10 @@ export class PrismaHerramientasRepository implements HerramientasRepository {
         color: input.color,
       },
     });
+    await prisma.tournamentCategory.updateMany({
+      where: { catalogCategoryId: id },
+      data: { name: input.name },
+    });
     return toCategory(row);
   }
 

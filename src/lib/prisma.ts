@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 35;
+const PRISMA_SCHEMA_REVISION = 37;
 
 /** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
 const PG_POOL_MAX = 1;
@@ -34,6 +34,11 @@ function schemaFingerprint(): string {
     "zonesDayPreference" in pairFields ? "1" : "0",
     "simulationEnabled" in categoryFields ? "1" : "0",
     "simulationConfirmedCount" in categoryFields ? "1" : "0",
+    "catalogCategoryId" in categoryFields ? "1" : "0",
+    "enabledSlotIndexes" in Prisma.TournamentPlayDayScalarFieldEnum
+      ? "1"
+      : "0",
+    "hasSlotSelection" in Prisma.TournamentPlayDayScalarFieldEnum ? "1" : "0",
     "pairsPerZone" in settingsFields ? "1" : "0",
     "zone4Advancers" in settingsFields ? "1" : "0",
     "zonesPlayDates" in settingsFields ? "1" : "0",

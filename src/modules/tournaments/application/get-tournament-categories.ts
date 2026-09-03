@@ -9,13 +9,12 @@ export async function getTournamentCategories(
   const club = await repo.getClubBySlug(clubSlug);
   if (!club) return null;
 
-  const [categories, tournament] = await Promise.all([
+  const [categories, tournament, catalogCategories] = await Promise.all([
     repo.listTournamentCategories(club.id, tournamentId),
     repo.getZonasTournamentDetail(club.id, tournamentId),
+    repo.listCatalogCategories(club.id),
   ]);
   if (!categories || !tournament) return null;
-
-  const levels = await repo.getClubLevels(club.id);
 
   return {
     club: { id: club.id, name: club.name, slug: club.slug },
@@ -26,6 +25,6 @@ export async function getTournamentCategories(
       endDate: tournament.endDate,
     },
     categories,
-    levels,
+    catalogCategories,
   };
 }

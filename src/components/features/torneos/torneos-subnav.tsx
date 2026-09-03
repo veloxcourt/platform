@@ -1,21 +1,25 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { BookOpen, List } from "lucide-react";
+import { List } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { TORNEOS_TABS } from "@/config/modules";
 import { StableTabButton } from "@/components/ui/stable-tab-button";
 
-const TAB_ICONS: Record<(typeof TORNEOS_TABS)[number]["slug"], LucideIcon> = {
+const TAB_ICONS: Partial<
+  Record<(typeof TORNEOS_TABS)[number]["slug"], LucideIcon>
+> = {
   listado: List,
-  soporte: BookOpen,
 };
 
 export function TorneosSubnav({ clubSlug }: { clubSlug: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const base = `/${clubSlug}/torneos`;
+
+  // Solo Listado: no hace falta fila de pestañas (Soporte está en Configuración).
+  if (TORNEOS_TABS.length <= 1) return null;
 
   return (
     <div
@@ -37,7 +41,7 @@ export function TorneosSubnav({ clubSlug }: { clubSlug: string }) {
             active={active}
             onSelect={() => router.push(href)}
           >
-            <Icon />
+            {Icon ? <Icon /> : null}
             {tab.label}
           </StableTabButton>
         );

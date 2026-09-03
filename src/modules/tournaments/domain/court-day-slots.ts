@@ -3,8 +3,13 @@ import {
   timeToMinutes,
   closingMinutes,
 } from "@/modules/bookings/domain/rules";
+import { TOURNAMENT_PHASE_META } from "./config-schema";
 import type { PlayDayValues } from "./config-schema";
 import { playDayWindowMinutes } from "./play-day";
+import {
+  buildPlayDayRulerSlots,
+  playDayRulerSelectedMinutes,
+} from "./play-day-slots";
 import type { CategoryScheduleSimulation } from "./simulate-category-schedule";
 
 /// Con pairsPerZone = 3, cada pareja juega 2 partidos en zonas (fixture).
@@ -20,6 +25,8 @@ export type SlotCellStatus =
 
 export type SlotBlockReason = "knockout" | "final";
 
+export type SimulationPhaseKey = "zones" | "knockout" | "final";
+
 export interface CourtDaySlot {
   id: string;
   playDate: string;
@@ -32,9 +39,15 @@ export interface CourtDaySlot {
   pairId?: string | null;
   pairLabel?: string | null;
   /// Solo en modo simulación: fase proyectada en esta celda.
-  projectedPhase?: "zones" | "knockout" | "final";
+  projectedPhase?: SimulationPhaseKey;
   /// En simulación: si la celda la ocupó otra categoría (mismas canchas físicas).
   projectedSource?: "self" | "other";
+  /// En simulación: categoría que ocupa la celda (para color y leyenda).
+  projectedCategoryId?: string;
+  /// Partido real: código corto, ej. A1.
+  matchCode?: string | null;
+  /// Más de uno = choque de categorías en la misma cancha/hora.
+  occupants?: { categoryId: string; matchCode?: string | null }[];
 }
 
 export interface SlotReservationRef {
@@ -50,6 +63,8 @@ export interface CourtDayRule {
   dayLabel: string;
   startTime: string;
   endTime: string;
+  /// Duración de cada celda en este día (puede cambiar si la fase es distinta).
+  slotMinutes?: number;
   courts: {
     courtIndex: number;
     courtLabel: string;
@@ -72,14 +87,40 @@ export function buildEmptyCourtDaySlots(
   slotMinutes: number,
 ): CourtDaySlot[] {
   if (!playDay.date || slotMinutes <= 0) return [];
+  const courts = Math.max(1, courtCount);
+  const slots: CourtDaySlot[] = [];
+
+  if (playDay.hasSlotSelection) {
+    const ruler = buildPlayDayRulerSlots(
+      playDay.startTime,
+      playDay.overnightExtraSlots ?? 0,
+      slotMinutes,
+    );
+    const enabled = new Set(playDay.enabledSlotIndexes ?? []);
+    if (enabled.size === 0) return [];
+
+    for (let courtIndex = 0; courtIndex < courts; courtIndex++) {
+      for (const tick of ruler) {
+        if (!enabled.has(tick.slotIndex)) continue;
+        slots.push({
+          id: slotId(playDay.date, courtIndex, tick.slotIndex),
+          playDate: playDay.date,
+          courtIndex,
+          slotIndex: tick.slotIndex,
+          startTime: tick.startTime,
+          endTime: tick.endTime,
+          status: "free",
+        });
+      }
+    }
+    return slots;
+  }
+
   const start = timeToMinutes(playDay.startTime);
   const end = closingMinutes(playDay.startTime, playDay.endTime);
   const window = end - start;
   const slotsPerCourt = Math.floor(window / slotMinutes);
   if (slotsPerCourt <= 0) return [];
-
-  const courts = Math.max(1, courtCount);
-  const slots: CourtDaySlot[] = [];
 
   for (let courtIndex = 0; courtIndex < courts; courtIndex++) {
     for (let slotIndex = 0; slotIndex < slotsPerCourt; slotIndex++) {
@@ -104,6 +145,7 @@ function groupSlotsIntoRules(
   playDays: PlayDayValues[],
   slots: CourtDaySlot[],
   courtCount: number,
+  slotMinutesByDate?: Map<string, number>,
 ): CourtDayRule[] {
   const byDate = new Map<string, CourtDaySlot[]>();
   for (const slot of slots) {
@@ -122,6 +164,7 @@ function groupSlotsIntoRules(
         dayLabel: `Día ${dayIndex + 1}`,
         startTime: day.startTime,
         endTime: day.endTime,
+        slotMinutes: slotMinutesByDate?.get(day.date),
         courts: Array.from({ length: courts }, (_, courtIndex) => ({
           courtIndex,
           courtLabel: `Cancha ${courtIndex + 1}`,
@@ -190,7 +233,7 @@ function isStrictlyAfterCutoff(
 
 function latestProjectedCutoff(
   slots: CourtDaySlot[],
-  phases: Array<"zones" | "knockout" | "final">,
+  phases: SimulationPhaseKey[],
 ): { playDate: string; slotIndex: number } | null {
   let best: CourtDaySlot | null = null;
   for (const slot of slots) {
@@ -224,36 +267,18 @@ function freeSlotsForDates(
     .sort(slotTimelineCmp);
 }
 
-function packProjectedMatches(
-  slots: CourtDaySlot[],
-  playDates: string[],
-  matchCount: number,
-  phase: "zones" | "knockout" | "final",
-  source: "self" | "other" = "self",
-  afterCutoff: { playDate: string; slotIndex: number } | null = null,
-): void {
-  if (matchCount <= 0 || playDates.length === 0) return;
-
-  const candidates = freeSlotsForDates(slots, playDates, afterCutoff);
-  let left = matchCount;
-  for (const slot of candidates) {
-    if (left <= 0) break;
-    slot.status = "projected";
-    slot.projectedPhase = phase;
-    slot.projectedSource = source;
-    left -= 1;
-  }
+interface PhaseLoad {
+  playDates: string[];
+  matchCount: number;
+  source: "self" | "other";
+  categoryId?: string;
 }
 
 /// Coloca partidos intercalados (A, B, A, B…) llenando canchas en paralelo por horario.
 function packInterleavedProjectedMatches(
   slots: CourtDaySlot[],
-  loads: {
-    playDates: string[];
-    matchCount: number;
-    source: "self" | "other";
-  }[],
-  phase: "zones" | "knockout" | "final",
+  loads: PhaseLoad[],
+  phase: SimulationPhaseKey,
   afterCutoff: { playDate: string; slotIndex: number } | null = null,
 ): void {
   const remaining = loads
@@ -264,18 +289,6 @@ function packInterleavedProjectedMatches(
       left: l.matchCount,
     }));
   if (remaining.length === 0) return;
-
-  if (remaining.length === 1) {
-    packProjectedMatches(
-      slots,
-      remaining[0].playDates,
-      remaining[0].matchCount,
-      phase,
-      remaining[0].source,
-      afterCutoff,
-    );
-    return;
-  }
 
   const allDates = [...new Set(remaining.flatMap((l) => [...l.dateSet]))];
   const ordered = freeSlotsForDates(slots, allDates, afterCutoff);
@@ -299,6 +312,7 @@ function packInterleavedProjectedMatches(
     slot.status = "projected";
     slot.projectedPhase = phase;
     slot.projectedSource = chosen.source;
+    slot.projectedCategoryId = chosen.categoryId;
     chosen.left -= 1;
   }
 }
@@ -403,6 +417,37 @@ export interface SimulationCategoryLoad {
   zoneMatches: number;
   intermediateMatches: number;
   finalMatches: number;
+  zonesSlotMinutes?: number;
+  knockoutSlotMinutes?: number;
+  finalSlotMinutes?: number;
+}
+
+export function slotMinutesForSimulationDate(
+  playDate: string,
+  loads: Pick<
+    SimulationCategoryLoad,
+    | "zonesPlayDates"
+    | "knockoutPlayDates"
+    | "finalPlayDates"
+    | "zonesSlotMinutes"
+    | "knockoutSlotMinutes"
+    | "finalSlotMinutes"
+  >[],
+  fallback: number,
+): number {
+  let max = 0;
+  for (const load of loads) {
+    if (load.zonesPlayDates.includes(playDate)) {
+      max = Math.max(max, load.zonesSlotMinutes ?? fallback);
+    }
+    if (load.knockoutPlayDates.includes(playDate)) {
+      max = Math.max(max, load.knockoutSlotMinutes ?? fallback);
+    }
+    if (load.finalPlayDates.includes(playDate)) {
+      max = Math.max(max, load.finalSlotMinutes ?? fallback);
+    }
+  }
+  return max > 0 ? max : Math.max(1, fallback);
 }
 
 export interface BuildSimulationRuleGridInput {
@@ -412,7 +457,127 @@ export interface BuildSimulationRuleGridInput {
   /// Todas las categorías en simulación (misma pool de canchas).
   categoryLoads: SimulationCategoryLoad[];
   /// Categoría desde la que se mira la grilla (self vs other).
-  currentCategoryId: string;
+  /// Sin valor: simulación integral, todas las categorías son propias.
+  currentCategoryId?: string;
+}
+
+export type ScheduledMatchMark = {
+  categoryId: string;
+  playDate: string;
+  startTime: string;
+  courtIndex: number | null;
+  slotIndex?: number | null;
+  pairLabel?: string | null;
+  matchCode?: string | null;
+};
+
+/// Grilla de partidos reales (Regla de Partidos): pinta el slot donde quedó cada partido.
+/// Solo días con fase de zonas; el rótulo Día N sigue el orden de playDays del torneo.
+export function buildMatchesRuleGrid(input: {
+  playDays: PlayDayValues[];
+  courtCount: number;
+  defaultSlotMinutes: number;
+  slotMinutesByDate?: Record<string, number>;
+  matches: ScheduledMatchMark[];
+  zonesPlayDates?: string[];
+}): CourtDayRule[] {
+  const fallback = Math.max(1, input.defaultSlotMinutes);
+  const slotMinutesByDate = new Map<string, number>();
+  const slots: CourtDaySlot[] = [];
+  const zonesDates = new Set(
+    (input.zonesPlayDates ?? input.playDays.map((day) => day.date)).filter(
+      Boolean,
+    ),
+  );
+
+  for (const day of input.playDays) {
+    if (!day.date || !zonesDates.has(day.date)) continue;
+    const daySlotMinutes = Math.max(
+      1,
+      input.slotMinutesByDate?.[day.date] ?? fallback,
+    );
+    slotMinutesByDate.set(day.date, daySlotMinutes);
+    slots.push(
+      ...buildEmptyCourtDaySlots(
+        { ...day, hasSlotSelection: false },
+        input.courtCount,
+        daySlotMinutes,
+      ),
+    );
+  }
+
+  const byKey = new Map(
+    slots.map((slot) => [
+      `${slot.playDate}:${slot.courtIndex}:${slot.slotIndex}`,
+      slot,
+    ]),
+  );
+  const byTime = new Map(
+    slots.map((slot) => [
+      `${slot.playDate}:${slot.courtIndex}:${slot.startTime}`,
+      slot,
+    ]),
+  );
+
+  for (const match of input.matches) {
+    if (!match.playDate || match.courtIndex == null) continue;
+    const byIndex =
+      match.slotIndex != null
+        ? byKey.get(
+            `${match.playDate}:${match.courtIndex}:${match.slotIndex}`,
+          )
+        : undefined;
+    const slot =
+      byIndex ??
+      (match.startTime
+        ? byTime.get(
+            `${match.playDate}:${match.courtIndex}:${match.startTime}`,
+          )
+        : undefined);
+    if (!slot) continue;
+    slot.status = "projected";
+    slot.projectedPhase = "zones";
+    slot.projectedSource = "self";
+    const occupant = {
+      categoryId: match.categoryId,
+      matchCode: match.matchCode ?? null,
+    };
+    const occupants = slot.occupants ?? [];
+    if (
+      !occupants.some(
+        (item) =>
+          item.categoryId === occupant.categoryId &&
+          item.matchCode === occupant.matchCode,
+      )
+    ) {
+      occupants.push(occupant);
+    }
+    slot.occupants = occupants;
+    if (!slot.projectedCategoryId) {
+      slot.projectedCategoryId = match.categoryId;
+      if (match.pairLabel) slot.pairLabel = match.pairLabel;
+      if (match.matchCode) slot.matchCode = match.matchCode;
+    }
+    if (occupants.length > 1 && !slot.matchCode && match.matchCode) {
+      slot.matchCode = match.matchCode;
+    }
+  }
+
+  const rules = groupSlotsIntoRules(
+    input.playDays,
+    slots,
+    input.courtCount,
+    slotMinutesByDate,
+  );
+  const labelByDate = new Map(
+    input.playDays
+      .filter((day) => day.date)
+      .map((day, index) => [day.date, `Día ${index + 1}`] as const),
+  );
+  for (const rule of rules) {
+    rule.dayLabel = labelByDate.get(rule.playDate) ?? rule.dayLabel;
+  }
+  return rules;
 }
 
 /// Grilla de simulación (modo regla): canchas compartidas.
@@ -422,21 +587,32 @@ export interface BuildSimulationRuleGridInput {
 export function buildSimulationRuleGrid(
   input: BuildSimulationRuleGridInput,
 ): CourtDayRule[] {
+  const slotMinutesByDate = new Map<string, number>();
   const slots: CourtDaySlot[] = [];
   for (const day of input.playDays) {
     if (!day.date) continue;
+    const daySlotMinutes = slotMinutesForSimulationDate(
+      day.date,
+      input.categoryLoads,
+      input.zonesSlotMinutes,
+    );
+    slotMinutesByDate.set(day.date, daySlotMinutes);
+    // La duración la marca la fase de ese día (zonas 60, final 75, etc.).
+    // El rango start/end es lo compartido con Parámetros; no reusar índices
+    // de una regla de otro tamaño.
     slots.push(
       ...buildEmptyCourtDaySlots(
-        day,
+        { ...day, hasSlotSelection: false },
         input.courtCount,
-        input.zonesSlotMinutes,
+        daySlotMinutes,
       ),
     );
   }
 
   const loads = input.categoryLoads.map((load) => ({
     ...load,
-    source: (load.categoryId === input.currentCategoryId
+    source: (input.currentCategoryId == null ||
+    load.categoryId === input.currentCategoryId
       ? "self"
       : "other") as "self" | "other",
   }));
@@ -447,6 +623,7 @@ export function buildSimulationRuleGrid(
       playDates: l.zonesPlayDates,
       matchCount: l.zoneMatches,
       source: l.source,
+      categoryId: l.categoryId,
     })),
     "zones",
     null,
@@ -459,6 +636,7 @@ export function buildSimulationRuleGrid(
       playDates: l.knockoutPlayDates,
       matchCount: l.intermediateMatches,
       source: l.source,
+      categoryId: l.categoryId,
     })),
     "knockout",
     afterZones,
@@ -471,12 +649,18 @@ export function buildSimulationRuleGrid(
       playDates: l.finalPlayDates,
       matchCount: l.finalMatches,
       source: l.source,
+      categoryId: l.categoryId,
     })),
     "final",
     afterKnockout,
   );
 
-  return groupSlotsIntoRules(input.playDays, slots, input.courtCount);
+  return groupSlotsIntoRules(
+    input.playDays,
+    slots,
+    input.courtCount,
+    slotMinutesByDate,
+  );
 }
 
 function applyReservations(
@@ -572,21 +756,216 @@ export function listSelectablePreferenceSlotsForDay(
 export function playDayCapacityMinutes(
   playDay: PlayDayValues,
   courtCount: number,
+  slotMinutes?: number,
 ): number {
-  return (
-    playDayWindowMinutes(playDay.startTime, playDay.endTime) *
-    Math.max(1, courtCount)
-  );
+  const courts = Math.max(1, courtCount);
+  if (playDay.hasSlotSelection && slotMinutes && slotMinutes > 0) {
+    return playDayRulerSelectedMinutes(playDay, slotMinutes) * courts;
+  }
+  return playDayWindowMinutes(playDay.startTime, playDay.endTime) * courts;
 }
 
-const PHASE_PACK_ORDER: Array<"zones" | "knockout" | "final"> = [
-  "zones",
-  "knockout",
-  "final",
-];
+const PHASE_PACK_ORDER: SimulationPhaseKey[] = ["zones", "knockout", "final"];
 
 function flattenRuleSlots(rules: CourtDayRule[]): CourtDaySlot[] {
   return rules.flatMap((day) => day.courts.flatMap((court) => court.slots));
+}
+
+export interface IntegralSimulationCategory {
+  categoryId: string;
+  result: CategoryScheduleSimulation;
+  zonesPlayDates: string[];
+  knockoutPlayDates: string[];
+  finalPlayDates: string[];
+}
+
+export interface IntegralPhaseSummary {
+  key: SimulationPhaseKey;
+  label: string;
+  matchCount: number;
+  /// Partidos que entraron en la grilla (todas las categorías).
+  packedCount: number;
+  dayCount: number;
+  minutesNeeded: number;
+  minutesAvailable: number;
+  surplusMinutes: number;
+  fits: boolean;
+  missingPlayDates: boolean;
+}
+
+export interface IntegralCategorySummary {
+  categoryId: string;
+  matchCount: number;
+  packedCount: number;
+  packedByPhase: Record<SimulationPhaseKey, number>;
+}
+
+export interface IntegralSimulationSummary {
+  phases: IntegralPhaseSummary[];
+  categories: IntegralCategorySummary[];
+  matchCount: number;
+  packedCount: number;
+  minutesNeeded: number;
+  minutesAvailable: number;
+  surplusMinutes: number;
+  totalCells: number;
+  usedCells: number;
+  freeCells: number;
+  fits: boolean;
+}
+
+function emptyPhaseCounter(): Record<SimulationPhaseKey, number> {
+  return { zones: 0, knockout: 0, final: 0 };
+}
+
+/**
+ * Totales de la simulación integral: suma las categorías y usa la grilla
+ * compartida (un solo conjunto de días) como fuente de verdad de lo que entra.
+ * Los slots libres de un día se atribuyen a la última fase que tiene ese día.
+ */
+function ruleSlotMinutes(
+  rules: CourtDayRule[],
+  playDate: string,
+  fallback: number,
+): number {
+  const rule = rules.find((day) => day.playDate === playDate);
+  return Math.max(1, rule?.slotMinutes ?? fallback);
+}
+
+export function summarizeIntegralSimulation(
+  rules: CourtDayRule[],
+  categories: IntegralSimulationCategory[],
+  slotMinutes: number,
+): IntegralSimulationSummary {
+  const slots = flattenRuleSlots(rules);
+  const fallbackMin = Math.max(1, slotMinutes);
+
+  const datesByPhase: Record<SimulationPhaseKey, Set<string>> = {
+    zones: new Set(),
+    knockout: new Set(),
+    final: new Set(),
+  };
+  for (const category of categories) {
+    for (const date of category.zonesPlayDates) {
+      if (date) datesByPhase.zones.add(date);
+    }
+    for (const date of category.knockoutPlayDates) {
+      if (date) datesByPhase.knockout.add(date);
+    }
+    for (const date of category.finalPlayDates) {
+      if (date) datesByPhase.final.add(date);
+    }
+  }
+
+  const freeByDate = new Map<string, number>();
+  let usedCells = 0;
+  for (const slot of slots) {
+    if (slot.status === "free") {
+      freeByDate.set(slot.playDate, (freeByDate.get(slot.playDate) ?? 0) + 1);
+    } else if (slot.status === "projected") {
+      usedCells += 1;
+    }
+  }
+
+  const freeMinByPhase = emptyPhaseCounter();
+  for (const [date, count] of freeByDate) {
+    let owner: SimulationPhaseKey | null = null;
+    for (const key of PHASE_PACK_ORDER) {
+      if (datesByPhase[key].has(date)) owner = key;
+    }
+    if (owner) {
+      freeMinByPhase[owner] +=
+        count * ruleSlotMinutes(rules, date, fallbackMin);
+    }
+  }
+
+  const packedByPhase = emptyPhaseCounter();
+  const packedByCategory = new Map<string, Record<SimulationPhaseKey, number>>();
+  for (const slot of slots) {
+    if (slot.status !== "projected" || !slot.projectedPhase) continue;
+    packedByPhase[slot.projectedPhase] += 1;
+    if (!slot.projectedCategoryId) continue;
+    const row =
+      packedByCategory.get(slot.projectedCategoryId) ?? emptyPhaseCounter();
+    row[slot.projectedPhase] += 1;
+    packedByCategory.set(slot.projectedCategoryId, row);
+  }
+
+  let totalUnmetMin = 0;
+  const phases: IntegralPhaseSummary[] = PHASE_PACK_ORDER.map((key) => {
+    let matchCount = 0;
+    let minutesNeeded = 0;
+    for (const category of categories) {
+      const phase = category.result.phases.find((p) => p.key === key);
+      if (!phase) continue;
+      matchCount += phase.matchCount;
+      minutesNeeded += phase.minutesNeeded;
+    }
+
+    const packedCount = packedByPhase[key];
+    const dayCount = rules.filter((day) => datesByPhase[key].has(day.playDate))
+      .length;
+    const missingPlayDates = matchCount > 0 && dayCount === 0;
+    const minutesPerMatch =
+      matchCount > 0 ? minutesNeeded / matchCount : fallbackMin;
+    const unmetMin = Math.max(0, matchCount - packedCount) * minutesPerMatch;
+    totalUnmetMin += unmetMin;
+    const surplusMinutes = freeMinByPhase[key] - unmetMin;
+
+    return {
+      key,
+      label: TOURNAMENT_PHASE_META[key].label,
+      matchCount,
+      packedCount,
+      dayCount,
+      minutesNeeded,
+      minutesAvailable: Math.max(0, minutesNeeded + surplusMinutes),
+      surplusMinutes,
+      fits:
+        !missingPlayDates &&
+        (matchCount === 0 || packedCount >= matchCount) &&
+        surplusMinutes >= 0,
+      missingPlayDates,
+    };
+  });
+
+  const assignedDates = new Set(
+    PHASE_PACK_ORDER.flatMap((key) => [...datesByPhase[key]]),
+  );
+  let freeCells = 0;
+  let freeMinutes = 0;
+  for (const [date, count] of freeByDate) {
+    if (!assignedDates.has(date)) continue;
+    freeCells += count;
+    freeMinutes += count * ruleSlotMinutes(rules, date, fallbackMin);
+  }
+
+  const minutesNeeded = phases.reduce((sum, p) => sum + p.minutesNeeded, 0);
+  const surplusMinutes = freeMinutes - totalUnmetMin;
+  const activePhases = phases.filter((p) => p.matchCount > 0);
+
+  return {
+    phases,
+    categories: categories.map((category) => {
+      const row = packedByCategory.get(category.categoryId) ?? emptyPhaseCounter();
+      return {
+        categoryId: category.categoryId,
+        matchCount: category.result.totalMatches,
+        packedCount: row.zones + row.knockout + row.final,
+        packedByPhase: row,
+      };
+    }),
+    matchCount: phases.reduce((sum, p) => sum + p.matchCount, 0),
+    packedCount: phases.reduce((sum, p) => sum + p.packedCount, 0),
+    minutesNeeded,
+    minutesAvailable: Math.max(0, minutesNeeded + surplusMinutes),
+    surplusMinutes,
+    totalCells: slots.length,
+    usedCells,
+    freeCells,
+    fits:
+      activePhases.length === 0 ? true : activePhases.every((p) => p.fits),
+  };
 }
 
 /**
@@ -597,10 +976,7 @@ function flattenRuleSlots(rules: CourtDayRule[]): CourtDaySlot[] {
 export function applyPackedSlotsToSimulation(
   result: CategoryScheduleSimulation,
   rules: CourtDayRule[],
-  phasePlayDates: Record<
-    "zones" | "knockout" | "final",
-    string[]
-  >,
+  phasePlayDates: Record<SimulationPhaseKey, string[]>,
   slotMinutes: number,
 ): CategoryScheduleSimulation {
   const slots = flattenRuleSlots(rules);
@@ -612,13 +988,9 @@ export function applyPackedSlotsToSimulation(
     freeByDate.set(slot.playDate, (freeByDate.get(slot.playDate) ?? 0) + 1);
   }
 
-  const freeCellsByPhase: Record<"zones" | "knockout" | "final", number> = {
-    zones: 0,
-    knockout: 0,
-    final: 0,
-  };
+  const freeCellsByPhase = emptyPhaseCounter();
   for (const [date, count] of freeByDate) {
-    let owner: "zones" | "knockout" | "final" | null = null;
+    let owner: SimulationPhaseKey | null = null;
     for (const key of PHASE_PACK_ORDER) {
       if (phasePlayDates[key]?.includes(date)) owner = key;
     }

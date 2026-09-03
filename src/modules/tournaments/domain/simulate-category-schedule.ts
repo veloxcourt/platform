@@ -1,5 +1,6 @@
 import type { CategoryPhaseConfig } from "./types";
 import {
+  FINAL_PHASE_START_ROUND_LABELS,
   FINAL_PHASE_START_ROUND_VALUES,
   TOURNAMENT_PHASE_META,
   normalizeZone4Advancers,
@@ -46,6 +47,76 @@ export interface CategoryScheduleSimulation {
   fits: boolean;
   surplusMinutes: number;
   phases: PhaseScheduleSimulation[];
+}
+
+export type SimulationRoundKey = FinalPhaseStartRound | "FINAL";
+
+export interface SimulationRoundStat {
+  key: SimulationRoundKey;
+  label: string;
+  matches: number;
+}
+
+export interface SimulationCategoryBreakdown {
+  zonesOf3: number;
+  zonesOf4: number;
+  zonesOf2: number;
+  zoneMatches: number;
+  advancers: number;
+  totalMatches: number;
+  knockoutRounds: SimulationRoundStat[];
+}
+
+/// Desglose para las tarjetas: zonas y partidos por instancia de llave.
+export function breakdownCategorySimulation(
+  result: CategoryScheduleSimulation,
+): SimulationCategoryBreakdown {
+  const zonesOf3 = result.zoneSizes.filter((size) => size === 3).length;
+  const zonesOf4 = result.zoneSizes.filter((size) => size === 4).length;
+  const zonesOf2 = result.zoneSizes.filter((size) => size === 2).length;
+  const knockoutRounds: SimulationRoundStat[] = [];
+  let remaining = result.intermediateMatches + result.finalMatches;
+
+  if (remaining > 0 && result.bracketSize <= 2) {
+    knockoutRounds.push({ key: "FINAL", label: "Final", matches: remaining });
+    remaining = 0;
+  } else if (remaining > 0) {
+    const start = bracketRoundForSize(result.bracketSize);
+    const startIdx = start
+      ? FINAL_PHASE_START_ROUND_VALUES.indexOf(start)
+      : 0;
+    if (startIdx >= 0) {
+      for (
+        let i = startIdx;
+        i < FINAL_PHASE_START_ROUND_VALUES.length && remaining > 0;
+        i += 1
+      ) {
+        const key = FINAL_PHASE_START_ROUND_VALUES[i];
+        const matches = Math.min(PAIR_COUNT_BY_ROUND[key] / 2, remaining);
+        if (matches > 0) {
+          knockoutRounds.push({
+            key,
+            label: FINAL_PHASE_START_ROUND_LABELS[key],
+            matches,
+          });
+          remaining -= matches;
+        }
+      }
+    }
+    if (remaining > 0) {
+      knockoutRounds.push({ key: "FINAL", label: "Final", matches: remaining });
+    }
+  }
+
+  return {
+    zonesOf3,
+    zonesOf4,
+    zonesOf2,
+    zoneMatches: result.zoneMatches,
+    advancers: result.advancers,
+    totalMatches: result.totalMatches,
+    knockoutRounds,
+  };
 }
 
 /// Reparte N parejas en zonas de 3 (preferido). Si N no es múltiplo de 3,

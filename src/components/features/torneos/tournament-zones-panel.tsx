@@ -13,7 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { formatShortDate } from "@/lib/date";
+import { formatWeekday } from "@/lib/date";
 import { formatAbbreviatedPairLabel } from "@/lib/person-name";
 import { buildZonesFixtureAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 import type { MatchFormat } from "@/modules/tournaments/domain/config-schema";
@@ -210,7 +210,6 @@ export function TournamentZonesPanel({
   config,
   courtCount,
   initialCategoryId,
-  lockCategory = false,
   reservations = [],
 }: {
   clubSlug: string;
@@ -219,26 +218,22 @@ export function TournamentZonesPanel({
   pairs: PairListItem[];
   config: TournamentConfig | null;
   courtCount: number;
+  /// Categoría activa: la elige el padre (sub-pestañas o ruta).
   initialCategoryId?: string;
-  /// Si true, no muestra el selector (la categoría viene del botón del torneo).
-  lockCategory?: boolean;
   reservations?: SlotReservationItem[];
 }) {
   const router = useRouter();
   const readOnly = useTournamentReadOnly();
   const [isPending, startTransition] = useTransition();
-  const [categoryId, setCategoryId] = useState(
-    initialCategoryId && categories.some((c) => c.id === initialCategoryId)
-      ? initialCategoryId
-      : (categories[0]?.id ?? ""),
-  );
   const [zonesByCategory, setZonesByCategory] = useState<
     Record<string, ZoneDraft[]>
   >({});
   const [rebuildToken, setRebuildToken] = useState(0);
 
   const activeCategoryId =
-    lockCategory && initialCategoryId ? initialCategoryId : categoryId;
+    initialCategoryId && categories.some((c) => c.id === initialCategoryId)
+      ? initialCategoryId
+      : (categories[0]?.id ?? "");
 
   const categoryConfig = config?.categories.find(
     (c) => c.categoryId === activeCategoryId,
@@ -292,8 +287,8 @@ export function TournamentZonesPanel({
       return {
         value: date,
         label: dayNum
-          ? `Día ${dayNum} · ${formatShortDate(date)}`
-          : formatShortDate(date),
+          ? `D${dayNum} · ${formatWeekday(date)}`
+          : formatWeekday(date),
       };
     });
   }, [categoryConfig, config?.playDays]);
@@ -426,20 +421,6 @@ export function TournamentZonesPanel({
               Actualizar
             </Button>
           )}
-          {!lockCategory && categories.length > 0 ? (
-            <select
-              className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-              aria-label="Categoría de zonas"
-            >
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

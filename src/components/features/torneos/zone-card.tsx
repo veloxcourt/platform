@@ -1,5 +1,7 @@
 "use client";
 
+import { ChevronDown } from "lucide-react";
+
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { MatchFormat } from "@/modules/tournaments/domain/config-schema";
@@ -39,7 +41,14 @@ export type ZoneDraft = {
 };
 
 const SELECT_CLASS =
-  "h-8 w-full min-w-[7rem] rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+  "h-8 w-full min-w-0 rounded-lg border border-input bg-background px-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
+const KIND_ROW_ORDER: Record<ZoneMatchKind, number> = {
+  opening: 0,
+  round_robin: 1,
+  winners: 2,
+  losers: 3,
+};
 
 const SCORE_CLASS =
   "h-8 w-10 rounded-lg border border-input bg-background px-1 text-center text-xs tabular-nums outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -52,6 +61,52 @@ function pairLabel(
   return options.find((p) => p.id === pairId)?.label ?? "—";
 }
 
+/** Muestra el nombre completo (con wrap) y deja el select nativo solo para elegir. */
+function PairSelect({
+  value,
+  options,
+  disabled,
+  onChange,
+  ariaLabel,
+}: {
+  value: string;
+  options: ZonePairOption[];
+  disabled?: boolean;
+  onChange: (id: string | null) => void;
+  ariaLabel: string;
+}) {
+  const label = pairLabel(value || null, options);
+  return (
+    <div className="relative min-w-0 rounded-lg border border-input bg-background focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+      <div
+        aria-hidden
+        className="min-h-8 px-1.5 py-1 pr-6 text-xs leading-snug break-words whitespace-normal"
+      >
+        {label}
+      </div>
+      <select
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value || null)}
+        aria-label={ariaLabel}
+        title={label}
+      >
+        <option value="">—</option>
+        {options.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 right-1.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+      />
+    </div>
+  );
+}
+
 function ResultHeader({ columns }: { columns: ZoneResultColumn[] }) {
   const groups: { group: string; cols: ZoneResultColumn[] }[] = [];
   for (const col of columns) {
@@ -62,7 +117,7 @@ function ResultHeader({ columns }: { columns: ZoneResultColumn[] }) {
   }
 
   return (
-    <th className="px-1 pb-1 pt-0 align-bottom" colSpan={columns.length}>
+    <th className="px-1 pb-1 pt-0 align-bottom">
       <div className="flex justify-end gap-0.5">
         {groups.map((g) => (
           <div
@@ -126,6 +181,14 @@ export function ZoneCard({
   const orderedMatches = [...zone.matches].sort((a, b) =>
     comparePlayDaySchedule(a, b, dayOpenByDate),
   );
+  /// Tabla: 1.ª ronda primero; G/G y P/P al final. El descanso sigue el horario real.
+  const tableMatches = [...zone.matches].sort((a, b) => {
+    const kindCmp =
+      (KIND_ROW_ORDER[a.kind ?? "round_robin"] ?? 1) -
+      (KIND_ROW_ORDER[b.kind ?? "round_robin"] ?? 1);
+    if (kindCmp !== 0) return kindCmp;
+    return comparePlayDaySchedule(a, b, dayOpenByDate);
+  });
 
   const computedNoRest =
     slotMinutes && slotMinutes > 0
@@ -243,20 +306,29 @@ export function ZoneCard({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[46rem] border-collapse text-left text-sm">
+        <table className="w-full table-fixed border-collapse text-left text-sm">
+          <colgroup>
+            <col className="w-8" />
+            <col className="w-[6.5rem]" />
+            <col className="w-16" />
+            <col className="w-[5rem]" />
+            <col />
+            <col />
+            <col style={{ width: `${Math.max(1, columns.length) * 2.75}rem` }} />
+          </colgroup>
           <thead>
             <tr className="border-b text-[11px] text-muted-foreground">
-              <th className="w-8 py-1.5 pr-2 font-medium">#</th>
-              <th className="py-1.5 pr-2 font-medium">Día</th>
-              <th className="py-1.5 pr-2 font-medium">Horario</th>
-              <th className="py-1.5 pr-2 font-medium">Cancha</th>
-              <th className="py-1.5 pr-2 font-medium">Pareja 1</th>
-              <th className="py-1.5 pr-2 font-medium">Pareja 2</th>
+              <th className="py-1.5 pr-1.5 font-medium">#</th>
+              <th className="py-1.5 pr-1.5 font-medium">Día</th>
+              <th className="py-1.5 pr-1.5 font-medium">Horario</th>
+              <th className="py-1.5 pr-1.5 font-medium">Cancha</th>
+              <th className="py-1.5 pr-1.5 font-medium">Pareja 1</th>
+              <th className="py-1.5 pr-1.5 font-medium">Pareja 2</th>
               <ResultHeader columns={columns} />
             </tr>
           </thead>
           <tbody>
-            {orderedMatches.map((match, index) => {
+            {tableMatches.map((match, index) => {
               const lacksRest = noRestGapIds.has(match.id);
               const lacksSchedule =
                 !match.playDate.trim() || !match.startTime.trim();
@@ -277,7 +349,7 @@ export function ZoneCard({
                     "bg-amber-200/70 dark:bg-amber-900/50",
                 )}
               >
-                <td className="py-1.5 pr-2 align-middle tabular-nums text-muted-foreground">
+                <td className="py-1.5 pr-1.5 align-middle tabular-nums text-muted-foreground">
                   <div className="flex flex-col">
                     <span>{index + 1}</span>
                     {lacksRest && (
@@ -300,9 +372,9 @@ export function ZoneCard({
                       )}
                   </div>
                 </td>
-                <td className="py-1.5 pr-2 align-middle">
+                <td className="py-1.5 pr-1.5 align-middle">
                   <select
-                    className={cn(SELECT_CLASS, "min-w-[8.5rem]")}
+                    className={SELECT_CLASS}
                     value={match.playDate}
                     disabled={readOnly}
                     onChange={(e) =>
@@ -318,11 +390,11 @@ export function ZoneCard({
                     ))}
                   </select>
                 </td>
-                <td className="py-1.5 pr-2 align-middle">
+                <td className="py-1.5 pr-1.5 align-middle">
                   <Input
                     value={match.startTime}
                     placeholder="17:00"
-                    className="h-8 w-[5.5rem] text-xs"
+                    className="h-8 w-full min-w-0 px-1.5 text-center text-xs tabular-nums"
                     disabled={readOnly}
                     readOnly={readOnly}
                     onChange={(e) =>
@@ -331,9 +403,9 @@ export function ZoneCard({
                     aria-label={`Horario partido ${index + 1}`}
                   />
                 </td>
-                <td className="py-1.5 pr-2 align-middle">
+                <td className="py-1.5 pr-1.5 align-middle">
                   <select
-                    className={cn(SELECT_CLASS, "w-[6.5rem]")}
+                    className={SELECT_CLASS}
                     value={match.courtIndex ?? ""}
                     disabled={readOnly}
                     onChange={(e) =>
@@ -354,47 +426,25 @@ export function ZoneCard({
                     ))}
                   </select>
                 </td>
-                <td className="py-1.5 pr-2 align-middle">
-                  <select
-                    className={SELECT_CLASS}
+                <td className="min-w-0 py-1.5 pr-1.5 align-middle">
+                  <PairSelect
                     value={match.pair1Id ?? ""}
+                    options={selectOptions}
                     disabled={readOnly}
-                    onChange={(e) =>
-                      updateMatch(match.id, {
-                        pair1Id: e.target.value || null,
-                      })
-                    }
-                    aria-label={`Pareja 1 partido ${index + 1}`}
-                  >
-                    <option value="">—</option>
-                    {selectOptions.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(id) => updateMatch(match.id, { pair1Id: id })}
+                    ariaLabel={`Pareja 1 partido ${index + 1}`}
+                  />
                 </td>
-                <td className="py-1.5 pr-2 align-middle">
-                  <select
-                    className={SELECT_CLASS}
+                <td className="min-w-0 py-1.5 pr-1.5 align-middle">
+                  <PairSelect
                     value={match.pair2Id ?? ""}
+                    options={selectOptions}
                     disabled={readOnly}
-                    onChange={(e) =>
-                      updateMatch(match.id, {
-                        pair2Id: e.target.value || null,
-                      })
-                    }
-                    aria-label={`Pareja 2 partido ${index + 1}`}
-                  >
-                    <option value="">—</option>
-                    {selectOptions.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(id) => updateMatch(match.id, { pair2Id: id })}
+                    ariaLabel={`Pareja 2 partido ${index + 1}`}
+                  />
                 </td>
-                <td className="py-1.5 align-middle" colSpan={columns.length}>
+                <td className="py-1.5 align-middle">
                   <div className="flex justify-end gap-0.5">
                     {columns.map((col) => (
                       <input

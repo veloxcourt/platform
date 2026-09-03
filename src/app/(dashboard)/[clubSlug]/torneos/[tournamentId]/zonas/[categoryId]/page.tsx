@@ -72,7 +72,6 @@ export default async function TorneoZonasCategoriaPage({
         config={config}
         courtCount={courtCount}
         initialCategoryId={categoryId}
-        lockCategory
         reservations={data.tournament.slotReservations}
       />
     </div>

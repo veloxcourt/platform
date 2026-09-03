@@ -1,6 +1,4 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
 
 import { ZonasTournamentDetail } from "@/components/features/torneos/zonas-tournament-detail";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
@@ -32,22 +30,12 @@ export default async function TorneoDetailPage({
   const courtCount = config?.courtCount || clubCourtCount || 1;
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <Link
-          href={`/${clubSlug}/torneos`}
-          className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="size-4" />
-          Volver a torneos
-        </Link>
-      </div>
-
+    <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col">
       <ZonasTournamentDetail
         clubSlug={clubSlug}
         currency={data.club.currency}
         tournament={data.tournament}
-        levels={data.levels}
+        catalogCategories={data.catalogCategories}
         players={players}
         config={config}
         courtCount={courtCount}

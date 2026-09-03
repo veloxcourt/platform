@@ -57,3 +57,12 @@ export const updateTournamentSchema = z
   );
 
 export type UpdateTournamentValues = z.infer<typeof updateTournamentSchema>;
+
+export function buildCloneTournamentName(name: string): string {
+  const suffix = " (copia)";
+  const trimmed = name.trim() || "Torneo";
+  const maxBase = 120 - suffix.length;
+  const base =
+    trimmed.length > maxBase ? trimmed.slice(0, maxBase).trimEnd() : trimmed;
+  return `${base}${suffix}`;
+}

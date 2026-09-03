@@ -5,13 +5,25 @@ import type { TournamentCategoryGender } from "./category-schema";
 export function parseCategoryGenderFromName(
   categoryName: string,
 ): TournamentCategoryGender | null {
-  const name = categoryName.trim();
-  if (name.startsWith("Femenina Suma")) return "FEMENINA_SUMA";
-  if (name.startsWith("Masculina Suma")) return "MASCULINA_SUMA";
-  if (name.startsWith("Mixta Suma")) return "MIXTA_SUMA";
-  if (name.startsWith("Femenina")) return "FEMENINA";
-  if (name.startsWith("Masculina")) return "MASCULINA";
-  if (name.startsWith("Mixta")) return "MIXTA";
+  const name = categoryName
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  const isSuma = /\bsuma\b/.test(name);
+  const isFemenina = /\bfemenina\b|\bdamas\b/.test(name);
+  const isMasculina = /\bmasculina\b|\bcaballeros\b/.test(name);
+  const isMixta = /\bmixta\b|\bmixto\b/.test(name);
+
+  if (isFemenina && !isMasculina) {
+    return isSuma ? "FEMENINA_SUMA" : "FEMENINA";
+  }
+  if (isMasculina && !isFemenina) {
+    return isSuma ? "MASCULINA_SUMA" : "MASCULINA";
+  }
+  if (isMixta) {
+    return isSuma ? "MIXTA_SUMA" : "MIXTA";
+  }
   return null;
 }
 

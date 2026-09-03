@@ -123,6 +123,32 @@ export function zoneLabelFromIndex(index: number): string {
   return `Zona ${index + 1}`;
 }
 
+/** "Zona A" → "A". */
+export function zoneLetterFromLabel(label: string): string {
+  const named = label.trim().match(/zona\s*([A-Z0-9]+)/i);
+  if (named?.[1]) return named[1].toUpperCase();
+  const fallback = label.replace(/[^A-Za-z0-9]/g, "").slice(-1);
+  return fallback ? fallback.toUpperCase() : "?";
+}
+
+/** Ej. A1: zona y n.º de partido (1-based). */
+export function formatZoneMatchSlotCode(
+  zoneLabel: string,
+  matchNumber: number,
+): string {
+  return `${zoneLetterFromLabel(zoneLabel)}${matchNumber}`;
+}
+
+/** Ej. 7D-A1: abreviatura de categoría, zona y n.º de partido (1-based). */
+export function formatZoneMatchCode(
+  abbreviation: string | null | undefined,
+  zoneLabel: string,
+  matchNumber: number,
+): string {
+  const abbr = abbreviation?.trim() || "?";
+  return `${abbr}-${formatZoneMatchSlotCode(zoneLabel, matchNumber)}`;
+}
+
 /// Cantidad de partidos de zona según tamaño (formato VeloxCourt, no RR puro en 4).
 export function zoneMatchCount(zoneSize: number): number {
   if (zoneSize < 2) return 0;

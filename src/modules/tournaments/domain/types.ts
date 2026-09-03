@@ -5,6 +5,7 @@ import type {
   PlayDayValues,
 } from "./config-schema";
 import type { ZonesFixturePersisted } from "./zones-fixture-schema";
+import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
 
 export type TournamentStatus = "DRAFT" | "OPEN" | "CLOSED" | "FINISHED";
 export type RegistrationStatus = "PENDING" | "CONFIRMED" | "CANCELLED";
@@ -27,6 +28,9 @@ export interface TournamentListItem {
 export interface TournamentCategoryItem {
   id: string;
   name: string;
+  catalogCategoryId: string | null;
+  abbreviation: string | null;
+  color: string | null;
   pairCount: number;
   confirmedCount: number;
   withoutPartnerCount: number;
@@ -95,7 +99,7 @@ export interface TournamentsListData {
 export interface ZonasTournamentDetailData {
   club: { id: string; name: string; slug: string; currency: string };
   tournament: ZonasTournamentDetail;
-  levels: string[];
+  catalogCategories: CatalogCategory[];
 }
 
 export interface TournamentCategoriesData {
@@ -107,7 +111,7 @@ export interface TournamentCategoriesData {
     endDate: string | null;
   };
   categories: TournamentCategoryItem[];
-  levels: string[];
+  catalogCategories: CatalogCategory[];
 }
 
 export interface CategoryPhaseConfig {

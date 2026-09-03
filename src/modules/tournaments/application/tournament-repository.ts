@@ -1,4 +1,6 @@
 import type { AddPairValues, UpdatePairValues } from "../domain/pair-schema";
+import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
+import type { CalendarCategoryValues } from "@/modules/herramientas/domain/calendario-schema";
 import type { CreateCategoryValues, RenameCategoryValues } from "../domain/category-schema";
 import type { UpdateCategorySimulationValues } from "../domain/category-simulation-schema";
 import type { TournamentConfigValues } from "../domain/config-schema";
@@ -33,6 +35,11 @@ export interface TournamentRepository {
     clubId: string,
     tournamentId: string,
   ): Promise<TournamentCategoryItem[] | null>;
+  listCatalogCategories(clubId: string): Promise<CatalogCategory[]>;
+  createCatalogCategory(
+    clubId: string,
+    input: CalendarCategoryValues,
+  ): Promise<CatalogCategory | { error: string }>;
   createTournamentCategory(
     clubId: string,
     tournamentId: string,
@@ -130,5 +137,21 @@ export interface TournamentRepository {
     clubId: string,
     tournamentId: string,
     input: TournamentConfigValues,
+  ): Promise<MutationResult>;
+  /// Copia formato por fase (y días de fase) de una categoría a otra. No toca el fixture.
+  copyCategoryPhaseConfig(
+    clubId: string,
+    tournamentId: string,
+    sourceCategoryId: string,
+    targetCategoryId: string,
+  ): Promise<MutationResult>;
+  cloneTournament(
+    clubId: string,
+    tournamentId: string,
+    input: { includePairs: boolean },
+  ): Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+  deleteTournament(
+    clubId: string,
+    tournamentId: string,
   ): Promise<MutationResult>;
 }

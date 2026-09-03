@@ -94,3 +94,9 @@ export const CALENDAR_PALETTE = [
   "#ea580c",
   "#4f46e5",
 ] as const;
+
+export function nextPaletteColor(usedColors: string[]): string {
+  const used = new Set(usedColors.map((c) => c.toLowerCase()));
+  const free = CALENDAR_PALETTE.find((c) => !used.has(c.toLowerCase()));
+  return free ?? CALENDAR_PALETTE[usedColors.length % CALENDAR_PALETTE.length]!;
+}

@@ -50,6 +50,13 @@ export type ZonesFixtureResult = {
   builtAt: string;
 };
 
+export type ReservedCourtSlot = {
+  playDate: string;
+  courtIndex: number;
+  startTime: string;
+  endTime?: string | null;
+};
+
 export type BuildZonesFixtureInput = {
   pairs: FixturePairInput[];
   pairsPerZone: number;
@@ -57,7 +64,45 @@ export type BuildZonesFixtureInput = {
   zonesPlayDates: string[];
   courtCount: number;
   slotMinutes: number;
+  /// Canchas/horarios ya tomados por otras categorías (misma pileta física).
+  reservedSlots?: ReservedCourtSlot[];
 };
+
+export function reservedSlotsFromOtherFixtures(
+  categories: Array<{
+    categoryId: string;
+    zonesFixture: {
+      zones: Array<{
+        matches: Array<{
+          playDate: string | null;
+          startTime: string | null;
+          endTime?: string | null;
+          courtIndex: number | null;
+        }>;
+      }>;
+    } | null;
+  }>,
+  exceptCategoryId: string,
+): ReservedCourtSlot[] {
+  const out: ReservedCourtSlot[] = [];
+  for (const category of categories) {
+    if (category.categoryId === exceptCategoryId) continue;
+    for (const zone of category.zonesFixture?.zones ?? []) {
+      for (const match of zone.matches) {
+        if (!match.playDate || match.courtIndex == null || !match.startTime) {
+          continue;
+        }
+        out.push({
+          playDate: match.playDate,
+          courtIndex: match.courtIndex,
+          startTime: match.startTime,
+          endTime: match.endTime,
+        });
+      }
+    }
+  }
+  return out;
+}
 
 type ResourceSlot = {
   playDate: string;
@@ -320,6 +365,59 @@ function dayPrefAllows(
     return !existingDates.has(candidateDate);
   }
   return true;
+}
+
+function intervalOverlaps(
+  aStart: string,
+  aEnd: string,
+  bStart: string,
+  bEnd: string,
+  dayOpen?: string,
+): boolean {
+  const a0 = playDayTimelineMinutes(aStart, dayOpen);
+  let a1 = playDayTimelineMinutes(aEnd, dayOpen);
+  const b0 = playDayTimelineMinutes(bStart, dayOpen);
+  let b1 = playDayTimelineMinutes(bEnd, dayOpen);
+  if (a1 <= a0) a1 += 24 * 60;
+  if (b1 <= b0) b1 += 24 * 60;
+  return a0 < b1 && b0 < a1;
+}
+
+function seedOccupiedFromReserved(
+  occupied: Set<string>,
+  resources: ResourceSlot[],
+  reserved: ReservedCourtSlot[],
+  playDays: PlayDayValues[],
+) {
+  const dayOpen = new Map(
+    playDays.filter((day) => day.date).map((day) => [day.date, day.startTime]),
+  );
+  for (const taken of reserved) {
+    occupied.add(resourceKey(taken.playDate, taken.courtIndex, taken.startTime));
+    const open = dayOpen.get(taken.playDate);
+    const takenEnd = taken.endTime || taken.startTime;
+    for (const resource of resources) {
+      if (
+        resource.playDate !== taken.playDate ||
+        resource.courtIndex !== taken.courtIndex
+      ) {
+        continue;
+      }
+      if (
+        intervalOverlaps(
+          resource.startTime,
+          resource.endTime,
+          taken.startTime,
+          takenEnd,
+          open,
+        )
+      ) {
+        occupied.add(
+          resourceKey(resource.playDate, resource.courtIndex, resource.startTime),
+        );
+      }
+    }
+  }
 }
 
 function courtsBusyAtTime(
@@ -637,6 +735,12 @@ export function buildZonesFixture(
   }
 
   const occupied = new Set<string>();
+  seedOccupiedFromReserved(
+    occupied,
+    resources,
+    input.reservedSlots ?? [],
+    input.playDays,
+  );
   const pairBusy = new Map<string, Set<string>>();
   const pairDates = new Map<string, Set<string>>();
   const appearances = new Map<string, PairAppearance[]>();

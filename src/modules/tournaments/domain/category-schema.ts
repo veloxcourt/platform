@@ -42,23 +42,9 @@ export function buildCategoryName(
   return `${TOURNAMENT_CATEGORY_GENDER_LABELS[gender]} ${trimmed}`;
 }
 
-export const createCategorySchema = z
-  .object({
-    gender: z.enum(TOURNAMENT_CATEGORY_GENDER_VALUES),
-    level: z.string().trim().min(1, "Elegí el valor").max(20),
-  })
-  .superRefine((data, ctx) => {
-    if (!isSumaGender(data.gender)) return;
-
-    const value = Number(data.level);
-    if (!Number.isInteger(value) || value < 5 || value > 16) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Elegí un valor de suma entre 5 y 16",
-        path: ["level"],
-      });
-    }
-  });
+export const createCategorySchema = z.object({
+  catalogCategoryId: z.string().min(1, "Elegí una categoría del catálogo"),
+});
 
 export type CreateCategoryValues = z.infer<typeof createCategorySchema>;
 

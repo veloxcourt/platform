@@ -125,9 +125,9 @@ export const CONTROL_USUARIOS_TABS = [
 ] as const;
 
 /// Sub-pestañas del módulo Torneos (mismo privilegio; listado queda en /torneos).
+/// Soporte vive dentro de Configuración del torneo (chequeo durante el armado).
 export const TORNEOS_TABS = [
   { slug: "listado", label: "Listado" },
-  { slug: "soporte", label: "Soporte" },
 ] as const;
 
 export function firstControlUsuariosSlug(

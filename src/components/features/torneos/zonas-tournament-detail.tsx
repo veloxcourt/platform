@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  ChevronLeft,
   ClipboardList,
   Copy,
+  GitBranch,
   Grid3x3,
   Info,
+  LayoutList,
+  Scale,
   Settings2,
+  Trophy,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -22,6 +28,7 @@ import {
 } from "@/components/ui/card";
 import { formatMoney } from "@/lib/money";
 import { formatShortDate } from "@/lib/date";
+import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
 import type { PlayerRef } from "@/modules/bookings/domain/types";
 import type {
   TournamentCategoryItem,
@@ -37,6 +44,8 @@ import { StableTabButton } from "@/components/ui/stable-tab-button";
 import { TournamentConfigTabs } from "./tournament-config-tabs";
 import { TournamentEditForm } from "./tournament-form-dialog";
 import { TournamentZonesPanel } from "./tournament-zones-panel";
+import { ZonesMatchGridPanel } from "./zones-match-grid-panel";
+import { ZonesMatchRulePanel } from "./zones-match-rule-panel";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 
 const STATUS_VARIANT: Record<
@@ -53,7 +62,13 @@ type TournamentTab =
   | "info"
   | "inscripciones"
   | "zonas"
-  | "configuracion";
+  | "configuracion"
+  | "fase-intermedia"
+  | "fase-final";
+
+const REGLA_PARTIDOS_TAB = "regla-partidos";
+const GRILLA_TAB = "grilla";
+const ZONAS_TOOL_TABS = new Set([REGLA_PARTIDOS_TAB, GRILLA_TAB]);
 
 const TABS: {
   id: TournamentTab;
@@ -64,13 +79,15 @@ const TABS: {
   { id: "configuracion", label: "Configuración", icon: Settings2 },
   { id: "inscripciones", label: "Inscripciones", icon: ClipboardList },
   { id: "zonas", label: "Zonas", icon: Grid3x3 },
+  { id: "fase-intermedia", label: "Fase Intermedia", icon: GitBranch },
+  { id: "fase-final", label: "Fase Final", icon: Trophy },
 ];
 
 export function ZonasTournamentDetail({
   clubSlug,
   currency,
   tournament,
-  levels,
+  catalogCategories,
   players,
   config,
   courtCount,
@@ -78,7 +95,7 @@ export function ZonasTournamentDetail({
   clubSlug: string;
   currency: string;
   tournament: ZonasTournamentDetail;
-  levels: string[];
+  catalogCategories: CatalogCategory[];
   players: PlayerRef[];
   config: TournamentConfig | null;
   courtCount: number;
@@ -89,20 +106,28 @@ export function ZonasTournamentDetail({
   const [categoryFilterId, setCategoryFilterId] = useState<string>(
     () => tournament.categories[0]?.id ?? "",
   );
+  const [zonasSubTab, setZonasSubTab] = useState<string>(
+    () => tournament.categories[0]?.id ?? REGLA_PARTIDOS_TAB,
+  );
 
   // Siempre una categoría concreta: no mezclar listados.
   useEffect(() => {
     if (tournament.categories.length === 0) {
       if (categoryFilterId) setCategoryFilterId("");
+      if (!ZONAS_TOOL_TABS.has(zonasSubTab)) {
+        setZonasSubTab(REGLA_PARTIDOS_TAB);
+      }
       return;
     }
     const stillValid = tournament.categories.some(
       (c) => c.id === categoryFilterId,
     );
     if (!stillValid) {
-      setCategoryFilterId(tournament.categories[0]!.id);
+      const first = tournament.categories[0]!.id;
+      setCategoryFilterId(first);
+      if (!ZONAS_TOOL_TABS.has(zonasSubTab)) setZonasSubTab(first);
     }
-  }, [tournament.categories, categoryFilterId]);
+  }, [tournament.categories, categoryFilterId, zonasSubTab]);
 
   const selectedCategory =
     tournament.categories.find((c) => c.id === categoryFilterId) ?? null;
@@ -113,8 +138,15 @@ export function ZonasTournamentDetail({
     toast.success("Link copiado");
   }
 
-  return (
-    <div className="flex w-full min-w-0 flex-col gap-4">
+  const chrome = (
+    <>
+      <Link
+        href={`/${clubSlug}/torneos`}
+        className="mb-1 flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ChevronLeft className="size-4" />
+        Volver a torneos
+      </Link>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -144,7 +176,7 @@ export function ZonasTournamentDetail({
       </div>
 
       <div
-        className="w-full min-w-0 flex items-center gap-2 overflow-x-auto"
+        className="mt-3 flex w-full min-w-0 items-center gap-2 overflow-x-auto"
         role="tablist"
         aria-label="Secciones del torneo"
       >
@@ -172,8 +204,61 @@ export function ZonasTournamentDetail({
           Copiar link
         </Button>
       </div>
+    </>
+  );
 
-      <div className="w-full min-w-0 overflow-x-clip">
+  return (
+    <div className="flex w-full min-w-0 flex-col">
+      {activeTab === "configuracion" ? (
+        <TournamentConfigTabs
+          clubSlug={clubSlug}
+          tournamentId={tournament.id}
+          categories={tournament.categories}
+          catalogCategories={catalogCategories}
+          config={config}
+          courtCount={courtCount}
+          header={chrome}
+        />
+      ) : (
+        <>
+          <div className="sticky top-0 z-20 -mx-4 -mt-4 border-b bg-background px-4 pt-4 pb-3">
+            {chrome}
+            {activeTab === "zonas" ? (
+              <div
+                className="mt-3 flex w-full min-w-0 items-center gap-2 overflow-x-auto"
+                role="tablist"
+                aria-label="Categorías de zonas"
+              >
+                {tournament.categories.map((category) => (
+                  <StableTabButton
+                    key={category.id}
+                    active={zonasSubTab === category.id}
+                    onSelect={() => {
+                      setCategoryFilterId(category.id);
+                      setZonasSubTab(category.id);
+                    }}
+                  >
+                    {category.name}
+                  </StableTabButton>
+                ))}
+                <StableTabButton
+                  active={zonasSubTab === REGLA_PARTIDOS_TAB}
+                  onSelect={() => setZonasSubTab(REGLA_PARTIDOS_TAB)}
+                >
+                  <Scale />
+                  Regla de Partidos
+                </StableTabButton>
+                <StableTabButton
+                  active={zonasSubTab === GRILLA_TAB}
+                  onSelect={() => setZonasSubTab(GRILLA_TAB)}
+                >
+                  <LayoutList />
+                  Grilla
+                </StableTabButton>
+              </div>
+            ) : null}
+          </div>
+          <div className="w-full min-w-0 overflow-x-clip pt-4">
       {activeTab === "info" ? (
         <Card>
           <CardHeader>
@@ -243,7 +328,20 @@ export function ZonasTournamentDetail({
       ) : null}
 
       {activeTab === "zonas" ? (
-        tournament.categories.length === 0 ? (
+        zonasSubTab === REGLA_PARTIDOS_TAB ? (
+          <ZonesMatchRulePanel
+            categories={tournament.categories}
+            config={config}
+            courtCount={courtCount}
+          />
+        ) : zonasSubTab === GRILLA_TAB ? (
+          <ZonesMatchGridPanel
+            tournamentName={tournament.name}
+            categories={tournament.categories}
+            pairs={tournament.pairs}
+            config={config}
+          />
+        ) : tournament.categories.length === 0 ? (
           <Card>
             <CardHeader>
               <CardTitle>Zonas</CardTitle>
@@ -262,23 +360,25 @@ export function ZonasTournamentDetail({
             config={config}
             courtCount={courtCount}
             initialCategoryId={categoryFilterId || undefined}
-            lockCategory={false}
             reservations={tournament.slotReservations}
           />
         )
       ) : null}
 
-      {activeTab === "configuracion" ? (
-        <TournamentConfigTabs
-          clubSlug={clubSlug}
-          tournamentId={tournament.id}
-          categories={tournament.categories}
-          levels={levels}
-          config={config}
-          courtCount={courtCount}
-        />
+      {activeTab === "fase-intermedia" || activeTab === "fase-final" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              {activeTab === "fase-intermedia"
+                ? "Fase Intermedia"
+                : "Fase Final"}
+            </CardTitle>
+          </CardHeader>
+        </Card>
       ) : null}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -9,14 +9,16 @@ import type {
   CreateCategoryValues,
   RenameCategoryValues,
 } from "../domain/category-schema";
+import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
+import type { CalendarCategoryValues } from "@/modules/herramientas/domain/calendario-schema";
 import type { UpdateCategorySimulationValues } from "../domain/category-simulation-schema";
-import { buildCategoryName } from "../domain/category-schema";
 import { normalizeCategoryLabel } from "../domain/category-level";
 import type { TournamentConfigValues } from "../domain/config-schema";
-import { defaultPhaseConfigs, defaultPlayDays } from "../domain/config-defaults";
-import type {
-  CreateTournamentValues,
-  UpdateTournamentValues,
+import { defaultPhaseConfigs, defaultPlayDays, syncPlayDaysToRange } from "../domain/config-defaults";
+import {
+  buildCloneTournamentName,
+  type CreateTournamentValues,
+  type UpdateTournamentValues,
 } from "../domain/tournament-schema";
 import { buildTournamentPublicSlug } from "../domain/slug";
 import type {
@@ -30,7 +32,10 @@ import type {
   TournamentStatus,
   ZonasTournamentDetail,
 } from "../domain/types";
-import { buildZonesFixture } from "../domain/build-zones-fixture";
+import {
+  buildZonesFixture,
+  reservedSlotsFromOtherFixtures,
+} from "../domain/build-zones-fixture";
 import { toPersistedZonesFixture } from "../domain/zones-fixture-schema";
 import type { TournamentType } from "../domain/tournament-types";
 import type {
@@ -59,6 +64,7 @@ const DEFAULT_LEVELS = ["1ra", "2da", "3ra", "4ta", "5ta", "6ta", "7ma", "8va"];
 interface ClubRecord {
   club: { id: string; name: string; slug: string; currency: string };
   tournaments: TournamentListItem[];
+  catalogCategories: CatalogCategory[];
   categories: Map<string, TournamentCategoryItem[]>;
   pairs: Map<string, PairListItem[]>;
   configs: Map<string, TournamentConfig>;
@@ -78,6 +84,8 @@ function ensureClub(slug: string): ClubRecord {
         currency: "ARS",
       },
       tournaments: slug === "club-demo" ? demoTournaments() : [],
+      catalogCategories:
+        slug === "club-demo" ? demoCatalogCategories() : [],
       categories: slug === "club-demo" ? demoCategories() : new Map(),
       pairs: slug === "club-demo" ? demoPairs() : new Map(),
       configs: slug === "club-demo" ? demoConfigs() : new Map(),
@@ -87,6 +95,9 @@ function ensureClub(slug: string): ClubRecord {
   }
   if (!record.slotReservations) {
     record.slotReservations = new Map();
+  }
+  if (!record.catalogCategories) {
+    record.catalogCategories = slug === "club-demo" ? demoCatalogCategories() : [];
   }
   return record;
 }
@@ -122,6 +133,23 @@ function demoTournaments(): TournamentListItem[] {
   ];
 }
 
+function demoCatalogCategories(): CatalogCategory[] {
+  return [
+    {
+      id: "demo-cat-f5-catalog",
+      name: "Femenina 5ta",
+      abbreviation: "F5",
+      color: "#db2777",
+    },
+    {
+      id: "demo-cat-m4-catalog",
+      name: "Masculina 4ta",
+      abbreviation: "M4",
+      color: "#2563eb",
+    },
+  ];
+}
+
 function demoCategories(): Map<string, TournamentCategoryItem[]> {
   return new Map([
     [
@@ -130,6 +158,9 @@ function demoCategories(): Map<string, TournamentCategoryItem[]> {
         {
           id: "demo-cat-f5",
           name: "Femenina 5ta",
+          catalogCategoryId: "demo-cat-f5-catalog",
+          abbreviation: "F5",
+          color: "#db2777",
           pairCount: 3,
           confirmedCount: 2,
           withoutPartnerCount: 1,
@@ -140,6 +171,9 @@ function demoCategories(): Map<string, TournamentCategoryItem[]> {
         {
           id: "demo-cat-m4",
           name: "Masculina 4ta",
+          catalogCategoryId: "demo-cat-m4-catalog",
+          abbreviation: "M4",
+          color: "#2563eb",
           pairCount: 1,
           confirmedCount: 0,
           withoutPartnerCount: 0,
@@ -272,9 +306,11 @@ function buildTournamentConfig(
     startDate: tournament.startDate,
     endDate: tournament.endDate,
     courtCount: stored?.courtCount ?? 4,
-    playDays:
-      stored?.playDays ??
-      defaultPlayDays(tournament.startDate, tournament.endDate),
+    playDays: syncPlayDaysToRange(
+      stored?.playDays ?? [],
+      tournament.startDate,
+      tournament.endDate,
+    ),
     categories: categories.map((category) => {
       const saved = stored?.categories.find(
         (item) => item.categoryId === category.id,
@@ -397,6 +433,47 @@ export class MockTournamentRepository implements TournamentRepository {
     return null;
   }
 
+  async listCatalogCategories(clubId: string): Promise<CatalogCategory[]> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      return record.catalogCategories.map((c) => ({ ...c }));
+    }
+    return [];
+  }
+
+  async createCatalogCategory(
+    clubId: string,
+    input: CalendarCategoryValues,
+  ): Promise<CatalogCategory | { error: string }> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      if (
+        record.catalogCategories.some(
+          (c) =>
+            c.abbreviation.toLowerCase() === input.abbreviation.toLowerCase(),
+        )
+      ) {
+        return { error: "Ya existe una categoría con esa abreviación" };
+      }
+      if (
+        record.catalogCategories.some(
+          (c) => c.name.toLowerCase() === input.name.toLowerCase(),
+        )
+      ) {
+        return { error: "Ya existe una categoría con ese nombre" };
+      }
+      const created: CatalogCategory = {
+        id: `catalog-${Date.now()}`,
+        name: input.name,
+        abbreviation: input.abbreviation,
+        color: input.color,
+      };
+      record.catalogCategories.push(created);
+      return { ...created };
+    }
+    return { error: "Club no encontrado" };
+  }
+
   async createTournamentCategory(
     clubId: string,
     tournamentId: string,
@@ -409,16 +486,29 @@ export class MockTournamentRepository implements TournamentRepository {
         return { ok: false, error: "Torneo no encontrado" };
       }
 
-      const name = buildCategoryName(input.gender, input.level);
+      const catalog = record.catalogCategories.find(
+        (c) => c.id === input.catalogCategoryId,
+      );
+      if (!catalog) return { ok: false, error: "Categoría no encontrada" };
+
       const categories = record.categories.get(tournamentId) ?? [];
-      if (categories.some((c) => c.name === name)) {
-        return { ok: false, error: "Ya existe una categoría con ese nombre" };
+      if (
+        categories.some(
+          (c) =>
+            c.catalogCategoryId === catalog.id ||
+            c.name.toLowerCase() === catalog.name.toLowerCase(),
+        )
+      ) {
+        return { ok: false, error: "Esa categoría ya está en el torneo" };
       }
 
       const id = `cat-${Date.now()}`;
       const category: TournamentCategoryItem = {
         id,
-        name,
+        name: catalog.name,
+        catalogCategoryId: catalog.id,
+        abbreviation: catalog.abbreviation,
+        color: catalog.color,
         pairCount: 0,
         confirmedCount: 0,
         withoutPartnerCount: 0,
@@ -525,6 +615,124 @@ export class MockTournamentRepository implements TournamentRepository {
     throw new Error("Club no encontrado");
   }
 
+  async cloneTournament(
+    clubId: string,
+    tournamentId: string,
+    input: { includePairs: boolean },
+  ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const source = record.tournaments.find((t) => t.id === tournamentId);
+      if (!source) return { ok: false, error: "Torneo no encontrado" };
+
+      const id = `t-${Date.now()}`;
+      const cloneName = buildCloneTournamentName(source.name);
+      const clone: TournamentListItem = {
+        ...source,
+        id,
+        name: cloneName,
+        status: "DRAFT",
+        publicSlug: buildTournamentPublicSlug(cloneName),
+        registrationCount: input.includePairs ? source.registrationCount : 0,
+        confirmedCount: input.includePairs ? source.confirmedCount : 0,
+      };
+      record.tournaments.unshift(clone);
+
+      const sourceCategories = record.categories.get(tournamentId) ?? [];
+      const categoryIdMap = new Map<string, string>();
+      const clonedCategories = sourceCategories.map((category, index) => {
+        const nextId = `${id}-cat-${index}`;
+        categoryIdMap.set(category.id, nextId);
+        return {
+          ...category,
+          id: nextId,
+          pairCount: input.includePairs ? category.pairCount : 0,
+          confirmedCount: input.includePairs ? category.confirmedCount : 0,
+          withoutPartnerCount: input.includePairs
+            ? category.withoutPartnerCount
+            : 0,
+          withoutZoneCount: input.includePairs ? category.withoutZoneCount : 0,
+        };
+      });
+      record.categories.set(id, clonedCategories);
+
+      const sourceConfig = record.configs.get(tournamentId);
+      if (sourceConfig) {
+        record.configs.set(id, {
+          ...sourceConfig,
+          tournamentId: id,
+          tournamentName: cloneName,
+          startDate: clone.startDate,
+          endDate: clone.endDate,
+          playDays: sourceConfig.playDays.map((day) => ({ ...day })),
+          categories: sourceConfig.categories.map((category) => ({
+            ...category,
+            categoryId:
+              categoryIdMap.get(category.categoryId) ?? category.categoryId,
+            zonesFixture: null,
+          })),
+        });
+      }
+
+      if (!input.includePairs) {
+        record.pairs.set(id, []);
+        record.slotReservations.set(id, []);
+        return { ok: true, id };
+      }
+
+      const pairIdMap = new Map<string, string>();
+      const clonedPairs = (record.pairs.get(tournamentId) ?? [])
+        .filter((pair) => pair.status !== "CANCELLED")
+        .map((pair, index) => {
+          const nextId = `${id}-pair-${index}`;
+          pairIdMap.set(pair.id, nextId);
+          return {
+            ...pair,
+            id: nextId,
+            categoryId: categoryIdMap.get(pair.categoryId) ?? pair.categoryId,
+          };
+        });
+      record.pairs.set(id, clonedPairs);
+
+      const clonedSlots = (record.slotReservations.get(tournamentId) ?? [])
+        .map((slot, index) => {
+          const pairId = pairIdMap.get(slot.pairId);
+          const categoryId = categoryIdMap.get(slot.categoryId);
+          if (!pairId || !categoryId) return null;
+          return {
+            ...slot,
+            id: `${id}-slot-${index}`,
+            tournamentId: id,
+            categoryId,
+            pairId,
+          };
+        })
+        .filter((slot): slot is SlotReservationItem => slot !== null);
+      record.slotReservations.set(id, clonedSlots);
+
+      return { ok: true, id };
+    }
+    return { ok: false, error: "Club no encontrado" };
+  }
+
+  async deleteTournament(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<MutationResult> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const index = record.tournaments.findIndex((t) => t.id === tournamentId);
+      if (index < 0) return { ok: false, error: "Torneo no encontrado" };
+      record.tournaments.splice(index, 1);
+      record.categories.delete(tournamentId);
+      record.pairs.delete(tournamentId);
+      record.configs.delete(tournamentId);
+      record.slotReservations.delete(tournamentId);
+      return { ok: true };
+    }
+    return { ok: false, error: "Club no encontrado" };
+  }
+
   async updateTournament(
     clubId: string,
     tournamentId: string,
@@ -540,6 +748,19 @@ export class MockTournamentRepository implements TournamentRepository {
       tournament.startDate = input.startDate;
       tournament.endDate = input.endDate ?? null;
       tournament.fee = input.fee;
+      const stored = record.configs.get(tournamentId);
+      if (stored) {
+        record.configs.set(tournamentId, {
+          ...stored,
+          startDate: tournament.startDate,
+          endDate: tournament.endDate,
+          playDays: syncPlayDaysToRange(
+            stored.playDays,
+            tournament.startDate,
+            tournament.endDate,
+          ),
+        });
+      }
       return { ok: true };
     }
     return { ok: false, error: "Club no encontrado" };
@@ -1124,6 +1345,10 @@ export class MockTournamentRepository implements TournamentRepository {
         zonesPlayDates: categoryConfig.phases.zones.playDates,
         courtCount: Math.max(1, config.courtCount || 1),
         slotMinutes: Math.max(1, slotMinutes),
+        reservedSlots: reservedSlotsFromOtherFixtures(
+          config.categories,
+          categoryId,
+        ),
       });
 
       const persisted = toPersistedZonesFixture(result);
@@ -1199,9 +1424,61 @@ export class MockTournamentRepository implements TournamentRepository {
         startDate: tournament.startDate,
         endDate: tournament.endDate,
         courtCount: input.courtCount,
-        playDays: input.playDays,
+        playDays: syncPlayDaysToRange(
+          input.playDays,
+          tournament.startDate,
+          tournament.endDate,
+        ),
         categories: categoryConfigs,
       });
+      return { ok: true };
+    }
+    return { ok: false, error: "Club no encontrado" };
+  }
+
+  async copyCategoryPhaseConfig(
+    clubId: string,
+    tournamentId: string,
+    sourceCategoryId: string,
+    targetCategoryId: string,
+  ): Promise<MutationResult> {
+    if (sourceCategoryId === targetCategoryId) {
+      return { ok: false, error: "Elegí otra categoría de origen" };
+    }
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const config = record.configs.get(tournamentId);
+      if (!config) return { ok: false, error: "Configuración no encontrada" };
+      const source = config.categories.find(
+        (c) => c.categoryId === sourceCategoryId,
+      );
+      const targetIndex = config.categories.findIndex(
+        (c) => c.categoryId === targetCategoryId,
+      );
+      if (!source) {
+        return { ok: false, error: "La categoría de origen no tiene configuración" };
+      }
+      if (targetIndex < 0) {
+        return { ok: false, error: "Categoría destino no encontrada" };
+      }
+      const target = config.categories[targetIndex];
+      config.categories[targetIndex] = {
+        ...target,
+        phases: {
+          zones: { ...source.phases.zones, playDates: [...source.phases.zones.playDates] },
+          knockout: {
+            ...source.phases.knockout,
+            playDates: [...source.phases.knockout.playDates],
+          },
+          final: {
+            ...source.phases.final,
+            playDates: [...source.phases.final.playDates],
+          },
+        },
+        intervalMin: source.intervalMin,
+        pairsPerZone: source.pairsPerZone,
+        zone4Advancers: source.zone4Advancers,
+      };
       return { ok: true };
     }
     return { ok: false, error: "Club no encontrado" };

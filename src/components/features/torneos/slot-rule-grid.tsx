@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatWeekdayName } from "@/lib/date";
@@ -12,16 +14,34 @@ import {
   listSelectablePreferenceSlotsForDay,
   mergeRegistrationDaySlots,
 } from "@/modules/tournaments/domain/court-day-slots";
+import {
+  PLAY_DAY_START_MINUTES,
+  type PlayDayStartMinutes,
+  type PlayDayWindowDelta,
+  type PlayDayWindowEdge,
+} from "@/modules/tournaments/domain/play-day-slots";
+import { EdgeButtons } from "./play-day-slot-ruler";
 
 export type SlotRuleGridMode = "simulation" | "registration";
+
+/// Categorías de la simulación integral: pintan un redondelito en cada slot ocupado.
+export interface SlotRuleGridCategory {
+  id: string;
+  name: string;
+  abbreviation?: string | null;
+  color: string;
+}
 
 const STATUS_LABEL: Record<SlotCellStatus, string> = {
   free: "Libre",
   projected: "Proyectado",
   blocked: "Bloqueado",
   reserved: "Ocupado",
-  mine: "Tu preferencia",
+    mine: "Tu preferencia",
 };
+
+const SLOT_BOX_CLASS =
+  "flex h-[3.25rem] w-16 shrink-0 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border px-1 text-xs leading-tight transition-colors";
 
 function cellClass(
   status: SlotCellStatus,
@@ -74,6 +94,12 @@ export function SlotRuleGrid({
   dayActionsDisabled = false,
   className,
   showMineCount = true,
+  categories,
+  onAdjustPlayDay,
+  canAdjustPlayDay,
+  adjustDisabled = false,
+  onSetPlayDayStartMinutes,
+  phaseLegend = true,
 }: {
   mode: SlotRuleGridMode;
   rules: CourtDayRule[];
@@ -85,7 +111,79 @@ export function SlotRuleGrid({
   dayActionsDisabled?: boolean;
   className?: string;
   showMineCount?: boolean;
+  /// Simulación integral: identifica con un punto de color qué categoría ocupa cada slot.
+  categories?: SlotRuleGridCategory[];
+  /// Mismos + / − que en Parámetros: alargan o recortan el rango del día.
+  onAdjustPlayDay?: (
+    playDate: string,
+    edge: PlayDayWindowEdge,
+    delta: PlayDayWindowDelta,
+  ) => void;
+  canAdjustPlayDay?: (
+    playDate: string,
+    edge: PlayDayWindowEdge,
+    delta: PlayDayWindowDelta,
+  ) => boolean;
+  adjustDisabled?: boolean;
+  onSetPlayDayStartMinutes?: (
+    playDate: string,
+    minutes: PlayDayStartMinutes,
+  ) => void;
+  /// Si false, oculta Zonas / Intermedia / Final (p. ej. vista de partidos reales).
+  phaseLegend?: boolean;
 }) {
+  const integral = mode === "simulation" && (categories?.length ?? 0) > 0;
+  const categoryById = new Map(
+    (categories ?? []).map((category) => [category.id, category]),
+  );
+  const [startMenu, setStartMenu] = useState<{
+    x: number;
+    y: number;
+    playDate: string;
+    currentMinutes: number;
+  } | null>(null);
+  const startMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!startMenu) return;
+    function onPointerDown(event: MouseEvent) {
+      if (!startMenuRef.current?.contains(event.target as Node)) {
+        setStartMenu(null);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setStartMenu(null);
+    }
+    function onScroll() {
+      setStartMenu(null);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [startMenu]);
+
+  function openStartMinutesMenu(
+    event: ReactMouseEvent,
+    playDate: string,
+    startTime: string,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (adjustDisabled || !onSetPlayDayStartMinutes) return;
+    const [, minutes = "0"] = startTime.split(":");
+    setStartMenu({
+      x: event.clientX,
+      y: event.clientY,
+      playDate,
+      currentMinutes: Number.parseInt(minutes, 10) || 0,
+    });
+  }
+
   if (rules.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -97,6 +195,7 @@ export function SlotRuleGrid({
   }
 
   return (
+    <>
     <div className={cn("space-y-4", className)}>
       {mode === "registration" && showMineCount && (
         <p className="text-sm text-muted-foreground">
@@ -109,11 +208,11 @@ export function SlotRuleGrid({
 
       <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
         <LegendSwatch className={cellClass("free")} label="Libre" />
-        {mode === "simulation" ? (
+        {mode === "simulation" && phaseLegend ? (
           <>
             <LegendSwatch
               className={cellClass("projected", "zones")}
-              label="Zonas (esta categoría)"
+              label={integral ? "Zonas" : "Zonas (esta categoría)"}
             />
             <LegendSwatch
               className={cellClass("projected", "knockout")}
@@ -123,11 +222,18 @@ export function SlotRuleGrid({
               className={cellClass("projected", "final")}
               label="Final"
             />
-            <LegendSwatch
-              className={cellClass("projected", "zones", "other")}
-              label="Otra categoría"
-            />
+            {!integral && (
+              <LegendSwatch
+                className={cellClass("projected", "zones", "other")}
+                label="Otra categoría"
+              />
+            )}
           </>
+        ) : mode === "simulation" ? (
+          <LegendSwatch
+            className={cellClass("projected", "zones")}
+            label="Partido"
+          />
         ) : (
           <>
             <LegendSwatch className={cellClass("mine")} label="Tu preferencia" />
@@ -138,6 +244,21 @@ export function SlotRuleGrid({
           </>
         )}
       </div>
+
+      {integral && (
+        <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+          {categories?.map((category) => (
+            <span key={category.id} className="inline-flex items-center gap-1.5">
+              <span
+                className="inline-block size-[15px] rounded-full"
+                style={{ backgroundColor: category.color }}
+                aria-hidden
+              />
+              {category.abbreviation || category.name}
+            </span>
+          ))}
+        </div>
+      )}
 
       {rules.map((day) => {
         const daySlots =
@@ -170,6 +291,9 @@ export function SlotRuleGrid({
             <span className="ml-2 text-sm font-normal text-muted-foreground">
               {mode === "simulation" ? `${day.playDate} · ` : ""}
               {day.startTime}–{day.endTime}
+              {mode === "simulation" && day.slotMinutes
+                ? ` · slots de ${day.slotMinutes} min`
+                : ""}
             </span>
           </p>
           {mode === "registration" ? (
@@ -241,19 +365,66 @@ export function SlotRuleGrid({
             {day.courts.map((court) => (
               <div
                 key={`${day.playDate}-${court.courtIndex}`}
-                className="flex flex-wrap items-center gap-2"
+                className="max-w-full overflow-x-auto"
               >
+                <div className="flex w-max flex-nowrap items-center gap-1.5">
                 <span className="w-20 shrink-0 text-xs text-muted-foreground">
                   {court.courtLabel}
                 </span>
-                <div className="flex flex-wrap gap-1.5">
+                {onAdjustPlayDay && (
+                  <EdgeButtons
+                    side="left"
+                    onAdd={() => onAdjustPlayDay(day.playDate, "start", "add")}
+                    onRemove={() =>
+                      onAdjustPlayDay(day.playDate, "start", "remove")
+                    }
+                    addDisabled={
+                      canAdjustPlayDay
+                        ? !canAdjustPlayDay(day.playDate, "start", "add")
+                        : false
+                    }
+                    removeDisabled={
+                      canAdjustPlayDay
+                        ? !canAdjustPlayDay(day.playDate, "start", "remove")
+                        : court.slots.length <= 1
+                    }
+                    readOnly={adjustDisabled}
+                  />
+                )}
+                <div className="flex flex-nowrap gap-1.5">
                   {court.slots.map((slot) => {
                     const clickable = isClickable(mode, slot, interactive);
+                    const canSetStartMinutes =
+                      mode === "simulation" &&
+                      Boolean(onSetPlayDayStartMinutes) &&
+                      !adjustDisabled &&
+                      slot.slotIndex === 0;
+                    const occupants =
+                      slot.occupants && slot.occupants.length > 0
+                        ? slot.occupants
+                        : slot.projectedCategoryId
+                          ? [
+                              {
+                                categoryId: slot.projectedCategoryId,
+                                matchCode: slot.matchCode ?? null,
+                              },
+                            ]
+                          : [];
+                    const conflict = occupants.length > 1;
+                    const slotCategory = slot.projectedCategoryId
+                      ? categoryById.get(slot.projectedCategoryId)
+                      : undefined;
                     const titleParts = [
-                      slot.projectedSource === "other"
-                        ? "Otra categoría (misma cancha)"
-                        : STATUS_LABEL[slot.status],
+                      conflict
+                        ? "Choque: dos categorías en la misma cancha y hora"
+                        : slot.projectedSource === "other"
+                          ? "Otra categoría (misma cancha)"
+                          : STATUS_LABEL[slot.status],
                       `${slot.startTime}–${slot.endTime}`,
+                      ...occupants.map((occupant) => {
+                        const name = categoryById.get(occupant.categoryId)?.name;
+                        return [name, occupant.matchCode].filter(Boolean).join(" ");
+                      }),
                       slot.pairLabel,
                       slot.blockReason === "knockout"
                         ? "Reservado fase intermedia"
@@ -261,37 +432,109 @@ export function SlotRuleGrid({
                       slot.projectedPhase && slot.projectedSource !== "other"
                         ? `Fase: ${slot.projectedPhase}`
                         : null,
+                      canSetStartMinutes
+                        ? "Clic derecho: minutos de arranque"
+                        : null,
                     ].filter(Boolean);
 
                     return (
                       <button
                         key={slot.id}
                         type="button"
-                        disabled={!clickable}
+                        disabled={!clickable && !canSetStartMinutes}
                         title={titleParts.join(" · ")}
                         aria-label={`${court.courtLabel} ${slot.startTime} ${
-                          slot.projectedSource === "other"
-                            ? "Otra categoría"
-                            : STATUS_LABEL[slot.status]
+                          slot.matchCode ??
+                          (slotCategory
+                            ? slotCategory.name
+                            : slot.projectedSource === "other"
+                              ? "Otra categoría"
+                              : STATUS_LABEL[slot.status])
                         }`}
                         onClick={() => clickable && onToggleSlot?.(slot)}
+                        onContextMenu={(event) =>
+                          canSetStartMinutes
+                            ? openStartMinutesMenu(
+                                event,
+                                day.playDate,
+                                slot.startTime,
+                              )
+                            : undefined
+                        }
                         className={cn(
-                          "flex h-10 min-w-10 flex-col items-center justify-center rounded-md border px-1.5 text-[10px] leading-tight transition-colors",
-                          cellClass(
-                            slot.status,
-                            slot.projectedPhase,
-                            slot.projectedSource,
-                          ),
-                          clickable && "cursor-pointer",
-                          !clickable && "cursor-default opacity-95",
+                          SLOT_BOX_CLASS,
+                          conflict
+                            ? cellClass("reserved")
+                            : cellClass(
+                                slot.status,
+                                slot.projectedPhase,
+                                slot.projectedSource,
+                              ),
+                          (clickable || canSetStartMinutes) && "cursor-pointer",
+                          !clickable &&
+                            !canSetStartMinutes &&
+                            "cursor-default opacity-95",
                         )}
                       >
                         <span className="font-semibold tabular-nums">
                           {slot.startTime}
                         </span>
+                        {occupants.length > 0 ? (
+                          <span className="inline-flex items-center gap-1 font-semibold tracking-tight">
+                            {occupants.map((occupant) => {
+                              const occupantCategory = categoryById.get(
+                                occupant.categoryId,
+                              );
+                              return (
+                                <span
+                                  key={`${occupant.categoryId}-${occupant.matchCode ?? ""}`}
+                                  className="inline-flex items-center gap-0.5"
+                                >
+                                  {occupantCategory ? (
+                                    <span
+                                      className="size-3 shrink-0 rounded-full ring-1 ring-inset ring-black/20"
+                                      style={{
+                                        backgroundColor: occupantCategory.color,
+                                      }}
+                                      aria-hidden
+                                    />
+                                  ) : null}
+                                  {occupant.matchCode}
+                                </span>
+                              );
+                            })}
+                          </span>
+                        ) : slotCategory ? (
+                          <span
+                            className="size-3 shrink-0 rounded-full ring-1 ring-inset ring-black/20"
+                            style={{ backgroundColor: slotCategory.color }}
+                            aria-hidden
+                          />
+                        ) : null}
                       </button>
                     );
                   })}
+                </div>
+                {onAdjustPlayDay && (
+                  <EdgeButtons
+                    side="right"
+                    onAdd={() => onAdjustPlayDay(day.playDate, "end", "add")}
+                    onRemove={() =>
+                      onAdjustPlayDay(day.playDate, "end", "remove")
+                    }
+                    addDisabled={
+                      canAdjustPlayDay
+                        ? !canAdjustPlayDay(day.playDate, "end", "add")
+                        : false
+                    }
+                    removeDisabled={
+                      canAdjustPlayDay
+                        ? !canAdjustPlayDay(day.playDate, "end", "remove")
+                        : court.slots.length <= 1
+                    }
+                    readOnly={adjustDisabled}
+                  />
+                )}
                 </div>
               </div>
             ))}
@@ -301,6 +544,39 @@ export function SlotRuleGrid({
         );
       })}
     </div>
+    {startMenu ? (
+      <div
+        ref={startMenuRef}
+        role="menu"
+        className="fixed z-50 min-w-40 rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
+        style={{
+          left: Math.min(startMenu.x, window.innerWidth - 180),
+          top: Math.min(startMenu.y, window.innerHeight - 180),
+        }}
+      >
+        <p className="px-2 py-1.5 text-xs text-muted-foreground">
+          Minutos de arranque
+        </p>
+        {PLAY_DAY_START_MINUTES.map((minutes) => (
+          <button
+            key={minutes}
+            type="button"
+            role="menuitem"
+            className={cn(
+              "flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground",
+              startMenu.currentMinutes === minutes && "font-medium",
+            )}
+            onClick={() => {
+              onSetPlayDayStartMinutes?.(startMenu.playDate, minutes);
+              setStartMenu(null);
+            }}
+          >
+            {minutes} minutos
+          </button>
+        ))}
+      </div>
+    ) : null}
+    </>
   );
 }
 
