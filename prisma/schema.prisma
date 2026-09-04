@@ -459,6 +459,8 @@ model Tournament {
   fee                  Int              @default(0)
   /// Canchas disponibles para partidos del torneo (capacidad horaria).
   courtCount           Int              @default(1)
+  /// AUTO: Actualizar genera el fixture. MANUAL: se edita a mano y Actualizar queda bloqueada.
+  fixtureEditMode      String           @default("AUTO")
   /// Slug p?blico para el link de inscripci?n (?nico por club).
   publicSlug           String
   registrationOpensAt  DateTime?

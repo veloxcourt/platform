@@ -20,6 +20,8 @@ import type {
   PaymentStatus,
   RegistrationStatus,
 } from "@/modules/tournaments/domain/types";
+import { intermediateFixtureSchema } from "@/modules/tournaments/domain/intermediate-fixture-schema";
+import { zonesFixtureDraftSchema } from "@/modules/tournaments/domain/zones-fixture-schema";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -253,7 +255,8 @@ export async function buildZonesFixtureAction(
   const finalPhase = await repo.buildAndSaveFinalFixture(clubId, tournamentId);
   if (!finalPhase.ok) {
     const skip =
-      finalPhase.error === "Ninguna categoría tiene fase final para armar";
+      finalPhase.error === "Ninguna categoría tiene fase final para armar" ||
+      finalPhase.error === "Esta categoría no tiene fase final para armar";
     if (!skip && finalPhase.error) {
       warnings.push(`Final: ${finalPhase.error}`);
     }
@@ -349,7 +352,8 @@ export async function buildAllZonesFixturesAction(
   const finalPhase = await repo.buildAndSaveFinalFixture(clubId, tournamentId);
   if (!finalPhase.ok) {
     const skip =
-      finalPhase.error === "Ninguna categoría tiene fase final para armar";
+      finalPhase.error === "Ninguna categoría tiene fase final para armar" ||
+      finalPhase.error === "Esta categoría no tiene fase final para armar";
     if (!skip && finalPhase.error) {
       warnings.push(`Final: ${finalPhase.error}`);
     }
@@ -370,6 +374,7 @@ export async function buildAllZonesFixturesAction(
 export async function buildIntermediateFixtureAction(
   clubSlug: string,
   tournamentId: string,
+  categoryId?: string,
 ): Promise<
   | {
       ok: true;
@@ -385,16 +390,22 @@ export async function buildIntermediateFixtureAction(
   const result = await repo.buildAndSaveIntermediateFixture(
     clubId,
     tournamentId,
+    categoryId,
   );
   if (!result.ok) {
     return { ok: false, error: result.error ?? "Error" };
   }
 
   const warnings = [...result.warnings];
-  const finalPhase = await repo.buildAndSaveFinalFixture(clubId, tournamentId);
+  const finalPhase = await repo.buildAndSaveFinalFixture(
+    clubId,
+    tournamentId,
+    categoryId,
+  );
   if (!finalPhase.ok) {
     const skip =
-      finalPhase.error === "Ninguna categoría tiene fase final para armar";
+      finalPhase.error === "Ninguna categoría tiene fase final para armar" ||
+      finalPhase.error === "Esta categoría no tiene fase final para armar";
     if (!skip && finalPhase.error) {
       warnings.push(`Final: ${finalPhase.error}`);
     }
@@ -409,6 +420,7 @@ export async function buildIntermediateFixtureAction(
 export async function buildFinalFixtureAction(
   clubSlug: string,
   tournamentId: string,
+  categoryId?: string,
 ): Promise<
   | {
       ok: true;
@@ -421,13 +433,81 @@ export async function buildFinalFixtureAction(
   const { repo, clubId } = await resolveClubId(clubSlug);
   if (!clubId) return { ok: false, error: "Club no encontrado" };
 
-  const result = await repo.buildAndSaveFinalFixture(clubId, tournamentId);
+  const result = await repo.buildAndSaveFinalFixture(
+    clubId,
+    tournamentId,
+    categoryId,
+  );
   if (!result.ok) {
     return { ok: false, error: result.error ?? "Error" };
   }
 
   revalidate(clubSlug, tournamentId);
   return result;
+}
+
+export async function setFixtureEditModeAction(
+  clubSlug: string,
+  tournamentId: string,
+  mode: "AUTO" | "MANUAL",
+): Promise<Result> {
+  if (mode !== "AUTO" && mode !== "MANUAL") {
+    return { ok: false, error: "Modo inválido" };
+  }
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+  const result = await repo.setFixtureEditMode(clubId, tournamentId, mode);
+  if (result.ok) revalidate(clubSlug, tournamentId);
+  return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };
+}
+
+export async function saveZonesFixtureDraftAction(
+  clubSlug: string,
+  tournamentId: string,
+  categoryId: string,
+  draft: unknown,
+): Promise<Result> {
+  const parsed = zonesFixtureDraftSchema.safeParse(draft);
+  if (!parsed.success) {
+    return { ok: false, error: "Datos de zonas inválidos" };
+  }
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+  const result = await repo.saveZonesFixtureDraft(
+    clubId,
+    tournamentId,
+    categoryId,
+    parsed.data,
+  );
+  if (result.ok) revalidate(clubSlug, tournamentId);
+  return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };
+}
+
+export async function saveKnockoutFixtureDraftAction(
+  clubSlug: string,
+  tournamentId: string,
+  categoryId: string,
+  phase: "intermediate" | "final",
+  fixture: unknown,
+): Promise<Result> {
+  if (phase !== "intermediate" && phase !== "final") {
+    return { ok: false, error: "Fase inválida" };
+  }
+  const parsed = intermediateFixtureSchema.safeParse(fixture);
+  if (!parsed.success) {
+    return { ok: false, error: "Datos de fixture inválidos" };
+  }
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+  const result = await repo.saveKnockoutFixtureDraft(
+    clubId,
+    tournamentId,
+    categoryId,
+    phase,
+    parsed.data,
+  );
+  if (result.ok) revalidate(clubSlug, tournamentId);
+  return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };
 }
 
 export async function getZonasTournamentDetailAction(

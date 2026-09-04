@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Grid3x3, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -15,7 +15,10 @@ import {
 } from "@/components/ui/card";
 import { formatWeekday } from "@/lib/date";
 import { formatAbbreviatedPairLabel } from "@/lib/person-name";
-import { buildZonesFixtureAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
+import {
+  buildZonesFixtureAction,
+  saveZonesFixtureDraftAction,
+} from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 import type { MatchFormat } from "@/modules/tournaments/domain/config-schema";
 import type {
   PairListItem,
@@ -38,7 +41,11 @@ import {
   type ZoneDraft,
   type ZonePairOption,
 } from "./zone-card";
+import { ActualizarHoverHint } from "./actualizar-hover-hint";
+import { useFixtureEditMode } from "./fixture-edit-mode-context";
+import { GrillaPdfMenu } from "./grilla-pdf-menu";
 import { useTournamentReadOnly } from "./tournament-mode-context";
+import { buildZonesMatchGridRows } from "./zones-match-grid-model";
 
 function pairOptionLabel(pair: PairListItem): string {
   return formatAbbreviatedPairLabel(
@@ -225,7 +232,9 @@ export function TournamentZonesPanel({
 }) {
   const router = useRouter();
   const readOnly = useTournamentReadOnly();
+  const { isManual, scheduleLocked } = useFixtureEditMode();
   const [isPending, startTransition] = useTransition();
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [zonesByCategory, setZonesByCategory] = useState<
     Record<string, ZoneDraft[]>
   >({});
@@ -308,6 +317,20 @@ export function TournamentZonesPanel({
     return Math.max(1, duration + interval);
   }, [categoryConfig]);
 
+  const pdfRows = useMemo(() => {
+    if (!config || !activeCategoryId) return [];
+    return buildZonesMatchGridRows({
+      categories: categoryMeta ? [categoryMeta] : [],
+      pairs: categoryPairs,
+      config: {
+        ...config,
+        categories: config.categories.filter(
+          (item) => item.categoryId === activeCategoryId,
+        ),
+      },
+    });
+  }, [activeCategoryId, categoryMeta, categoryPairs, config]);
+
   const zones = useMemo(() => {
     if (!activeCategoryId) return [];
     if (zonesByCategory[activeCategoryId]) {
@@ -331,13 +354,50 @@ export function TournamentZonesPanel({
     dayOpenByDate,
   ]);
 
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
+  function persistZones(next: ZoneDraft[]) {
+    if (!isManual || readOnly || !activeCategoryId) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      void saveZonesFixtureDraftAction(clubSlug, tournamentId, activeCategoryId, {
+        zones: next.map((zone) => ({
+          label: zone.label,
+          pairIds: zone.pairIds,
+          matches: zone.matches.map((match) => ({
+            kind: match.kind,
+            playDate: match.playDate,
+            startTime: match.startTime,
+            courtIndex: match.courtIndex,
+            pair1Id: match.pair1Id,
+            pair2Id: match.pair2Id,
+            noRestGap: match.noRestGap,
+            ruleBreaks: match.ruleBreaks,
+          })),
+        })),
+      }).then((result) => {
+        if (!result.ok) {
+          toast.error("No se pudo guardar el ajuste", {
+            description: result.error,
+          });
+        }
+      });
+    }, 600);
+  }
+
   function setZones(next: ZoneDraft[]) {
     if (!activeCategoryId) return;
     setZonesByCategory((prev) => ({ ...prev, [activeCategoryId]: next }));
   }
 
   function updateZone(zoneId: string, next: ZoneDraft) {
-    setZones(zones.map((z) => (z.id === zoneId ? next : z)));
+    const nextZones = zones.map((z) => (z.id === zoneId ? next : z));
+    setZones(nextZones);
+    persistZones(nextZones);
   }
 
   function handleActualizar() {
@@ -401,26 +461,59 @@ export function TournamentZonesPanel({
             {zone4Advancers}
             {zone4Advancers === 2 ? " · APA" : " · FAP"}).{" "}
             <span className="font-medium text-foreground">Actualizar</span>{" "}
-            asigna parejas y completa día, horario y cancha según preferencias.
-            Después podés ajustar a mano.
+            arma en Modo Automático. Para retocar día, horario o cancha, pasá a
+            Modo Manual.
             {!hasAssigned
               ? " Todavía no hay un armado guardado."
               : null}
           </CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <GrillaPdfMenu
+            tournamentName={config?.tournamentName ?? ""}
+            rows={pdfRows}
+          />
           {!readOnly && (
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleActualizar}
-              disabled={isPending || !activeCategoryId}
+            <ActualizarHoverHint
+              heading={
+                isManual
+                  ? "Actualizar está bloqueada en Modo Manual"
+                  : hasAssigned
+                    ? "Vuelve a armar las zonas de esta categoría"
+                    : "Arma las zonas de esta categoría"
+              }
+              effects={
+                isManual
+                  ? [
+                      "En Manual no se regeneran zonas ni horarios",
+                      "Ajustá día, horario, cancha y parejas a mano",
+                    ]
+                  : [
+                      "Reasigna las parejas de cada zona",
+                      "Recalcula día, horario y cancha de los partidos",
+                      "También rearma fase intermedia y fase final",
+                    ]
+              }
+              note={
+                isManual
+                  ? "Pasá a Modo Automático si querés volver a generar."
+                  : hasAssigned
+                    ? "Pisa los ajustes que hayas hecho a mano en esta categoría. Usalo si cambiaste inscripciones o preferencias."
+                    : "Completa día, horario y cancha según preferencias."
+              }
             >
-              <RefreshCw
-                className={`size-4 ${isPending ? "animate-spin" : ""}`}
-              />
-              Actualizar
-            </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleActualizar}
+                disabled={isPending || !activeCategoryId || isManual}
+              >
+                <RefreshCw
+                  className={`size-4 ${isPending ? "animate-spin" : ""}`}
+                />
+                Actualizar
+              </Button>
+            </ActualizarHoverHint>
           )}
         </div>
       </CardHeader>
@@ -428,9 +521,8 @@ export function TournamentZonesPanel({
         <p className="text-xs text-muted-foreground">
           Preferencias usadas: {pairsWithPreferences} pareja(s) ·{" "}
           {preferenceCount} celda(s). El armado intenta respetar todas las
-          reglas; si algo no entra, la zona queda en ámbar (badge Revisar) para
-          corregir a mano. Los cambios manuales en esta pantalla son locales
-          hasta una próxima mejora de guardado.
+          reglas; si algo no entra, la zona queda en ámbar (badge Revisar). En
+          Modo Manual los cambios de día, horario y cancha se guardan.
         </p>
         {categories.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -448,6 +540,7 @@ export function TournamentZonesPanel({
               dayOpenByDate={dayOpenByDate}
               slotMinutes={slotMinutes}
               readOnly={readOnly}
+              scheduleLocked={scheduleLocked}
               onChange={(next) => updateZone(zone.id, next)}
             />
           ))

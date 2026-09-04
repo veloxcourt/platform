@@ -26,6 +26,14 @@ import type {
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
 import { IntermediateRoundCard } from "./intermediate-round-card";
+import { ActualizarHoverHint } from "./actualizar-hover-hint";
+import { useFixtureEditMode } from "./fixture-edit-mode-context";
+import { GrillaPdfMenu } from "./grilla-pdf-menu";
+import {
+  buildIntermediateMatchGridRows,
+  toGrillaPdfRows,
+} from "./intermediate-match-grid-model";
+import { useKnockoutFixtureReorder } from "./use-knockout-fixture-reorder";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 
 export function IntermediatePhasePanel({
@@ -47,6 +55,7 @@ export function IntermediatePhasePanel({
 }) {
   const router = useRouter();
   const readOnly = useTournamentReadOnly();
+  const { isManual } = useFixtureEditMode();
   const [isPending, startTransition] = useTransition();
   const category = categories.find((item) => item.id === categoryId) ?? null;
   const settings = intermediatePhaseSettings(config, categoryId);
@@ -85,28 +94,23 @@ export function IntermediatePhasePanel({
     });
   }, [categoryId, config]);
 
-  const scheduleByOfficialId = useMemo(() => {
-    const map = new Map<
-      number,
-      {
-        playDate: string | null;
-        startTime: string | null;
-        courtIndex: number | null;
-        noRestGap?: boolean;
-      }
-    >();
-    for (const round of fixture?.rounds ?? []) {
-      for (const match of round.matches) {
-        map.set(match.officialId, {
-          playDate: match.playDate,
-          startTime: match.startTime,
-          courtIndex: match.courtIndex,
-          noRestGap: match.noRestGap,
-        });
-      }
+  const dayOpenByDate = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const day of config?.playDays ?? []) {
+      if (day.date) map[day.date] = day.startTime;
     }
     return map;
-  }, [fixture]);
+  }, [config?.playDays]);
+
+  const { scheduleByOfficialId, canReorder, orderedCrossings, moveCrossing } =
+    useKnockoutFixtureReorder({
+      clubSlug,
+      tournamentId,
+      categoryId,
+      phase: "intermediate",
+      fixture,
+      dayOpenByDate,
+    });
 
   const matchCount = rounds.reduce(
     (sum, round) => sum + round.crossings.length,
@@ -114,12 +118,23 @@ export function IntermediatePhasePanel({
   );
   const regulation = settings.zone4Advancers === 2 ? "APA" : "FAP";
   const hasFixture = Boolean(fixture?.rounds.length);
+  const pdfRows = useMemo(() => {
+    if (!category) return [];
+    return toGrillaPdfRows(
+      buildIntermediateMatchGridRows({
+        categories: [category],
+        pairs,
+        config,
+      }),
+    );
+  }, [category, config, pairs]);
 
   function handleActualizar() {
     startTransition(async () => {
       const result = await buildIntermediateFixtureAction(
         clubSlug,
         tournamentId,
+        categoryId,
       );
       if (!result.ok) {
         toast.error("No se pudo armar la fase intermedia", {
@@ -146,40 +161,77 @@ export function IntermediatePhasePanel({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <GitBranch className="size-4 text-muted-foreground" />
-          Fase Intermedia{category ? ` · ${category.name}` : ""}
-        </CardTitle>
-        <CardDescription>
-          Llave oficial {regulation}. Los cruces usan los puestos de zona (1° A,
-          2° B).{" "}
-          <span className="font-medium text-foreground">Actualizar</span>{" "}
-          asigna día, horario y cancha según las reglas de intermedia.
-          {!hasFixture ? " Todavía no hay un armado guardado." : null}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">
-            {pairCount} pareja{pairCount === 1 ? "" : "s"} con compañero ·{" "}
-            {rounds.length} ronda{rounds.length === 1 ? "" : "s"} · {matchCount}{" "}
-            partido{matchCount === 1 ? "" : "s"}.
-          </p>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <GitBranch className="size-4 text-muted-foreground" />
+            Fase Intermedia{category ? ` · ${category.name}` : ""}
+          </CardTitle>
+          <CardDescription>
+            Llave oficial {regulation}. Los cruces usan los puestos de zona (1° A,
+            2° B).{" "}
+            <span className="font-medium text-foreground">Actualizar</span>{" "}
+            asigna día, horario y cancha según las reglas de intermedia. En
+            Modo Manual podés cambiar el orden de los partidos.
+            {!hasFixture ? " Todavía no hay un armado guardado." : null}
+          </CardDescription>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <GrillaPdfMenu
+            tournamentName={config?.tournamentName ?? ""}
+            rows={pdfRows}
+            groupColumnLabel="Ronda"
+          />
           {!readOnly && (
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleActualizar}
-              disabled={isPending}
+            <ActualizarHoverHint
+              heading={
+                isManual
+                  ? "Actualizar está bloqueada en Modo Manual"
+                  : hasFixture
+                    ? "Vuelve a armar la intermedia de esta categoría"
+                    : "Arma la intermedia de esta categoría"
+              }
+              effects={
+                isManual
+                  ? [
+                      "En Manual no se regeneran los cruces",
+                      "Podés cambiar el orden de los partidos con las flechas",
+                    ]
+                  : [
+                      "Recalcula día, horario y cancha de esta categoría",
+                      "No toca las otras categorías",
+                      "También rearma la final de esta categoría",
+                    ]
+              }
+              note={
+                isManual
+                  ? "Pasá a Modo Automático si querés volver a generar."
+                  : hasFixture
+                    ? "Pisa los ajustes de esta categoría. El Actualizar de arriba rearma todas."
+                    : "Programa los cruces de esta categoría según las reglas de intermedia."
+              }
             >
-              <RefreshCw
-                className={`size-4 ${isPending ? "animate-spin" : ""}`}
-              />
-              Actualizar
-            </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleActualizar}
+                disabled={isPending || isManual}
+              >
+                <RefreshCw
+                  className={`size-4 ${isPending ? "animate-spin" : ""}`}
+                />
+                Actualizar
+              </Button>
+            </ActualizarHoverHint>
           )}
         </div>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <p className="text-xs text-muted-foreground">
+          {pairCount} pareja{pairCount === 1 ? "" : "s"} con compañero ·{" "}
+          {rounds.length} ronda{rounds.length === 1 ? "" : "s"} · {matchCount}{" "}
+          partido{matchCount === 1 ? "" : "s"}.
+        </p>
         {rounds.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Esta categoría no tiene rondas de fase intermedia.
@@ -189,12 +241,16 @@ export function IntermediatePhasePanel({
             <IntermediateRoundCard
               key={round.label}
               label={round.label}
-              crossings={round.crossings}
+              crossings={orderedCrossings(round.crossings)}
               matchFormat={settings.matchFormat}
               courtCount={config?.courtCount || courtCount}
               dayOptions={dayOptions}
               showOfficialId={settings.zone4Advancers === 3}
               scheduleByOfficialId={scheduleByOfficialId}
+              canReorder={canReorder}
+              onMove={(officialId, direction) =>
+                moveCrossing(round.crossings, officialId, direction)
+              }
             />
           ))
         )}

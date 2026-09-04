@@ -17,7 +17,15 @@ import type {
   TournamentListItem,
   ZonasTournamentDetail,
 } from "../domain/types";
-import type { ZonesFixturePersisted } from "../domain/zones-fixture-schema";
+import type { FixtureEditMode } from "../domain/fixture-edit-mode";
+import type {
+  IntermediateFixturePersisted,
+  KnockoutFixturePhase,
+} from "../domain/intermediate-fixture-schema";
+import type {
+  ZonesFixtureDraftInput,
+  ZonesFixturePersisted,
+} from "../domain/zones-fixture-schema";
 
 export type MutationResult = { ok: boolean; error?: string };
 
@@ -140,6 +148,7 @@ export interface TournamentRepository {
   buildAndSaveIntermediateFixture(
     clubId: string,
     tournamentId: string,
+    categoryId?: string,
   ): Promise<
     | {
         ok: true;
@@ -152,6 +161,7 @@ export interface TournamentRepository {
   buildAndSaveFinalFixture(
     clubId: string,
     tournamentId: string,
+    categoryId?: string,
   ): Promise<
     | {
         ok: true;
@@ -161,6 +171,28 @@ export interface TournamentRepository {
       }
     | { ok: false; error: string }
   >;
+  getFixtureEditMode(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<FixtureEditMode | null>;
+  setFixtureEditMode(
+    clubId: string,
+    tournamentId: string,
+    mode: FixtureEditMode,
+  ): Promise<MutationResult>;
+  saveZonesFixtureDraft(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+    draft: ZonesFixtureDraftInput,
+  ): Promise<MutationResult>;
+  saveKnockoutFixtureDraft(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+    phase: KnockoutFixturePhase,
+    fixture: IntermediateFixturePersisted,
+  ): Promise<MutationResult>;
   getTournamentConfig(
     clubId: string,
     tournamentId: string,

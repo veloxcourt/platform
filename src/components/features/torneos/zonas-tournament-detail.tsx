@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import {
   buildAllZonesFixturesAction,
   buildFinalFixtureAction,
+  buildIntermediateFixtureAction,
 } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 
 import { Badge } from "@/components/ui/badge";
@@ -63,7 +64,11 @@ import { TournamentEditForm } from "./tournament-form-dialog";
 import { TournamentZonesPanel } from "./tournament-zones-panel";
 import { ZonesMatchGridPanel } from "./zones-match-grid-panel";
 import { ZonesMatchRulePanel } from "./zones-match-rule-panel";
+import { ActualizarHoverHint } from "./actualizar-hover-hint";
+import { FixtureEditModeProvider } from "./fixture-edit-mode-context";
+import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import { useTournamentReadOnly } from "./tournament-mode-context";
+import { parseFixtureEditMode } from "@/modules/tournaments/domain/fixture-edit-mode";
 
 const STATUS_VARIANT: Record<
   CreateTournamentValues["status"],
@@ -135,7 +140,11 @@ export function ZonasTournamentDetail({
   const router = useRouter();
   const readOnly = useTournamentReadOnly();
   const [isUpdatingAllZones, startUpdateAllZones] = useTransition();
+  const [isUpdatingIntermediate, startUpdateIntermediate] = useTransition();
   const [isUpdatingFinal, startUpdateFinal] = useTransition();
+  const [fixtureEditMode, setFixtureEditMode] = useState(() =>
+    parseFixtureEditMode(tournament.fixtureEditMode),
+  );
   const [zonesPanelKey, setZonesPanelKey] = useState(0);
   const [activeTab, setActiveTab] = useState<TournamentTab>("inscripciones");
   const [categoryFilterId, setCategoryFilterId] = useState<string>(
@@ -214,8 +223,24 @@ export function ZonasTournamentDetail({
     }
   }, [finalLlaveCategoryId, tournament.categories]);
 
+  useEffect(() => {
+    setFixtureEditMode(parseFixtureEditMode(tournament.fixtureEditMode));
+  }, [tournament.fixtureEditMode]);
+
   const selectedCategory =
     tournament.categories.find((c) => c.id === categoryFilterId) ?? null;
+
+  const hasAnyZonesFixture = Boolean(
+    config?.categories.some((category) => category.zonesFixture?.zones.length),
+  );
+  const hasAnyIntermediateFixture = Boolean(
+    config?.categories.some(
+      (category) => category.intermediateFixture?.rounds.length,
+    ),
+  );
+  const hasAnyFinalFixture = Boolean(
+    config?.categories.some((category) => category.finalFixture?.rounds.length),
+  );
 
   function handleActualizarTodasLasZonas() {
     startUpdateAllZones(async () => {
@@ -234,6 +259,35 @@ export function ZonasTournamentDetail({
       toast.success("Zonas armadas", {
         description: [
           `${result.categoryCount} categoría(s) · ${result.zoneCount} zona(s) · ${result.matchCount} partido(s)`,
+          result.warnings[0],
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
+      if (result.warnings.length > 1) {
+        for (const warning of result.warnings.slice(1, 4)) {
+          toast.message(warning);
+        }
+      }
+    });
+  }
+
+  function handleActualizarTodaIntermedia() {
+    startUpdateIntermediate(async () => {
+      const result = await buildIntermediateFixtureAction(
+        clubSlug,
+        tournament.id,
+      );
+      if (!result.ok) {
+        toast.error("No se pudo armar la fase intermedia", {
+          description: result.error,
+        });
+        return;
+      }
+      router.refresh();
+      toast.success("Fase intermedia armada", {
+        description: [
+          `${result.categoryCount} categoría(s) · ${result.matchCount} partido(s)`,
           result.warnings[0],
         ]
           .filter(Boolean)
@@ -357,7 +411,14 @@ export function ZonasTournamentDetail({
     </>
   );
 
+  const isManual = fixtureEditMode === "MANUAL";
+
   return (
+    <FixtureEditModeProvider
+      mode={fixtureEditMode}
+      readOnly={readOnly}
+      setMode={setFixtureEditMode}
+    >
     <div className="flex w-full min-w-0 flex-col">
       {activeTab === "configuracion" ? (
         <TournamentConfigTabs
@@ -408,24 +469,60 @@ export function ZonasTournamentDetail({
                   </StableTabButton>
                 </div>
                 {!readOnly && tournament.categories.length > 0 ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={handleActualizarTodasLasZonas}
-                    disabled={isUpdatingAllZones}
-                  >
-                    <RefreshCw
-                      className={`size-4 ${isUpdatingAllZones ? "animate-spin" : ""}`}
+                  <>
+                    <FixtureEditModeSelect
+                      clubSlug={clubSlug}
+                      tournamentId={tournament.id}
                     />
-                    Actualizar
-                  </Button>
+                    <ActualizarHoverHint
+                      heading={
+                        isManual
+                          ? "Actualizar está bloqueada en Modo Manual"
+                          : hasAnyZonesFixture
+                            ? "Vuelve a armar las zonas de todas las categorías"
+                            : "Arma las zonas de todas las categorías"
+                      }
+                      effects={
+                        isManual
+                          ? [
+                              "En Manual no se regeneran zonas ni horarios",
+                              "Podés ajustar día, horario, cancha y parejas a mano",
+                            ]
+                          : [
+                              "Reasigna las parejas de cada zona",
+                              "Recalcula día, horario y cancha de todos los partidos",
+                              "También rearma fase intermedia y fase final",
+                            ]
+                      }
+                      note={
+                        isManual
+                          ? "Pasá a Modo Automático si querés volver a generar."
+                          : hasAnyZonesFixture
+                            ? "Pisa los ajustes que hayas hecho a mano. Usalo si cambiaste inscripciones o preferencias; no lo uses si ya acomodaste horarios y querés conservarlos."
+                            : "Usalo para completar día, horario y cancha según preferencias."
+                      }
+                    >
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={handleActualizarTodasLasZonas}
+                        disabled={isUpdatingAllZones || isManual}
+                      >
+                        <RefreshCw
+                          className={`size-4 ${isUpdatingAllZones ? "animate-spin" : ""}`}
+                        />
+                        Actualizar
+                      </Button>
+                    </ActualizarHoverHint>
+                  </>
                 ) : null}
               </div>
             ) : null}
             {activeTab === "fase-intermedia" ? (
+              <div className="mt-3 flex w-full min-w-0 items-center gap-2">
               <div
-                className="mt-3 flex w-full min-w-0 items-center gap-2 overflow-x-auto"
+                className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto"
                 role="tablist"
                 aria-label="Categorías de fase intermedia"
               >
@@ -459,6 +556,53 @@ export function ZonasTournamentDetail({
                   <Workflow />
                   Llave
                 </StableTabButton>
+              </div>
+                {!readOnly && intermediateCategories.length > 0 ? (
+                  <>
+                    <FixtureEditModeSelect
+                      clubSlug={clubSlug}
+                      tournamentId={tournament.id}
+                    />
+                    <ActualizarHoverHint
+                      heading={
+                        isManual
+                          ? "Actualizar está bloqueada en Modo Manual"
+                          : hasAnyIntermediateFixture
+                            ? "Vuelve a armar la intermedia de todas las categorías"
+                            : "Arma la intermedia de todas las categorías"
+                      }
+                      effects={
+                        isManual
+                          ? [
+                              "En Manual no se regeneran los cruces",
+                              "Podés cambiar el orden de los partidos con las flechas",
+                            ]
+                          : [
+                              "Recalcula día, horario y cancha de todos los cruces intermedios",
+                              "También rearma la fase final de todas las categorías",
+                            ]
+                      }
+                      note={
+                        isManual
+                          ? "Pasá a Modo Automático si querés volver a generar."
+                          : "Pisa los ajustes de todas las categorías. El Actualizar de cada categoría solo toca esa."
+                      }
+                    >
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={handleActualizarTodaIntermedia}
+                        disabled={isUpdatingIntermediate || isManual}
+                      >
+                        <RefreshCw
+                          className={`size-4 ${isUpdatingIntermediate ? "animate-spin" : ""}`}
+                        />
+                        Actualizar
+                      </Button>
+                    </ActualizarHoverHint>
+                  </>
+                ) : null}
               </div>
             ) : null}
             {activeTab === "fase-final" ? (
@@ -517,18 +661,50 @@ export function ZonasTournamentDetail({
                   </StableTabButton>
                 </div>
                 {!readOnly && tournament.categories.length > 0 ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={handleActualizarFaseFinal}
-                    disabled={isUpdatingFinal}
-                  >
-                    <RefreshCw
-                      className={`size-4 ${isUpdatingFinal ? "animate-spin" : ""}`}
+                  <>
+                    <FixtureEditModeSelect
+                      clubSlug={clubSlug}
+                      tournamentId={tournament.id}
                     />
-                    Actualizar
-                  </Button>
+                    <ActualizarHoverHint
+                      heading={
+                        isManual
+                          ? "Actualizar está bloqueada en Modo Manual"
+                          : hasAnyFinalFixture
+                            ? "Vuelve a armar la fase final"
+                            : "Arma la fase final"
+                      }
+                      effects={
+                        isManual
+                          ? [
+                              "En Manual no se regeneran los cruces",
+                              "Pasá a Automático para volver a generar",
+                            ]
+                          : [
+                              "Recalcula día, horario y cancha de todos los cruces finales",
+                              "Aplica a todas las categorías",
+                            ]
+                      }
+                      note={
+                        isManual
+                          ? "Pasá a Modo Automático si querés volver a generar."
+                          : "Pisa los ajustes de todas las categorías. El Actualizar de cada categoría solo toca esa."
+                      }
+                    >
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={handleActualizarFaseFinal}
+                        disabled={isUpdatingFinal || isManual}
+                      >
+                        <RefreshCw
+                          className={`size-4 ${isUpdatingFinal ? "animate-spin" : ""}`}
+                        />
+                        Actualizar
+                      </Button>
+                    </ActualizarHoverHint>
+                  </>
                 ) : null}
               </div>
             ) : null}
@@ -743,6 +919,7 @@ export function ZonasTournamentDetail({
         </>
       )}
     </div>
+    </FixtureEditModeProvider>
   );
 }
 

@@ -36,14 +36,25 @@ import {
   buildZonesFixture,
   reservedSlotsFromOtherFixtures,
 } from "../domain/build-zones-fixture";
-import { toPersistedZonesFixture } from "../domain/zones-fixture-schema";
+import {
+  parseFixtureEditMode,
+  type FixtureEditMode,
+} from "../domain/fixture-edit-mode";
+import {
+  toPersistedZonesFixture,
+  zonesDraftToPersisted,
+  type ZonesFixtureDraftInput,
+} from "../domain/zones-fixture-schema";
 import {
   buildFinalFixture,
   buildIntermediateFixture,
 } from "../domain/build-intermediate-fixture";
 import {
+  knockoutFixtureStamps,
   toPersistedFinalFixture,
   toPersistedIntermediateFixture,
+  type IntermediateFixturePersisted,
+  type KnockoutFixturePhase,
 } from "../domain/intermediate-fixture-schema";
 import {
   categoryHasFinalPhase,
@@ -292,6 +303,7 @@ function demoConfigs(): Map<string, TournamentConfig> {
         endDate: "2026-02-16",
         courtCount: 4,
         playDays,
+        fixtureEditMode: "AUTO",
         categories: [
           {
             categoryId: "demo-cat-f5",
@@ -338,6 +350,7 @@ function buildTournamentConfig(
       tournament.startDate,
       tournament.endDate,
     ),
+    fixtureEditMode: parseFixtureEditMode(stored?.fixtureEditMode),
     categories: categories.map((category) => {
       const saved = stored?.categories.find(
         (item) => item.categoryId === category.id,
@@ -439,6 +452,9 @@ export class MockTournamentRepository implements TournamentRepository {
         endDate: tournament.endDate,
         fee: tournament.fee,
         publicSlug: tournament.publicSlug,
+        fixtureEditMode: parseFixtureEditMode(
+          record.configs.get(tournamentId)?.fixtureEditMode,
+        ),
         categories,
         pairs,
         slotReservations: [
@@ -1322,6 +1338,12 @@ export class MockTournamentRepository implements TournamentRepository {
       const config =
         record.configs.get(tournamentId) ??
         buildTournamentConfig(tournament, categories);
+      if (parseFixtureEditMode(config.fixtureEditMode) === "MANUAL") {
+        return {
+          ok: false,
+          error: "Pasá a Modo Automático para actualizar el armado",
+        };
+      }
       const categoryConfig = config.categories.find(
         (c) => c.categoryId === categoryId,
       );
@@ -1409,6 +1431,7 @@ export class MockTournamentRepository implements TournamentRepository {
   async buildAndSaveIntermediateFixture(
     clubId: string,
     tournamentId: string,
+    categoryId?: string,
   ): Promise<
     | {
         ok: true;
@@ -1428,9 +1451,15 @@ export class MockTournamentRepository implements TournamentRepository {
       const config =
         record.configs.get(tournamentId) ??
         buildTournamentConfig(tournament, categories);
+      if (parseFixtureEditMode(config.fixtureEditMode) === "MANUAL") {
+        return {
+          ok: false,
+          error: "Pasá a Modo Automático para actualizar el armado",
+        };
+      }
       const pairs = record.pairs.get(tournamentId) ?? [];
 
-      const builderCategories = config.categories
+      const allBuilderCategories = config.categories
         .map((category) => {
           const settings = intermediatePhaseSettings(
             config,
@@ -1454,12 +1483,28 @@ export class MockTournamentRepository implements TournamentRepository {
           }),
         );
 
+      const builderCategories = categoryId
+        ? allBuilderCategories.filter((item) => item.categoryId === categoryId)
+        : allBuilderCategories;
+
       if (builderCategories.length === 0) {
         return {
           ok: false,
-          error: "Ninguna categoría tiene fase intermedia para armar",
+          error: categoryId
+            ? "Esta categoría no tiene fase intermedia para armar"
+            : "Ninguna categoría tiene fase intermedia para armar",
         };
       }
+
+      const reservedMatches = categoryId
+        ? config.categories
+            .filter((item) => item.categoryId !== categoryId)
+            .flatMap((item) => [
+              ...(item.zonesFixture?.zones.flatMap((zone) => zone.matches) ??
+                []),
+              ...knockoutFixtureStamps(item.intermediateFixture),
+            ])
+        : [];
 
       const slotMinutes = Math.max(
         60,
@@ -1479,6 +1524,7 @@ export class MockTournamentRepository implements TournamentRepository {
         courtCount: Math.max(1, config.courtCount || 1),
         slotMinutes,
         categories: builderCategories,
+        reservedMatches,
       });
 
       if (
@@ -1527,6 +1573,7 @@ export class MockTournamentRepository implements TournamentRepository {
   async buildAndSaveFinalFixture(
     clubId: string,
     tournamentId: string,
+    categoryId?: string,
   ): Promise<
     | {
         ok: true;
@@ -1548,9 +1595,15 @@ export class MockTournamentRepository implements TournamentRepository {
           tournament,
           record.categories.get(tournamentId) ?? [],
         );
+      if (parseFixtureEditMode(config.fixtureEditMode) === "MANUAL") {
+        return {
+          ok: false,
+          error: "Pasá a Modo Automático para actualizar el armado",
+        };
+      }
       const pairs = record.pairs.get(tournamentId) ?? [];
 
-      const builderCategories = config.categories
+      const allBuilderCategories = config.categories
         .map((category) => {
           const settings = finalPhaseSettings(config, category.categoryId);
           return {
@@ -1575,12 +1628,29 @@ export class MockTournamentRepository implements TournamentRepository {
           }),
         );
 
+      const builderCategories = categoryId
+        ? allBuilderCategories.filter((item) => item.categoryId === categoryId)
+        : allBuilderCategories;
+
       if (builderCategories.length === 0) {
         return {
           ok: false,
-          error: "Ninguna categoría tiene fase final para armar",
+          error: categoryId
+            ? "Esta categoría no tiene fase final para armar"
+            : "Ninguna categoría tiene fase final para armar",
         };
       }
+
+      const reservedMatches = categoryId
+        ? config.categories
+            .filter((item) => item.categoryId !== categoryId)
+            .flatMap((item) => [
+              ...(item.zonesFixture?.zones.flatMap((zone) => zone.matches) ??
+                []),
+              ...knockoutFixtureStamps(item.intermediateFixture),
+              ...knockoutFixtureStamps(item.finalFixture),
+            ])
+        : [];
 
       const slotMinutes = Math.max(
         60,
@@ -1600,6 +1670,7 @@ export class MockTournamentRepository implements TournamentRepository {
         courtCount: Math.max(1, config.courtCount || 1),
         slotMinutes,
         categories: builderCategories,
+        reservedMatches,
       });
 
       if (
@@ -1640,6 +1711,135 @@ export class MockTournamentRepository implements TournamentRepository {
         categoryCount: result.categories.length,
         matchCount,
       };
+    }
+    return { ok: false, error: "Club no encontrado" };
+  }
+
+  async getFixtureEditMode(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<FixtureEditMode | null> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const tournament = record.tournaments.find((t) => t.id === tournamentId);
+      if (!tournament || tournament.type !== "ZONAS") return null;
+      return parseFixtureEditMode(
+        record.configs.get(tournamentId)?.fixtureEditMode,
+      );
+    }
+    return null;
+  }
+
+  async setFixtureEditMode(
+    clubId: string,
+    tournamentId: string,
+    mode: FixtureEditMode,
+  ): Promise<MutationResult> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const tournament = record.tournaments.find((t) => t.id === tournamentId);
+      if (!tournament || tournament.type !== "ZONAS") {
+        return { ok: false, error: "Torneo no encontrado" };
+      }
+      const categories = record.categories.get(tournamentId) ?? [];
+      const stored =
+        record.configs.get(tournamentId) ??
+        buildTournamentConfig(tournament, categories);
+      record.configs.set(tournamentId, {
+        ...stored,
+        fixtureEditMode: mode,
+      });
+      return { ok: true };
+    }
+    return { ok: false, error: "Club no encontrado" };
+  }
+
+  async saveZonesFixtureDraft(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+    draft: ZonesFixtureDraftInput,
+  ): Promise<MutationResult> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const tournament = record.tournaments.find((t) => t.id === tournamentId);
+      if (!tournament || tournament.type !== "ZONAS") {
+        return { ok: false, error: "Torneo no encontrado" };
+      }
+      const config = record.configs.get(tournamentId);
+      if (!config) return { ok: false, error: "Configuración no encontrada" };
+      if (parseFixtureEditMode(config.fixtureEditMode) !== "MANUAL") {
+        return {
+          ok: false,
+          error: "Pasá a Modo Manual para guardar ajustes a mano",
+        };
+      }
+      const category = config.categories.find(
+        (item) => item.categoryId === categoryId,
+      );
+      if (!category) return { ok: false, error: "Categoría no encontrada" };
+      const persisted = zonesDraftToPersisted(draft, category.zonesFixture);
+      for (const pair of record.pairs.get(tournamentId) ?? []) {
+        if (pair.categoryId === categoryId) pair.zoneLabel = null;
+      }
+      for (const zone of persisted.zones) {
+        for (const pairId of zone.pairIds) {
+          const pair = (record.pairs.get(tournamentId) ?? []).find(
+            (item) => item.id === pairId,
+          );
+          if (pair) pair.zoneLabel = zone.label;
+        }
+      }
+      record.configs.set(tournamentId, {
+        ...config,
+        categories: config.categories.map((item) =>
+          item.categoryId === categoryId
+            ? { ...item, zonesFixture: persisted }
+            : item,
+        ),
+      });
+      syncCategoryCounts(record, tournamentId);
+      return { ok: true };
+    }
+    return { ok: false, error: "Club no encontrado" };
+  }
+
+  async saveKnockoutFixtureDraft(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+    phase: KnockoutFixturePhase,
+    fixture: IntermediateFixturePersisted,
+  ): Promise<MutationResult> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const tournament = record.tournaments.find((t) => t.id === tournamentId);
+      if (!tournament || tournament.type !== "ZONAS") {
+        return { ok: false, error: "Torneo no encontrado" };
+      }
+      const config = record.configs.get(tournamentId);
+      if (!config) return { ok: false, error: "Configuración no encontrada" };
+      if (parseFixtureEditMode(config.fixtureEditMode) !== "MANUAL") {
+        return {
+          ok: false,
+          error: "Pasá a Modo Manual para guardar ajustes a mano",
+        };
+      }
+      const category = config.categories.find(
+        (item) => item.categoryId === categoryId,
+      );
+      if (!category) return { ok: false, error: "Categoría no encontrada" };
+      record.configs.set(tournamentId, {
+        ...config,
+        categories: config.categories.map((item) =>
+          item.categoryId === categoryId
+            ? phase === "final"
+              ? { ...item, finalFixture: fixture }
+              : { ...item, intermediateFixture: fixture }
+            : item,
+        ),
+      });
+      return { ok: true };
     }
     return { ok: false, error: "Club no encontrado" };
   }
@@ -1706,6 +1906,7 @@ export class MockTournamentRepository implements TournamentRepository {
           tournament.startDate,
           tournament.endDate,
         ),
+        fixtureEditMode: parseFixtureEditMode(previous?.fixtureEditMode),
         categories: categoryConfigs,
       });
       return { ok: true };

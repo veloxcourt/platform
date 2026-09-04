@@ -1,5 +1,7 @@
 "use client";
 
+import { ChevronDown, ChevronUp } from "lucide-react";
+
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { MatchFormat } from "@/modules/tournaments/domain/config-schema";
@@ -12,6 +14,8 @@ import {
 
 const SELECT_CLASS =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-background px-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
+const COURT_SELECT_CLASS = `${SELECT_CLASS} text-center [text-align-last:center]`;
 
 const SCORE_CLASS =
   "h-8 w-10 rounded-lg border border-input bg-muted/40 px-1 text-center text-xs tabular-nums outline-none";
@@ -69,6 +73,8 @@ export function IntermediateRoundCard({
   dayOptions,
   showOfficialId,
   scheduleByOfficialId,
+  canReorder = false,
+  onMove,
 }: {
   label: string;
   crossings: FapCrossing[];
@@ -77,6 +83,8 @@ export function IntermediateRoundCard({
   dayOptions: { value: string; label: string }[];
   showOfficialId: boolean;
   scheduleByOfficialId?: Map<number, IntermediateCrossingSchedule>;
+  canReorder?: boolean;
+  onMove?: (officialId: number, direction: "up" | "down") => void;
 }) {
   const columns = resultColumnsForFormat(matchFormat);
   const hasUnscheduled = crossings.some((crossing) => {
@@ -110,6 +118,7 @@ export function IntermediateRoundCard({
           {crossings.length} partido
           {crossings.length === 1 ? "" : "s"} · {MATCH_FORMAT_LABELS[matchFormat]}
           {hasUnscheduled ? " · horario incompleto" : null}
+          {canReorder ? " · flechas: cambiar el orden de juego" : null}
         </p>
       </div>
 
@@ -158,6 +167,30 @@ export function IntermediateRoundCard({
                 <td className="py-1.5 pr-1.5 align-middle tabular-nums text-muted-foreground">
                   <div className="flex flex-col">
                     <span>{index + 1}</span>
+                    {canReorder && onMove ? (
+                      <span className="mt-0.5 flex flex-col">
+                        <button
+                          type="button"
+                          className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                          disabled={index === 0}
+                          onClick={() => onMove(crossing.id, "up")}
+                          aria-label={`Jugar antes el partido ${index + 1}`}
+                          title="Jugar antes"
+                        >
+                          <ChevronUp className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                          disabled={index === crossings.length - 1}
+                          onClick={() => onMove(crossing.id, "down")}
+                          aria-label={`Jugar después el partido ${index + 1}`}
+                          title="Jugar después"
+                        >
+                          <ChevronDown className="size-3.5" />
+                        </button>
+                      </span>
+                    ) : null}
                     {unscheduled ? (
                       <span className="max-w-[4.5rem] text-[9px] font-medium leading-tight text-amber-900 dark:text-amber-100">
                         Sin horario
@@ -201,7 +234,7 @@ export function IntermediateRoundCard({
                 </td>
                 <td className="py-1.5 pr-1.5 align-middle">
                   <select
-                    className={SELECT_CLASS}
+                    className={COURT_SELECT_CLASS}
                     value={
                       schedule?.courtIndex == null
                         ? ""
@@ -213,7 +246,7 @@ export function IntermediateRoundCard({
                     <option value="">—</option>
                     {Array.from({ length: Math.max(1, courtCount) }, (_, i) => (
                       <option key={i} value={i}>
-                        Cancha {i + 1}
+                        {i + 1}
                       </option>
                     ))}
                   </select>

@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 40;
+const PRISMA_SCHEMA_REVISION = 41;
 
 /** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
 const PG_POOL_MAX = 1;
@@ -46,6 +46,7 @@ function schemaFingerprint(): string {
     "intermediateFixture" in settingsFields ? "1" : "0",
     "finalFixture" in settingsFields ? "1" : "0",
     "courtCount" in Prisma.TournamentScalarFieldEnum ? "1" : "0",
+    "fixtureEditMode" in Prisma.TournamentScalarFieldEnum ? "1" : "0",
     "tournamentSlotReservation" in Prisma.ModelName ? "1" : "0",
     "ecoTorneoSimulation" in Prisma.ModelName ? "1" : "0",
     "productComponent" in Prisma.ModelName ? "1" : "0",

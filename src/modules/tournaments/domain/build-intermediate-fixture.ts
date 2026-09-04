@@ -62,6 +62,8 @@ export type BuildIntermediateFixtureInput = {
   courtCount: number;
   slotMinutes: number;
   categories: BuildIntermediateCategoryInput[];
+  /// Canchas/horarios ya tomados (otras categorías), para no pisarlos.
+  reservedMatches?: ZoneMatchStamp[];
 };
 
 export type BuildFinalCategoryInput = BuildIntermediateCategoryInput & {
@@ -73,6 +75,8 @@ export type BuildFinalFixtureInput = {
   courtCount: number;
   slotMinutes: number;
   categories: BuildFinalCategoryInput[];
+  /// Canchas/horarios ya tomados (otras categorías), para no pisarlos.
+  reservedMatches?: ZoneMatchStamp[];
 };
 
 type ResourceSlot = {
@@ -306,7 +310,11 @@ export function buildIntermediateFixture(
     (category) => category.zonesFixtureMatches,
   );
   occupyZoneSlots(occupied, resources, allZoneMatches);
-  const zonesBound = latestZoneBound(allZoneMatches);
+  occupyZoneSlots(occupied, resources, input.reservedMatches ?? []);
+  const zonesBound = latestZoneBound([
+    ...allZoneMatches,
+    ...(input.reservedMatches ?? []),
+  ]);
 
   const queues = input.categories
     .map((category) => {
@@ -507,7 +515,11 @@ export function buildFinalFixture(
     ...(category.priorKnockoutMatches ?? []),
   ]);
   occupyZoneSlots(occupied, resources, priorStamps);
-  const zonesBound = latestZoneBound(priorStamps);
+  occupyZoneSlots(occupied, resources, input.reservedMatches ?? []);
+  const zonesBound = latestZoneBound([
+    ...priorStamps,
+    ...(input.reservedMatches ?? []),
+  ]);
 
   const queues = input.categories
     .map((category) => {

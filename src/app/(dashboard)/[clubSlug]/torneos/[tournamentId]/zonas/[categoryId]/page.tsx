@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 
+import { FixtureEditModePage } from "@/components/features/torneos/fixture-edit-mode-page";
 import { TournamentZonesPanel } from "@/components/features/torneos/tournament-zones-panel";
 import {
   parseTournamentMode,
@@ -64,16 +65,22 @@ export default async function TorneoZonasCategoriaPage({
         </p>
       </div>
 
-      <TournamentZonesPanel
+      <FixtureEditModePage
         clubSlug={clubSlug}
         tournamentId={tournamentId}
-        categories={data.tournament.categories}
-        pairs={data.tournament.pairs}
-        config={config}
-        courtCount={courtCount}
-        initialCategoryId={categoryId}
-        reservations={data.tournament.slotReservations}
-      />
+        initialMode={data.tournament.fixtureEditMode}
+      >
+        <TournamentZonesPanel
+          clubSlug={clubSlug}
+          tournamentId={tournamentId}
+          categories={data.tournament.categories}
+          pairs={data.tournament.pairs}
+          config={config}
+          courtCount={courtCount}
+          initialCategoryId={categoryId}
+          reservations={data.tournament.slotReservations}
+        />
+      </FixtureEditModePage>
     </div>
   );
 }

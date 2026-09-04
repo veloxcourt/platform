@@ -48,6 +48,8 @@ export type ZoneDraft = {
 const SELECT_CLASS =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-background px-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
+const COURT_SELECT_CLASS = `${SELECT_CLASS} text-center [text-align-last:center]`;
+
 const KIND_ROW_ORDER: Record<ZoneMatchKind, number> = {
   opening: 0,
   round_robin: 1,
@@ -159,6 +161,7 @@ export function ZoneCard({
   dayOpenByDate,
   slotMinutes,
   readOnly = false,
+  scheduleLocked = false,
   onChange,
   className,
 }: {
@@ -173,9 +176,12 @@ export function ZoneCard({
   /// Duración de celda (partido + intervalo) para detectar falta de descanso.
   slotMinutes?: number;
   readOnly?: boolean;
+  /// Bloquea día, horario, cancha y parejas (Modo Automático).
+  scheduleLocked?: boolean;
   onChange: (next: ZoneDraft) => void;
   className?: string;
 }) {
+  const fieldsLocked = readOnly || scheduleLocked;
   const columns = resultColumnsForFormat(matchFormat);
   const zonePairOptions = pairOptions.filter((p) =>
     zone.pairIds.includes(p.id),
@@ -403,7 +409,7 @@ export function ZoneCard({
                   <select
                     className={SELECT_CLASS}
                     value={match.playDate}
-                    disabled={readOnly}
+                    disabled={fieldsLocked}
                     onChange={(e) =>
                       updateMatch(match.id, { playDate: e.target.value })
                     }
@@ -422,8 +428,8 @@ export function ZoneCard({
                     value={match.startTime}
                     placeholder="17:00"
                     className="h-8 w-full min-w-0 px-1.5 text-center text-xs tabular-nums"
-                    disabled={readOnly}
-                    readOnly={readOnly}
+                    disabled={fieldsLocked}
+                    readOnly={fieldsLocked}
                     onChange={(e) =>
                       updateMatch(match.id, { startTime: e.target.value })
                     }
@@ -432,9 +438,9 @@ export function ZoneCard({
                 </td>
                 <td className="py-1.5 pr-1.5 align-middle">
                   <select
-                    className={SELECT_CLASS}
+                    className={COURT_SELECT_CLASS}
                     value={match.courtIndex ?? ""}
-                    disabled={readOnly}
+                    disabled={fieldsLocked}
                     onChange={(e) =>
                       updateMatch(match.id, {
                         courtIndex:
@@ -448,7 +454,7 @@ export function ZoneCard({
                     <option value="">—</option>
                     {Array.from({ length: Math.max(1, courtCount) }, (_, i) => (
                       <option key={i} value={i}>
-                        Cancha {i + 1}
+                        {i + 1}
                       </option>
                     ))}
                   </select>
@@ -457,7 +463,7 @@ export function ZoneCard({
                   <PairSelect
                     value={match.pair1Id ?? ""}
                     options={selectOptions}
-                    disabled={readOnly}
+                    disabled={fieldsLocked}
                     onChange={(id) => updateMatch(match.id, { pair1Id: id })}
                     ariaLabel={`Pareja 1 partido ${index + 1}`}
                   />
@@ -466,7 +472,7 @@ export function ZoneCard({
                   <PairSelect
                     value={match.pair2Id ?? ""}
                     options={selectOptions}
-                    disabled={readOnly}
+                    disabled={fieldsLocked}
                     onChange={(id) => updateMatch(match.id, { pair2Id: id })}
                     ariaLabel={`Pareja 2 partido ${index + 1}`}
                   />
