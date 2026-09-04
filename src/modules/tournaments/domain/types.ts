@@ -4,6 +4,7 @@ import type {
   PhaseConfigValues,
   PlayDayValues,
 } from "./config-schema";
+import type { IntermediateFixturePersisted } from "./intermediate-fixture-schema";
 import type { ZonesFixturePersisted } from "./zones-fixture-schema";
 import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
 
@@ -97,7 +98,15 @@ export interface TournamentsListData {
 }
 
 export interface ZonasTournamentDetailData {
-  club: { id: string; name: string; slug: string; currency: string };
+  club: {
+    id: string;
+    name: string;
+    slug: string;
+    currency: string;
+    logoUrl?: string | null;
+    locality?: string | null;
+    address?: string | null;
+  };
   tournament: ZonasTournamentDetail;
   catalogCategories: CatalogCategory[];
 }
@@ -128,6 +137,10 @@ export interface CategoryPhaseConfig {
   zone4Advancers: 2 | 3;
   /// Fixture armado de zonas (si ya se generó).
   zonesFixture: ZonesFixturePersisted | null;
+  /// Fixture armado de fase intermedia (si ya se generó).
+  intermediateFixture: IntermediateFixturePersisted | null;
+  /// Fixture armado de fase final (si ya se generó).
+  finalFixture: IntermediateFixturePersisted | null;
 }
 
 export interface TournamentConfig {

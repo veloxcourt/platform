@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 37;
+const PRISMA_SCHEMA_REVISION = 40;
 
 /** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
 const PG_POOL_MAX = 1;
@@ -43,6 +43,8 @@ function schemaFingerprint(): string {
     "zone4Advancers" in settingsFields ? "1" : "0",
     "zonesPlayDates" in settingsFields ? "1" : "0",
     "zonesFixture" in settingsFields ? "1" : "0",
+    "intermediateFixture" in settingsFields ? "1" : "0",
+    "finalFixture" in settingsFields ? "1" : "0",
     "courtCount" in Prisma.TournamentScalarFieldEnum ? "1" : "0",
     "tournamentSlotReservation" in Prisma.ModelName ? "1" : "0",
     "ecoTorneoSimulation" in Prisma.ModelName ? "1" : "0",
@@ -58,6 +60,7 @@ function schemaFingerprint(): string {
     "calendarPlannerVenue" in Prisma.ModelName ? "1" : "0",
     "calendarPlannerSettings" in Prisma.ModelName ? "1" : "0",
     "calendarSearchLink" in Prisma.ModelName ? "1" : "0",
+    "logoUrl" in Prisma.ClubScalarFieldEnum ? "1" : "0",
     "TOOLS_ECO_TORNEO" in $Enums.AdminModule ? "1" : "0",
     "TOOLS_CALENDARIO" in $Enums.AdminModule ? "1" : "0",
   ].join(":");

@@ -12,6 +12,9 @@ export const zonesFixtureMatchSchema = z.object({
   pair2Id: z.string().nullable(),
   slotIndex: z.number().int().min(0).nullable().optional(),
   noRestGap: z.boolean().optional(),
+  ruleBreaks: z
+    .array(z.enum(["rest", "day_pref", "cell_pref"]))
+    .optional(),
 });
 
 export const zonesFixtureZoneSchema = z.object({

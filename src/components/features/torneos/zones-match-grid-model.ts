@@ -2,6 +2,7 @@ import { formatWeekday } from "@/lib/date";
 import { formatAbbreviatedPairLabel } from "@/lib/person-name";
 import { CALENDAR_PALETTE } from "@/modules/herramientas/domain/calendario-torneos";
 import { comparePlayDaySchedule } from "@/modules/tournaments/domain/play-day";
+import { ZONE_RULE_BREAK_LABELS } from "@/modules/tournaments/domain/build-zones-fixture";
 import type {
   PairListItem,
   TournamentCategoryItem,
@@ -36,6 +37,7 @@ function pairName(pair: PairListItem | undefined): string {
 
 function observationFor(match: {
   noRestGap?: boolean;
+  ruleBreaks?: Array<keyof typeof ZONE_RULE_BREAK_LABELS>;
   kind?: string;
   pair1Id: string | null;
   pair2Id: string | null;
@@ -49,6 +51,10 @@ function observationFor(match: {
   }
   if (match.courtIndex == null) notes.push("Sin cancha");
   if (match.noRestGap) notes.push("Sin descanso");
+  for (const breakKey of match.ruleBreaks ?? []) {
+    if (breakKey === "rest") continue;
+    notes.push(ZONE_RULE_BREAK_LABELS[breakKey]);
+  }
   if (
     (match.kind === "winners" || match.kind === "losers") &&
     (!match.pair1Id || !match.pair2Id)

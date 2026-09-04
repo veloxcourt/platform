@@ -22,6 +22,14 @@ export type FixturePairInput = {
   preferences: FixtureSlotPref[];
 };
 
+export type ZoneRuleBreak = "rest" | "day_pref" | "cell_pref";
+
+export const ZONE_RULE_BREAK_LABELS: Record<ZoneRuleBreak, string> = {
+  rest: "Sin descanso",
+  day_pref: "Pref. día",
+  cell_pref: "Pref. horario",
+};
+
 export type ScheduledZoneMatch = {
   matchIndex: number;
   kind: ZoneMatchKind;
@@ -35,6 +43,8 @@ export type ScheduledZoneMatch = {
   slotIndex?: number | null;
   /// True si alguna pareja del partido juega sin la celda de descanso.
   noRestGap?: boolean;
+  /// Reglas blandas que la oleada u otra regla dura dejó de lado (solo informar).
+  ruleBreaks?: ZoneRuleBreak[];
 };
 
 export type ScheduledZone = {
@@ -129,6 +139,43 @@ function pairBusyKey(playDate: string, slotIndex: number) {
 
 function pairTimeKey(playDate: string, startTime: string) {
   return `time:${playDate}:${startTime}`;
+}
+
+type SlotBound = {
+  playDate: string;
+  slotIndex: number;
+};
+
+function compareSlotBounds(a: SlotBound, b: SlotBound): number {
+  if (a.playDate !== b.playDate) return a.playDate.localeCompare(b.playDate);
+  return a.slotIndex - b.slotIndex;
+}
+
+function isSlotAfterBound(slot: SlotBound, bound: SlotBound): boolean {
+  return compareSlotBounds(slot, bound) > 0;
+}
+
+/// Última apertura ya programada de la zona. Null si falta alguna.
+export function latestScheduledOpeningBound(
+  matches: Array<{
+    kind: ZoneMatchKind;
+    playDate?: string | null;
+    slotIndex?: number | null;
+  }>,
+): SlotBound | null {
+  const openings = matches.filter((match) => match.kind === "opening");
+  if (openings.length === 0) return null;
+
+  const scheduled: SlotBound[] = [];
+  for (const match of openings) {
+    if (!match.playDate || match.slotIndex == null) return null;
+    scheduled.push({ playDate: match.playDate, slotIndex: match.slotIndex });
+  }
+  if (scheduled.length < openings.length) return null;
+
+  return scheduled.reduce((latest, stamp) =>
+    compareSlotBounds(stamp, latest) > 0 ? stamp : latest,
+  );
 }
 
 /**
@@ -433,15 +480,50 @@ function courtsBusyAtTime(
   return n;
 }
 
+function uniqueRuleBreaks(breaks: ZoneRuleBreak[]): ZoneRuleBreak[] {
+  return [...new Set(breaks)];
+}
+
+function collectRuleBreaks(
+  slot: ResourceSlot,
+  pair1: FixturePairInput | undefined,
+  pair2: FixturePairInput | undefined,
+  pairBusy: Map<string, Set<string>>,
+  pairDates: Map<string, Set<string>>,
+  ignoreCellPrefs: boolean,
+): ZoneRuleBreak[] {
+  const breaks: ZoneRuleBreak[] = [];
+  for (const pair of [pair1, pair2]) {
+    if (!pair) continue;
+    if (
+      !pairRespectsRestGap(
+        pairBusy.get(pair.id),
+        slot.playDate,
+        slot.slotIndex,
+        slot.startTime,
+      )
+    ) {
+      breaks.push("rest");
+    }
+    const dates = pairDates.get(pair.id) ?? new Set<string>();
+    if (!dayPrefAllows(pair.zonesDayPreference, dates, slot.playDate)) {
+      breaks.push("day_pref");
+    }
+    if (
+      !ignoreCellPrefs &&
+      pair.preferences.length > 0 &&
+      !preferenceKeys(pair).has(prefKey(slot.playDate, slot.slotIndex))
+    ) {
+      breaks.push("cell_pref");
+    }
+  }
+  return uniqueRuleBreaks(breaks);
+}
+
 /**
- * Prioridad de scoring (de mayor a menor):
- * 1. Respetar descanso (incluso en modo semi-duro: preferir huecos con gap)
- * 2. Preferencias de celda
- * 3. Repartir en otro día cuando la preferencia lo permite (ANY / DIFFERENT_DAYS)
- * 4. Horario más temprano + completar oleada en paralelo
- * 5. Desempate por cancha
- *
- * El intercalado de canchas NUNCA debe ganar al descanso.
+ * Scoring dentro de una oleada (misma fecha + slotIndex).
+ * La oleada ya está fijada: acá solo se elige cancha y se prefiere
+ * no romper descanso / preferencias.
  */
 function scoreSlot(
   slot: ResourceSlot,
@@ -512,9 +594,6 @@ function scoreSlot(
     }
   }
 
-  // 4) Horario temprano + oleada en paralelo (solo entre candidatos ya válidos).
-  score -= slot.slotIndex * 10_000;
-
   const busy = courtsBusyAtTime(
     occupied,
     slot.playDate,
@@ -529,6 +608,68 @@ function scoreSlot(
   return score;
 }
 
+type SlotPick = {
+  slot: ResourceSlot;
+  ruleBreaks: ZoneRuleBreak[];
+};
+
+function pairHardConflict(
+  pair: FixturePairInput | undefined,
+  pairBusy: Map<string, Set<string>>,
+  slot: ResourceSlot,
+): boolean {
+  if (!pair) return false;
+  return pairSlotConflicts(
+    pairBusy.get(pair.id),
+    slot.playDate,
+    slot.slotIndex,
+    slot.startTime,
+    false,
+  );
+}
+
+function leftoverOleadaHoleCount(
+  resources: ResourceSlot[],
+  occupied: Set<string>,
+  courtCount: number,
+): number {
+  const laterBusy = new Set<string>();
+  for (const slot of resources) {
+    if (
+      occupied.has(resourceKey(slot.playDate, slot.courtIndex, slot.startTime))
+    ) {
+      laterBusy.add(`${slot.playDate}:${slot.slotIndex}`);
+    }
+  }
+
+  const waves = new Map<string, { free: number; busy: number; hasLater: boolean }>();
+  for (const slot of resources) {
+    const key = `${slot.playDate}:${slot.slotIndex}`;
+    const wave = waves.get(key) ?? { free: 0, busy: 0, hasLater: false };
+    if (
+      occupied.has(resourceKey(slot.playDate, slot.courtIndex, slot.startTime))
+    ) {
+      wave.busy += 1;
+    } else {
+      wave.free += 1;
+    }
+    waves.set(key, wave);
+  }
+
+  let holes = 0;
+  for (const [key, wave] of waves) {
+    if (wave.busy === 0 || wave.free === 0) continue;
+    const [playDate, slotIndexRaw] = key.split(":");
+    const slotIndex = Number(slotIndexRaw);
+    const hasLater = [...laterBusy].some((busyKey) => {
+      const [date, indexRaw] = busyKey.split(":");
+      return date === playDate && Number(indexRaw) > slotIndex;
+    });
+    if (hasLater && wave.busy < courtCount) holes += 1;
+  }
+  return holes;
+}
+
 function pickSlot(params: {
   resources: ResourceSlot[];
   occupied: Set<string>;
@@ -539,7 +680,9 @@ function pickSlot(params: {
   pair2?: FixturePairInput;
   /// Si true, ignora preferencias de celda (solo día/ocupación) — útil para G/G y P/P.
   relaxPreferences?: boolean;
-}): ResourceSlot | null {
+  /// G/G y P/P: solo slots posteriores a ambas aperturas de la zona.
+  afterBound?: SlotBound | null;
+}): SlotPick | null {
   const {
     resources,
     occupied,
@@ -549,87 +692,79 @@ function pickSlot(params: {
     pair1,
     pair2,
     relaxPreferences = false,
+    afterBound = null,
   } = params;
 
-  // Semi-duro: primero con descanso; si no hay hueco, permitir slots seguidos
-  // (pero el score sigue prefiriendo huecos con descanso).
-  const restAttempts = [true, false];
-  const prefAttempts: Array<{ relaxPrefs: boolean; relaxDay: boolean }> = [
-    { relaxPrefs: relaxPreferences, relaxDay: false },
-    { relaxPrefs: true, relaxDay: false },
-    { relaxPrefs: true, relaxDay: true },
-  ];
+  const hardValid: ResourceSlot[] = [];
+  for (const slot of resources) {
+    if (
+      afterBound &&
+      !isSlotAfterBound(
+        { playDate: slot.playDate, slotIndex: slot.slotIndex },
+        afterBound,
+      )
+    ) {
+      continue;
+    }
+    if (
+      occupied.has(resourceKey(slot.playDate, slot.courtIndex, slot.startTime))
+    ) {
+      continue;
+    }
+    if (pairHardConflict(pair1, pairBusy, slot)) continue;
+    if (pairHardConflict(pair2, pairBusy, slot)) continue;
+    hardValid.push(slot);
+  }
+  if (hardValid.length === 0) return null;
 
-  for (const requireRest of restAttempts) {
-    for (const attempt of prefAttempts) {
-      let best: ResourceSlot | null = null;
-      let bestScore = -Infinity;
-
-      for (const slot of resources) {
-        if (
-          occupied.has(
-            resourceKey(slot.playDate, slot.courtIndex, slot.startTime),
-          )
-        ) {
-          continue;
-        }
-
-        const checkPair = (
-          pair: FixturePairInput | undefined,
-        ): boolean => {
-          if (!pair) return true;
-          if (
-            pairSlotConflicts(
-              pairBusy.get(pair.id),
-              slot.playDate,
-              slot.slotIndex,
-              slot.startTime,
-              requireRest,
-            )
-          ) {
-            return false;
-          }
-          if (!attempt.relaxDay) {
-            const dates = pairDates.get(pair.id) ?? new Set<string>();
-            if (!dayPrefAllows(pair.zonesDayPreference, dates, slot.playDate)) {
-              return false;
-            }
-          }
-          if (!attempt.relaxPrefs && pair.preferences.length > 0) {
-            if (
-              !preferenceKeys(pair).has(
-                prefKey(slot.playDate, slot.slotIndex),
-              )
-            ) {
-              return false;
-            }
-          }
-          return true;
-        };
-
-        if (!checkPair(pair1) || !checkPair(pair2)) continue;
-
-        const score = scoreSlot(
-          slot,
-          pair1,
-          pair2,
-          pairBusy,
-          pairDates,
-          occupied,
-          courtCount,
-          requireRest,
-        );
-        if (score > bestScore) {
-          bestScore = score;
-          best = slot;
-        }
-      }
-
-      if (best) return best;
+  let earliest = hardValid[0]!;
+  for (const slot of hardValid) {
+    if (
+      compareSlotBounds(
+        { playDate: slot.playDate, slotIndex: slot.slotIndex },
+        { playDate: earliest.playDate, slotIndex: earliest.slotIndex },
+      ) < 0
+    ) {
+      earliest = slot;
     }
   }
 
-  return null;
+  const wave = hardValid.filter(
+    (slot) =>
+      slot.playDate === earliest.playDate &&
+      slot.slotIndex === earliest.slotIndex,
+  );
+
+  let best = wave[0]!;
+  let bestScore = -Infinity;
+  for (const slot of wave) {
+    const score = scoreSlot(
+      slot,
+      pair1,
+      pair2,
+      pairBusy,
+      pairDates,
+      occupied,
+      courtCount,
+      false,
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      best = slot;
+    }
+  }
+
+  return {
+    slot: best,
+    ruleBreaks: collectRuleBreaks(
+      best,
+      pair1,
+      pair2,
+      pairBusy,
+      pairDates,
+      relaxPreferences,
+    ),
+  };
 }
 
 type PairAppearance = {
@@ -776,28 +911,13 @@ export function buildZonesFixture(
       const pair2 = pairing.pair2 ? pairById.get(pairing.pair2) : undefined;
       const isFollowUp =
         pairing.kind === "winners" || pairing.kind === "losers";
+      const afterBound = isFollowUp
+        ? latestScheduledOpeningBound(job.matches)
+        : null;
 
-      const softPair1 = isFollowUp
-        ? pairById.get(job.pairIds[0]!)
-        : pair1;
-      const softPair2 = isFollowUp
-        ? pairById.get(job.pairIds[1]!)
-        : pair2;
-
-      const slot = pickSlot({
-        resources,
-        occupied,
-        pairBusy,
-        pairDates,
-        courtCount,
-        pair1: softPair1,
-        pair2: softPair2,
-        relaxPreferences: isFollowUp,
-      });
-
-      if (!slot) {
+      if (isFollowUp && !afterBound) {
         warnings.push(
-          `${job.label} partido ${round + 1}: sin horario disponible.`,
+          `${job.label} partido ${round + 1}: sin horario posterior a las aperturas.`,
         );
         job.matches.push({
           matchIndex: round,
@@ -814,6 +934,48 @@ export function buildZonesFixture(
         continue;
       }
 
+      const softPair1 = isFollowUp
+        ? pairById.get(job.pairIds[0]!)
+        : pair1;
+      const softPair2 = isFollowUp
+        ? pairById.get(job.pairIds[1]!)
+        : pair2;
+
+      const picked = pickSlot({
+        resources,
+        occupied,
+        pairBusy,
+        pairDates,
+        courtCount,
+        pair1: softPair1,
+        pair2: softPair2,
+        relaxPreferences: isFollowUp,
+        afterBound,
+      });
+
+      if (!picked) {
+        warnings.push(
+          isFollowUp
+            ? `${job.label} partido ${round + 1}: sin horario posterior a las aperturas.`
+            : `${job.label} partido ${round + 1}: sin horario disponible.`,
+        );
+        job.matches.push({
+          matchIndex: round,
+          kind: pairing.kind,
+          playDate: null,
+          startTime: null,
+          endTime: null,
+          courtIndex: null,
+          pair1Id: pairing.pair1,
+          pair2Id: pairing.pair2,
+          slotIndex: null,
+          noRestGap: false,
+        });
+        continue;
+      }
+
+      const { slot, ruleBreaks } = picked;
+
       const scheduled: ScheduledZoneMatch = {
         matchIndex: round,
         kind: pairing.kind,
@@ -824,7 +986,8 @@ export function buildZonesFixture(
         pair1Id: pairing.pair1,
         pair2Id: pairing.pair2,
         slotIndex: slot.slotIndex,
-        noRestGap: false,
+        noRestGap: ruleBreaks.includes("rest"),
+        ruleBreaks,
       };
 
       markScheduled(
@@ -866,10 +1029,35 @@ export function buildZonesFixture(
     );
   }
 
+  const allMatches = scheduledZones.flatMap((zone) => zone.matches);
+  const dayPrefBreaks = allMatches.filter((match) =>
+    match.ruleBreaks?.includes("day_pref"),
+  ).length;
+  const cellPrefBreaks = allMatches.filter((match) =>
+    match.ruleBreaks?.includes("cell_pref"),
+  ).length;
+  if (dayPrefBreaks > 0) {
+    warnings.push(
+      `${dayPrefBreaks} partido(s) fuera de preferencia de día (la oleada tuvo prioridad; solo informativo).`,
+    );
+  }
+  if (cellPrefBreaks > 0) {
+    warnings.push(
+      `${cellPrefBreaks} partido(s) fuera de preferencia de horario (la oleada tuvo prioridad; solo informativo).`,
+    );
+  }
+
   const withoutPrefs = input.pairs.filter((p) => p.preferences.length === 0);
   if (withoutPrefs.length > 0) {
     warnings.push(
       `${withoutPrefs.length} pareja(s) sin rangos de preferencia: se ubicaron en los huecos libres.`,
+    );
+  }
+
+  const oleadaHoles = leftoverOleadaHoleCount(resources, occupied, courtCount);
+  if (oleadaHoles > 0) {
+    warnings.push(
+      `${oleadaHoles} franja(s) con cancha libre y partidos más tarde (oleada incompleta: pareja ocupada o G/G).`,
     );
   }
 

@@ -26,7 +26,6 @@ import {
   toPlayDayValues,
 } from "../domain/play-day-slots";
 import {
-  buildCloneTournamentName,
   type CreateTournamentValues,
   type UpdateTournamentValues,
 } from "../domain/tournament-schema";
@@ -61,6 +60,23 @@ import {
   type ZonesFixturePersisted,
 } from "../domain/zones-fixture-schema";
 import {
+  buildFinalFixture,
+  buildIntermediateFixture,
+} from "../domain/build-intermediate-fixture";
+import {
+  parseFinalFixture,
+  parseIntermediateFixture,
+  toPersistedFinalFixture,
+  toPersistedIntermediateFixture,
+} from "../domain/intermediate-fixture-schema";
+import {
+  categoryHasFinalPhase,
+  categoryHasIntermediatePhase,
+  eligiblePairCount,
+  finalPhaseSettings,
+  intermediatePhaseSettings,
+} from "../domain/intermediate-phase";
+import {
   buildCategoryZonesGrid,
   estimateIntermediateMatches,
   findPreferenceSlotInRules,
@@ -74,6 +90,25 @@ function toDbDate(dateISO: string): Date {
 
 function fromDbDate(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+let intermediateFixtureColumnReady = false;
+let finalFixtureColumnReady = false;
+
+async function ensureIntermediateFixtureColumn() {
+  if (intermediateFixtureColumnReady) return;
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "intermediateFixture" JSONB`,
+  );
+  intermediateFixtureColumnReady = true;
+}
+
+async function ensureFinalFixtureColumn() {
+  if (finalFixtureColumnReady) return;
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "finalFixture" JSONB`,
+  );
+  finalFixtureColumnReady = true;
 }
 
 function mapStoredPlayDay(day: {
@@ -227,6 +262,8 @@ function mapCategoryPhaseConfig(
     knockoutPlayDates?: string[];
     finalPlayDates?: string[];
     zonesFixture?: unknown;
+    intermediateFixture?: unknown;
+    finalFixture?: unknown;
   } | null,
 ): CategoryPhaseConfig {
   const phases = defaultPhaseConfigs();
@@ -258,6 +295,10 @@ function mapCategoryPhaseConfig(
     pairsPerZone: settings?.pairsPerZone ?? 3,
     zone4Advancers: settings?.zone4Advancers === 2 ? 2 : 3,
     zonesFixture: parseZonesFixture(settings?.zonesFixture ?? null),
+    intermediateFixture: parseIntermediateFixture(
+      settings?.intermediateFixture ?? null,
+    ),
+    finalFixture: parseFinalFixture(settings?.finalFixture ?? null),
   };
 }
 
@@ -355,7 +396,17 @@ export class PrismaTournamentRepository implements TournamentRepository {
       where: { slug },
       select: { id: true, name: true, slug: true, currency: true },
     });
-    return club;
+    if (!club) return null;
+    const { getClubProfile } = await import(
+      "@/modules/clubs/infrastructure/club-profile"
+    );
+    const profile = await getClubProfile(club.id);
+    return {
+      ...club,
+      logoUrl: profile?.logoUrl ?? null,
+      locality: profile?.locality ?? null,
+      address: profile?.address ?? null,
+    };
   }
 
   async getClubLevels(clubId: string) {
@@ -692,7 +743,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
   async cloneTournament(
     clubId: string,
     tournamentId: string,
-    input: { includePairs: boolean },
+    input: { includePairs: boolean; name: string },
   ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
     const source = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId },
@@ -709,7 +760,8 @@ export class PrismaTournamentRepository implements TournamentRepository {
     });
     if (!source) return { ok: false, error: "Torneo no encontrado" };
 
-    const cloneName = buildCloneTournamentName(source.name);
+    const cloneName = input.name.trim();
+    if (!cloneName) return { ok: false, error: "Ingresá el nombre del torneo" };
 
     try {
       const cloneId = await prisma.$transaction(async (tx) => {
@@ -1670,6 +1722,298 @@ export class PrismaTournamentRepository implements TournamentRepository {
     return { ok: true, fixture: persisted };
   }
 
+  async buildAndSaveIntermediateFixture(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<
+    | {
+        ok: true;
+        warnings: string[];
+        categoryCount: number;
+        matchCount: number;
+      }
+    | { ok: false; error: string }
+  > {
+    const tournament = await prisma.tournament.findFirst({
+      where: { id: tournamentId, clubId, type: "ZONAS" },
+      select: { id: true, courtCount: true },
+    });
+    if (!tournament) return { ok: false, error: "Torneo no encontrado" };
+
+    const config = await this.getTournamentConfig(clubId, tournamentId);
+    if (!config) return { ok: false, error: "Configuración no encontrada" };
+
+    const pairs = await prisma.tournamentPair.findMany({
+      where: { tournamentId, status: { not: "CANCELLED" } },
+      select: {
+        id: true,
+        categoryId: true,
+        player2Id: true,
+        status: true,
+      },
+    });
+
+    const pairItems = pairs.map((pair) => ({
+      id: pair.id,
+      categoryId: pair.categoryId,
+      status: pair.status as PairListItem["status"],
+      player2: pair.player2Id ? { id: pair.player2Id, name: "" } : null,
+      player1: { id: "", name: "" },
+      categoryName: "",
+      zoneLabel: null,
+      zonesDayPreference: "ANY" as const,
+      player1Confirmed: false,
+      player2Confirmed: false,
+      player1PaymentStatus: "UNPAID" as const,
+      player2PaymentStatus: "UNPAID" as const,
+      paymentStatus: "UNPAID" as const,
+      createdAt: "",
+    }));
+
+    const builderCategories = config.categories
+      .map((category) => {
+        const settings = intermediatePhaseSettings(config, category.categoryId);
+        const pairCount = eligiblePairCount(
+          pairItems,
+          category.categoryId,
+        );
+        return {
+          categoryId: category.categoryId,
+          pairCount,
+          zone4Advancers: settings.zone4Advancers,
+          startsAtRound: settings.startsAtRound,
+          zonesFixtureMatches:
+            category.zonesFixture?.zones.flatMap((zone) => zone.matches) ?? [],
+        };
+      })
+      .filter((category) =>
+        categoryHasIntermediatePhase({
+          pairCount: category.pairCount,
+          zone4Advancers: category.zone4Advancers,
+          startsAtRound: category.startsAtRound,
+        }),
+      );
+
+    if (builderCategories.length === 0) {
+      return {
+        ok: false,
+        error: "Ninguna categoría tiene fase intermedia para armar",
+      };
+    }
+
+    const slotMinutes = Math.max(
+      60,
+      ...builderCategories.map((category) => {
+        const categoryConfig = config.categories.find(
+          (item) => item.categoryId === category.categoryId,
+        );
+        return (
+          (categoryConfig?.phases.knockout.matchDurationMin ?? 90) +
+          (categoryConfig?.intervalMin ?? 0)
+        );
+      }),
+    );
+
+    const result = buildIntermediateFixture({
+      playDays: config.playDays,
+      courtCount: Math.max(1, config.courtCount || tournament.courtCount || 1),
+      slotMinutes,
+      categories: builderCategories,
+    });
+
+    if (
+      result.warnings.some((warning) => warning.includes("penúltimo día")) &&
+      result.categories.every((category) => category.rounds.length === 0)
+    ) {
+      return { ok: false, error: result.warnings[0] ?? "No se pudo armar" };
+    }
+
+    await ensureIntermediateFixtureColumn();
+    await prisma.$transaction(async (tx) => {
+      for (const category of result.categories) {
+        const persisted = toPersistedIntermediateFixture(category);
+        const updated = await tx.$executeRawUnsafe(
+          `UPDATE "tournament_settings" SET "intermediateFixture" = $1::jsonb WHERE "categoryId" = $2`,
+          JSON.stringify(persisted),
+          category.categoryId,
+        );
+        if (updated === 0) {
+          await tx.tournamentSettings.create({
+            data: { categoryId: category.categoryId },
+          });
+          await tx.$executeRawUnsafe(
+            `UPDATE "tournament_settings" SET "intermediateFixture" = $1::jsonb WHERE "categoryId" = $2`,
+            JSON.stringify(persisted),
+            category.categoryId,
+          );
+        }
+      }
+    });
+
+    const matchCount = result.categories.reduce(
+      (sum, category) =>
+        sum +
+        category.rounds.reduce(
+          (roundSum, round) => roundSum + round.matches.length,
+          0,
+        ),
+      0,
+    );
+
+    return {
+      ok: true,
+      warnings: result.warnings,
+      categoryCount: result.categories.length,
+      matchCount,
+    };
+  }
+
+  async buildAndSaveFinalFixture(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<
+    | {
+        ok: true;
+        warnings: string[];
+        categoryCount: number;
+        matchCount: number;
+      }
+    | { ok: false; error: string }
+  > {
+    const tournament = await prisma.tournament.findFirst({
+      where: { id: tournamentId, clubId, type: "ZONAS" },
+      select: { id: true, courtCount: true },
+    });
+    if (!tournament) return { ok: false, error: "Torneo no encontrado" };
+
+    const config = await this.getTournamentConfig(clubId, tournamentId);
+    if (!config) return { ok: false, error: "Torneo no encontrado" };
+
+    const pairs = await prisma.tournamentPair.findMany({
+      where: { tournamentId, status: { not: "CANCELLED" } },
+      select: {
+        id: true,
+        categoryId: true,
+        player2Id: true,
+        status: true,
+      },
+    });
+    const pairItems = pairs.map((pair) => ({
+      id: pair.id,
+      categoryId: pair.categoryId,
+      status: pair.status as PairListItem["status"],
+      player2: pair.player2Id ? { id: pair.player2Id, name: "" } : null,
+      player1: { id: "", name: "" },
+      categoryName: "",
+      zoneLabel: null,
+      zonesDayPreference: "ANY" as const,
+      player1Confirmed: false,
+      player2Confirmed: false,
+      player1PaymentStatus: "UNPAID" as const,
+      player2PaymentStatus: "UNPAID" as const,
+      paymentStatus: "UNPAID" as const,
+      createdAt: "",
+    }));
+
+    const builderCategories = config.categories
+      .map((category) => {
+        const settings = finalPhaseSettings(config, category.categoryId);
+        const pairCount = eligiblePairCount(pairItems, category.categoryId);
+        return {
+          categoryId: category.categoryId,
+          pairCount,
+          zone4Advancers: settings.zone4Advancers,
+          startsAtRound: settings.startsAtRound,
+          zonesFixtureMatches:
+            category.zonesFixture?.zones.flatMap((zone) => zone.matches) ?? [],
+          priorKnockoutMatches:
+            category.intermediateFixture?.rounds.flatMap(
+              (round) => round.matches,
+            ) ?? [],
+        };
+      })
+      .filter((category) =>
+        categoryHasFinalPhase({
+          pairCount: category.pairCount,
+          zone4Advancers: category.zone4Advancers,
+          startsAtRound: category.startsAtRound,
+        }),
+      );
+
+    if (builderCategories.length === 0) {
+      return {
+        ok: false,
+        error: "Ninguna categoría tiene fase final para armar",
+      };
+    }
+
+    const slotMinutes = Math.max(
+      60,
+      ...builderCategories.map((category) => {
+        const categoryConfig = config.categories.find(
+          (item) => item.categoryId === category.categoryId,
+        );
+        return (
+          (categoryConfig?.phases.final.matchDurationMin ?? 120) +
+          (categoryConfig?.intervalMin ?? 0)
+        );
+      }),
+    );
+
+    const result = buildFinalFixture({
+      playDays: config.playDays,
+      courtCount: Math.max(1, config.courtCount || tournament.courtCount || 1),
+      slotMinutes,
+      categories: builderCategories,
+    });
+
+    if (
+      result.warnings.some((warning) => warning.includes("último día")) &&
+      result.categories.every((category) => category.rounds.length === 0)
+    ) {
+      return { ok: false, error: result.warnings[0] ?? "No se pudo armar" };
+    }
+
+    await ensureFinalFixtureColumn();
+    await prisma.$transaction(async (tx) => {
+      for (const category of result.categories) {
+        const persisted = toPersistedFinalFixture(category);
+        const updated = await tx.$executeRawUnsafe(
+          `UPDATE "tournament_settings" SET "finalFixture" = $1::jsonb WHERE "categoryId" = $2`,
+          JSON.stringify(persisted),
+          category.categoryId,
+        );
+        if (updated === 0) {
+          await tx.tournamentSettings.create({
+            data: { categoryId: category.categoryId },
+          });
+          await tx.$executeRawUnsafe(
+            `UPDATE "tournament_settings" SET "finalFixture" = $1::jsonb WHERE "categoryId" = $2`,
+            JSON.stringify(persisted),
+            category.categoryId,
+          );
+        }
+      }
+    });
+
+    const matchCount = result.categories.reduce(
+      (sum, category) =>
+        sum +
+        category.rounds.reduce(
+          (roundSum, round) => roundSum + round.matches.length,
+          0,
+        ),
+      0,
+    );
+
+    return {
+      ok: true,
+      warnings: result.warnings,
+      categoryCount: result.categories.length,
+      matchCount,
+    };
+  }
+
   async getTournamentConfig(
     clubId: string,
     tournamentId: string,
@@ -1695,17 +2039,30 @@ export class PrismaTournamentRepository implements TournamentRepository {
     const playDays = syncPlayDaysToRange(storedDays, startDate, endDate);
 
     const categoryIds = tournament.categories.map((c) => c.id);
+    await ensureIntermediateFixtureColumn();
+    await ensureFinalFixtureColumn();
     const fixtureRows =
       categoryIds.length === 0
         ? []
         : await prisma.$queryRawUnsafe<
-            Array<{ categoryId: string; zonesFixture: unknown }>
+            Array<{
+              categoryId: string;
+              zonesFixture: unknown;
+              intermediateFixture: unknown;
+              finalFixture: unknown;
+            }>
           >(
-            `SELECT "categoryId", "zonesFixture" FROM "tournament_settings" WHERE "categoryId" = ANY($1::text[])`,
+            `SELECT "categoryId", "zonesFixture", "intermediateFixture", "finalFixture" FROM "tournament_settings" WHERE "categoryId" = ANY($1::text[])`,
             categoryIds,
           );
     const fixtureByCategory = new Map(
       fixtureRows.map((row) => [row.categoryId, row.zonesFixture]),
+    );
+    const intermediateByCategory = new Map(
+      fixtureRows.map((row) => [row.categoryId, row.intermediateFixture]),
+    );
+    const finalByCategory = new Map(
+      fixtureRows.map((row) => [row.categoryId, row.finalFixture]),
     );
 
     return {
@@ -1723,9 +2080,22 @@ export class PrismaTournamentRepository implements TournamentRepository {
                 (category.settings as { zonesFixture?: unknown }).zonesFixture ??
                 fixtureByCategory.get(category.id) ??
                 null,
+              intermediateFixture:
+                (category.settings as { intermediateFixture?: unknown })
+                  .intermediateFixture ??
+                intermediateByCategory.get(category.id) ??
+                null,
+              finalFixture:
+                (category.settings as { finalFixture?: unknown })
+                  .finalFixture ??
+                finalByCategory.get(category.id) ??
+                null,
             }
           : {
               zonesFixture: fixtureByCategory.get(category.id) ?? null,
+              intermediateFixture:
+                intermediateByCategory.get(category.id) ?? null,
+              finalFixture: finalByCategory.get(category.id) ?? null,
               zonesMatchFormat: "ONE_SET_6",
               zonesMatchDurationMin: 75,
               knockoutMatchFormat: "TWO_SETS_STB",

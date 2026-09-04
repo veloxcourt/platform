@@ -234,6 +234,33 @@ export async function buildZonesFixtureAction(
     return { ok: false, error: result.error ?? "Error" };
   }
 
+  const warnings = [...result.fixture.warnings];
+  const intermediate = await repo.buildAndSaveIntermediateFixture(
+    clubId,
+    tournamentId,
+  );
+  if (!intermediate.ok) {
+    const skip =
+      intermediate.error ===
+      "Ninguna categoría tiene fase intermedia para armar";
+    if (!skip && intermediate.error) {
+      warnings.push(`Intermedia: ${intermediate.error}`);
+    }
+  } else {
+    warnings.push(...intermediate.warnings);
+  }
+
+  const finalPhase = await repo.buildAndSaveFinalFixture(clubId, tournamentId);
+  if (!finalPhase.ok) {
+    const skip =
+      finalPhase.error === "Ninguna categoría tiene fase final para armar";
+    if (!skip && finalPhase.error) {
+      warnings.push(`Final: ${finalPhase.error}`);
+    }
+  } else {
+    warnings.push(...finalPhase.warnings);
+  }
+
   revalidate(clubSlug, tournamentId);
   const matchCount = result.fixture.zones.reduce(
     (sum, zone) => sum + zone.matches.length,
@@ -241,10 +268,166 @@ export async function buildZonesFixtureAction(
   );
   return {
     ok: true,
-    warnings: result.fixture.warnings,
+    warnings,
     zoneCount: result.fixture.zones.length,
     matchCount,
   };
+}
+
+export async function buildAllZonesFixturesAction(
+  clubSlug: string,
+  tournamentId: string,
+): Promise<
+  | {
+      ok: true;
+      warnings: string[];
+      categoryCount: number;
+      zoneCount: number;
+      matchCount: number;
+    }
+  | { ok: false; error: string }
+> {
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+
+  const config = await repo.getTournamentConfig(clubId, tournamentId);
+  if (!config) return { ok: false, error: "Configuración no encontrada" };
+  if (config.categories.length === 0) {
+    return { ok: false, error: "No hay categorías para armar" };
+  }
+
+  const warnings: string[] = [];
+  let zoneCount = 0;
+  let matchCount = 0;
+  let okCategories = 0;
+
+  for (const category of config.categories) {
+    const result = await repo.buildAndSaveZonesFixture(
+      clubId,
+      tournamentId,
+      category.categoryId,
+    );
+    if (!result.ok) {
+      warnings.push(
+        `${category.categoryName}: ${result.error ?? "Error"}`,
+      );
+      continue;
+    }
+    okCategories += 1;
+    zoneCount += result.fixture.zones.length;
+    matchCount += result.fixture.zones.reduce(
+      (sum, zone) => sum + zone.matches.length,
+      0,
+    );
+    for (const warning of result.fixture.warnings) {
+      warnings.push(`${category.categoryName}: ${warning}`);
+    }
+  }
+
+  if (okCategories === 0) {
+    return {
+      ok: false,
+      error: warnings[0] ?? "No se pudieron armar las zonas",
+    };
+  }
+
+  const intermediate = await repo.buildAndSaveIntermediateFixture(
+    clubId,
+    tournamentId,
+  );
+  if (!intermediate.ok) {
+    const skip =
+      intermediate.error ===
+      "Ninguna categoría tiene fase intermedia para armar";
+    if (!skip && intermediate.error) {
+      warnings.push(`Intermedia: ${intermediate.error}`);
+    }
+  } else {
+    warnings.push(...intermediate.warnings);
+  }
+
+  const finalPhase = await repo.buildAndSaveFinalFixture(clubId, tournamentId);
+  if (!finalPhase.ok) {
+    const skip =
+      finalPhase.error === "Ninguna categoría tiene fase final para armar";
+    if (!skip && finalPhase.error) {
+      warnings.push(`Final: ${finalPhase.error}`);
+    }
+  } else {
+    warnings.push(...finalPhase.warnings);
+  }
+
+  revalidate(clubSlug, tournamentId);
+  return {
+    ok: true,
+    warnings,
+    categoryCount: okCategories,
+    zoneCount,
+    matchCount,
+  };
+}
+
+export async function buildIntermediateFixtureAction(
+  clubSlug: string,
+  tournamentId: string,
+): Promise<
+  | {
+      ok: true;
+      warnings: string[];
+      categoryCount: number;
+      matchCount: number;
+    }
+  | { ok: false; error: string }
+> {
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+
+  const result = await repo.buildAndSaveIntermediateFixture(
+    clubId,
+    tournamentId,
+  );
+  if (!result.ok) {
+    return { ok: false, error: result.error ?? "Error" };
+  }
+
+  const warnings = [...result.warnings];
+  const finalPhase = await repo.buildAndSaveFinalFixture(clubId, tournamentId);
+  if (!finalPhase.ok) {
+    const skip =
+      finalPhase.error === "Ninguna categoría tiene fase final para armar";
+    if (!skip && finalPhase.error) {
+      warnings.push(`Final: ${finalPhase.error}`);
+    }
+  } else {
+    warnings.push(...finalPhase.warnings);
+  }
+
+  revalidate(clubSlug, tournamentId);
+  return { ...result, warnings };
+}
+
+export async function buildFinalFixtureAction(
+  clubSlug: string,
+  tournamentId: string,
+): Promise<
+  | {
+      ok: true;
+      warnings: string[];
+      categoryCount: number;
+      matchCount: number;
+    }
+  | { ok: false; error: string }
+> {
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+
+  const result = await repo.buildAndSaveFinalFixture(clubId, tournamentId);
+  if (!result.ok) {
+    return { ok: false, error: result.error ?? "Error" };
+  }
+
+  revalidate(clubSlug, tournamentId);
+  return result;
 }
 
 export async function getZonasTournamentDetailAction(

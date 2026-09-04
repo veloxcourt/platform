@@ -27,9 +27,12 @@ export default async function ControlUsuariosLayout({
         <ControlUsuariosSubnav
           clubSlug={clubSlug}
           allowedModules={access.allowedModules}
+          isClubOwner={access.role === "OWNER"}
         />
         <p className="shrink-0 text-sm text-muted-foreground">
-          Tipos de perfil y usuarios del club
+          {access.role === "OWNER"
+            ? "Datos del club, tipos de perfil y usuarios"
+            : "Tipos de perfil y usuarios del club"}
         </p>
       </div>
 

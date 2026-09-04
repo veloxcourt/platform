@@ -34,6 +34,12 @@ export default async function TorneoDetailPage({
       <ZonasTournamentDetail
         clubSlug={clubSlug}
         currency={data.club.currency}
+        club={{
+          name: data.club.name,
+          logoUrl: data.club.logoUrl ?? null,
+          locality: data.club.locality ?? null,
+          address: data.club.address ?? null,
+        }}
         tournament={data.tournament}
         catalogCategories={data.catalogCategories}
         players={players}

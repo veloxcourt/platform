@@ -5,6 +5,7 @@ export async function cloneTournament(
   clubId: string,
   tournamentId: string,
   includePairs: boolean,
+  name: string,
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-  return repo.cloneTournament(clubId, tournamentId, { includePairs });
+  return repo.cloneTournament(clubId, tournamentId, { includePairs, name });
 }

@@ -58,6 +58,12 @@ export const updateTournamentSchema = z
 
 export type UpdateTournamentValues = z.infer<typeof updateTournamentSchema>;
 
+export const cloneTournamentNameSchema = z.object({
+  name: z.string().trim().min(1, "Ingresá el nombre del torneo").max(120),
+});
+
+export type CloneTournamentNameValues = z.infer<typeof cloneTournamentNameSchema>;
+
 export function buildCloneTournamentName(name: string): string {
   const suffix = " (copia)";
   const trimmed = name.trim() || "Torneo";

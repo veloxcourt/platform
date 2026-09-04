@@ -37,6 +37,21 @@ import {
   reservedSlotsFromOtherFixtures,
 } from "../domain/build-zones-fixture";
 import { toPersistedZonesFixture } from "../domain/zones-fixture-schema";
+import {
+  buildFinalFixture,
+  buildIntermediateFixture,
+} from "../domain/build-intermediate-fixture";
+import {
+  toPersistedFinalFixture,
+  toPersistedIntermediateFixture,
+} from "../domain/intermediate-fixture-schema";
+import {
+  categoryHasFinalPhase,
+  categoryHasIntermediatePhase,
+  eligiblePairCount,
+  finalPhaseSettings,
+  intermediatePhaseSettings,
+} from "../domain/intermediate-phase";
 import type { TournamentType } from "../domain/tournament-types";
 import type {
   TogglePairSlotValues,
@@ -62,7 +77,15 @@ const DEMO_PLAYERS: Record<string, string> = {
 const DEFAULT_LEVELS = ["1ra", "2da", "3ra", "4ta", "5ta", "6ta", "7ma", "8va"];
 
 interface ClubRecord {
-  club: { id: string; name: string; slug: string; currency: string };
+  club: {
+    id: string;
+    name: string;
+    slug: string;
+    currency: string;
+    logoUrl?: string | null;
+    locality?: string | null;
+    address?: string | null;
+  };
   tournaments: TournamentListItem[];
   catalogCategories: CatalogCategory[];
   categories: Map<string, TournamentCategoryItem[]>;
@@ -278,6 +301,8 @@ function demoConfigs(): Map<string, TournamentConfig> {
             pairsPerZone: 3,
             zone4Advancers: 3,
             zonesFixture: null,
+            intermediateFixture: null,
+            finalFixture: null,
           },
           {
             categoryId: "demo-cat-m4",
@@ -287,6 +312,8 @@ function demoConfigs(): Map<string, TournamentConfig> {
             pairsPerZone: 3,
             zone4Advancers: 3,
             zonesFixture: null,
+            intermediateFixture: null,
+            finalFixture: null,
           },
         ],
       },
@@ -324,6 +351,8 @@ function buildTournamentConfig(
           pairsPerZone: 3,
           zone4Advancers: 3,
           zonesFixture: null,
+          intermediateFixture: null,
+          finalFixture: null,
         }
       );
     }),
@@ -618,7 +647,7 @@ export class MockTournamentRepository implements TournamentRepository {
   async cloneTournament(
     clubId: string,
     tournamentId: string,
-    input: { includePairs: boolean },
+    input: { includePairs: boolean; name: string },
   ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
     for (const record of store.values()) {
       if (record.club.id !== clubId) continue;
@@ -626,7 +655,7 @@ export class MockTournamentRepository implements TournamentRepository {
       if (!source) return { ok: false, error: "Torneo no encontrado" };
 
       const id = `t-${Date.now()}`;
-      const cloneName = buildCloneTournamentName(source.name);
+      const cloneName = input.name.trim() || buildCloneTournamentName(source.name);
       const clone: TournamentListItem = {
         ...source,
         id,
@@ -670,6 +699,8 @@ export class MockTournamentRepository implements TournamentRepository {
             categoryId:
               categoryIdMap.get(category.categoryId) ?? category.categoryId,
             zonesFixture: null,
+            intermediateFixture: null,
+            finalFixture: null,
           })),
         });
       }
@@ -1375,6 +1406,244 @@ export class MockTournamentRepository implements TournamentRepository {
     return { ok: false, error: "Club no encontrado" };
   }
 
+  async buildAndSaveIntermediateFixture(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<
+    | {
+        ok: true;
+        warnings: string[];
+        categoryCount: number;
+        matchCount: number;
+      }
+    | { ok: false; error: string }
+  > {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const tournament = record.tournaments.find((t) => t.id === tournamentId);
+      if (!tournament || tournament.type !== "ZONAS") {
+        return { ok: false, error: "Torneo no encontrado" };
+      }
+      const categories = record.categories.get(tournamentId) ?? [];
+      const config =
+        record.configs.get(tournamentId) ??
+        buildTournamentConfig(tournament, categories);
+      const pairs = record.pairs.get(tournamentId) ?? [];
+
+      const builderCategories = config.categories
+        .map((category) => {
+          const settings = intermediatePhaseSettings(
+            config,
+            category.categoryId,
+          );
+          return {
+            categoryId: category.categoryId,
+            pairCount: eligiblePairCount(pairs, category.categoryId),
+            zone4Advancers: settings.zone4Advancers,
+            startsAtRound: settings.startsAtRound,
+            zonesFixtureMatches:
+              category.zonesFixture?.zones.flatMap((zone) => zone.matches) ??
+              [],
+          };
+        })
+        .filter((category) =>
+          categoryHasIntermediatePhase({
+            pairCount: category.pairCount,
+            zone4Advancers: category.zone4Advancers,
+            startsAtRound: category.startsAtRound,
+          }),
+        );
+
+      if (builderCategories.length === 0) {
+        return {
+          ok: false,
+          error: "Ninguna categoría tiene fase intermedia para armar",
+        };
+      }
+
+      const slotMinutes = Math.max(
+        60,
+        ...builderCategories.map((category) => {
+          const categoryConfig = config.categories.find(
+            (item) => item.categoryId === category.categoryId,
+          );
+          return (
+            (categoryConfig?.phases.knockout.matchDurationMin ?? 90) +
+            (categoryConfig?.intervalMin ?? 0)
+          );
+        }),
+      );
+
+      const result = buildIntermediateFixture({
+        playDays: config.playDays,
+        courtCount: Math.max(1, config.courtCount || 1),
+        slotMinutes,
+        categories: builderCategories,
+      });
+
+      if (
+        result.warnings.some((warning) => warning.includes("penúltimo día")) &&
+        result.categories.every((category) => category.rounds.length === 0)
+      ) {
+        return { ok: false, error: result.warnings[0] ?? "No se pudo armar" };
+      }
+
+      const persistedById = new Map(
+        result.categories.map((category) => [
+          category.categoryId,
+          toPersistedIntermediateFixture(category),
+        ]),
+      );
+      const nextCategories = config.categories.map((category) => ({
+        ...category,
+        intermediateFixture:
+          persistedById.get(category.categoryId) ??
+          category.intermediateFixture,
+      }));
+      record.configs.set(tournamentId, {
+        ...config,
+        categories: nextCategories,
+      });
+
+      const matchCount = result.categories.reduce(
+        (sum, category) =>
+          sum +
+          category.rounds.reduce(
+            (roundSum, round) => roundSum + round.matches.length,
+            0,
+          ),
+        0,
+      );
+      return {
+        ok: true,
+        warnings: result.warnings,
+        categoryCount: result.categories.length,
+        matchCount,
+      };
+    }
+    return { ok: false, error: "Club no encontrado" };
+  }
+
+  async buildAndSaveFinalFixture(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<
+    | {
+        ok: true;
+        warnings: string[];
+        categoryCount: number;
+        matchCount: number;
+      }
+    | { ok: false; error: string }
+  > {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const tournament = record.tournaments.find((t) => t.id === tournamentId);
+      if (!tournament || tournament.type !== "ZONAS") {
+        return { ok: false, error: "Torneo no encontrado" };
+      }
+      const config =
+        record.configs.get(tournamentId) ??
+        buildTournamentConfig(
+          tournament,
+          record.categories.get(tournamentId) ?? [],
+        );
+      const pairs = record.pairs.get(tournamentId) ?? [];
+
+      const builderCategories = config.categories
+        .map((category) => {
+          const settings = finalPhaseSettings(config, category.categoryId);
+          return {
+            categoryId: category.categoryId,
+            pairCount: eligiblePairCount(pairs, category.categoryId),
+            zone4Advancers: settings.zone4Advancers,
+            startsAtRound: settings.startsAtRound,
+            zonesFixtureMatches:
+              category.zonesFixture?.zones.flatMap((zone) => zone.matches) ??
+              [],
+            priorKnockoutMatches:
+              category.intermediateFixture?.rounds.flatMap(
+                (round) => round.matches,
+              ) ?? [],
+          };
+        })
+        .filter((category) =>
+          categoryHasFinalPhase({
+            pairCount: category.pairCount,
+            zone4Advancers: category.zone4Advancers,
+            startsAtRound: category.startsAtRound,
+          }),
+        );
+
+      if (builderCategories.length === 0) {
+        return {
+          ok: false,
+          error: "Ninguna categoría tiene fase final para armar",
+        };
+      }
+
+      const slotMinutes = Math.max(
+        60,
+        ...builderCategories.map((category) => {
+          const categoryConfig = config.categories.find(
+            (item) => item.categoryId === category.categoryId,
+          );
+          return (
+            (categoryConfig?.phases.final.matchDurationMin ?? 120) +
+            (categoryConfig?.intervalMin ?? 0)
+          );
+        }),
+      );
+
+      const result = buildFinalFixture({
+        playDays: config.playDays,
+        courtCount: Math.max(1, config.courtCount || 1),
+        slotMinutes,
+        categories: builderCategories,
+      });
+
+      if (
+        result.warnings.some((warning) => warning.includes("último día")) &&
+        result.categories.every((category) => category.rounds.length === 0)
+      ) {
+        return { ok: false, error: result.warnings[0] ?? "No se pudo armar" };
+      }
+
+      const persistedById = new Map(
+        result.categories.map((category) => [
+          category.categoryId,
+          toPersistedFinalFixture(category),
+        ]),
+      );
+      const nextCategories = config.categories.map((category) => ({
+        ...category,
+        finalFixture:
+          persistedById.get(category.categoryId) ?? category.finalFixture,
+      }));
+      record.configs.set(tournamentId, {
+        ...config,
+        categories: nextCategories,
+      });
+
+      const matchCount = result.categories.reduce(
+        (sum, category) =>
+          sum +
+          category.rounds.reduce(
+            (roundSum, round) => roundSum + round.matches.length,
+            0,
+          ),
+        0,
+      );
+      return {
+        ok: true,
+        warnings: result.warnings,
+        categoryCount: result.categories.length,
+        matchCount,
+      };
+    }
+    return { ok: false, error: "Club no encontrado" };
+  }
+
   async getTournamentConfig(
     clubId: string,
     tournamentId: string,
@@ -1416,6 +1685,14 @@ export class MockTournamentRepository implements TournamentRepository {
             previous?.categories.find(
               (c) => c.categoryId === category.categoryId,
             )?.zonesFixture ?? null,
+          intermediateFixture:
+            previous?.categories.find(
+              (c) => c.categoryId === category.categoryId,
+            )?.intermediateFixture ?? null,
+          finalFixture:
+            previous?.categories.find(
+              (c) => c.categoryId === category.categoryId,
+            )?.finalFixture ?? null,
         };
       });
       record.configs.set(tournamentId, {

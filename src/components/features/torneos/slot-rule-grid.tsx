@@ -43,6 +43,14 @@ const STATUS_LABEL: Record<SlotCellStatus, string> = {
 const SLOT_BOX_CLASS =
   "flex h-[3.25rem] w-16 shrink-0 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border px-1 text-xs leading-tight transition-colors";
 
+function pairVsLabel(
+  pair1?: string | null,
+  pair2?: string | null,
+): string | null {
+  if (!pair1 && !pair2) return null;
+  return `${pair1 ?? "—"} vs ${pair2 ?? "—"}`;
+}
+
 function cellClass(
   status: SlotCellStatus,
   projectedPhase?: string,
@@ -142,20 +150,43 @@ export function SlotRuleGrid({
     playDate: string;
     currentMinutes: number;
   } | null>(null);
+  const [slotDetail, setSlotDetail] = useState<{
+    x: number;
+    y: number;
+    courtLabel: string;
+    startTime: string;
+    endTime: string;
+    status: string;
+    phase?: string;
+    occupants: {
+      name: string;
+      matchCode?: string | null;
+      pairs: string | null;
+    }[];
+  } | null>(null);
   const startMenuRef = useRef<HTMLDivElement>(null);
+  const slotDetailRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!startMenu) return;
+    if (!startMenu && !slotDetail) return;
     function onPointerDown(event: MouseEvent) {
-      if (!startMenuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (!startMenuRef.current?.contains(target)) {
         setStartMenu(null);
+      }
+      if (!slotDetailRef.current?.contains(target)) {
+        setSlotDetail(null);
       }
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setStartMenu(null);
+      if (event.key === "Escape") {
+        setStartMenu(null);
+        setSlotDetail(null);
+      }
     }
     function onScroll() {
       setStartMenu(null);
+      setSlotDetail(null);
     }
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -165,7 +196,7 @@ export function SlotRuleGrid({
       document.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("scroll", onScroll, true);
     };
-  }, [startMenu]);
+  }, [startMenu, slotDetail]);
 
   function openStartMinutesMenu(
     event: ReactMouseEvent,
@@ -407,6 +438,8 @@ export function SlotRuleGrid({
                               {
                                 categoryId: slot.projectedCategoryId,
                                 matchCode: slot.matchCode ?? null,
+                                pair1Label: slot.occupants?.[0]?.pair1Label,
+                                pair2Label: slot.occupants?.[0]?.pair2Label,
                               },
                             ]
                           : [];
@@ -414,6 +447,17 @@ export function SlotRuleGrid({
                     const slotCategory = slot.projectedCategoryId
                       ? categoryById.get(slot.projectedCategoryId)
                       : undefined;
+                    const occupantLines = occupants.map((occupant) => {
+                      const name = categoryById.get(occupant.categoryId)?.name;
+                      return {
+                        name: name ?? "",
+                        matchCode: occupant.matchCode,
+                        pairs: pairVsLabel(
+                          occupant.pair1Label,
+                          occupant.pair2Label,
+                        ),
+                      };
+                    });
                     const titleParts = [
                       conflict
                         ? "Choque: dos categorías en la misma cancha y hora"
@@ -421,10 +465,9 @@ export function SlotRuleGrid({
                           ? "Otra categoría (misma cancha)"
                           : STATUS_LABEL[slot.status],
                       `${slot.startTime}–${slot.endTime}`,
-                      ...occupants.map((occupant) => {
-                        const name = categoryById.get(occupant.categoryId)?.name;
-                        return [name, occupant.matchCode].filter(Boolean).join(" ");
-                      }),
+                      ...occupantLines.flatMap((line) =>
+                        [ [line.name, line.matchCode].filter(Boolean).join(" "), line.pairs ].filter(Boolean),
+                      ),
                       slot.pairLabel,
                       slot.blockReason === "knockout"
                         ? "Reservado fase intermedia"
@@ -436,22 +479,52 @@ export function SlotRuleGrid({
                         ? "Clic derecho: minutos de arranque"
                         : null,
                     ].filter(Boolean);
+                    const canInspect =
+                      mode === "simulation" && occupants.length > 0;
 
                     return (
                       <button
                         key={slot.id}
                         type="button"
-                        disabled={!clickable && !canSetStartMinutes}
+                        disabled={
+                          !clickable && !canSetStartMinutes && !canInspect
+                        }
                         title={titleParts.join(" · ")}
                         aria-label={`${court.courtLabel} ${slot.startTime} ${
-                          slot.matchCode ??
+                          occupantLines
+                            .map((line) =>
+                              [line.matchCode, line.pairs]
+                                .filter(Boolean)
+                                .join(" "),
+                            )
+                            .join(" · ") ||
+                          slot.matchCode ||
                           (slotCategory
                             ? slotCategory.name
                             : slot.projectedSource === "other"
                               ? "Otra categoría"
                               : STATUS_LABEL[slot.status])
                         }`}
-                        onClick={() => clickable && onToggleSlot?.(slot)}
+                        onClick={(event) => {
+                          if (clickable) {
+                            onToggleSlot?.(slot);
+                            return;
+                          }
+                          if (!canInspect) return;
+                          setStartMenu(null);
+                          setSlotDetail({
+                            x: event.clientX,
+                            y: event.clientY,
+                            courtLabel: court.courtLabel,
+                            startTime: slot.startTime,
+                            endTime: slot.endTime,
+                            status: conflict
+                              ? "Choque"
+                              : STATUS_LABEL[slot.status],
+                            phase: slot.projectedPhase,
+                            occupants: occupantLines,
+                          });
+                        }}
                         onContextMenu={(event) =>
                           canSetStartMinutes
                             ? openStartMinutesMenu(
@@ -470,9 +543,11 @@ export function SlotRuleGrid({
                                 slot.projectedPhase,
                                 slot.projectedSource,
                               ),
-                          (clickable || canSetStartMinutes) && "cursor-pointer",
+                          (clickable || canSetStartMinutes || canInspect) &&
+                            "cursor-pointer",
                           !clickable &&
                             !canSetStartMinutes &&
+                            !canInspect &&
                             "cursor-default opacity-95",
                         )}
                       >
@@ -544,6 +619,47 @@ export function SlotRuleGrid({
         );
       })}
     </div>
+    {slotDetail ? (
+      <div
+        ref={slotDetailRef}
+        role="dialog"
+        aria-label="Detalle del partido"
+        className="fixed z-50 min-w-56 max-w-xs rounded-lg border bg-popover p-2.5 text-popover-foreground shadow-md"
+        style={{
+          left: Math.min(slotDetail.x, window.innerWidth - 260),
+          top: Math.min(slotDetail.y, window.innerHeight - 200),
+        }}
+      >
+        <p className="text-xs text-muted-foreground">
+          {slotDetail.courtLabel} · {slotDetail.startTime}–{slotDetail.endTime}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {slotDetail.status}
+          {slotDetail.phase ? ` · Fase: ${slotDetail.phase}` : ""}
+        </p>
+        <div className="mt-2 space-y-2">
+          {slotDetail.occupants.map((occupant, index) => (
+            <div
+              key={`${occupant.name}-${occupant.matchCode ?? index}`}
+              className="text-sm"
+            >
+              <p className="font-medium">
+                {[occupant.name, occupant.matchCode]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+              {occupant.pairs ? (
+                <p className="text-sm leading-snug">{occupant.pairs}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Parejas aún no definidas
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    ) : null}
     {startMenu ? (
       <div
         ref={startMenuRef}

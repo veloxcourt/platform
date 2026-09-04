@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, usePathname } from "next/navigation";
-import { Shield, Users } from "lucide-react";
+import { Building2, Shield, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import {
@@ -10,10 +10,8 @@ import {
 } from "@/config/modules";
 import { StableTabButton } from "@/components/ui/stable-tab-button";
 
-const TAB_ICONS: Record<
-  (typeof CONTROL_USUARIOS_TABS)[number]["slug"],
-  LucideIcon
-> = {
+const TAB_ICONS: Record<string, LucideIcon> = {
+  club: Building2,
   "tipo-usuario": Shield,
   usuarios: Users,
 };
@@ -21,16 +19,21 @@ const TAB_ICONS: Record<
 export function ControlUsuariosSubnav({
   clubSlug,
   allowedModules,
+  isClubOwner = false,
 }: {
   clubSlug: string;
   allowedModules: AdminModuleKey[];
+  isClubOwner?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const base = `/${clubSlug}/control-usuarios`;
-  const tabs = CONTROL_USUARIOS_TABS.filter((tab) =>
-    allowedModules.includes(tab.privilege),
-  );
+  const tabs = [
+    ...(isClubOwner ? [{ slug: "club", label: "Club" }] : []),
+    ...CONTROL_USUARIOS_TABS.filter((tab) =>
+      allowedModules.includes(tab.privilege),
+    ),
+  ];
 
   return (
     <div
@@ -41,7 +44,7 @@ export function ControlUsuariosSubnav({
       {tabs.map((tab) => {
         const href = `${base}/${tab.slug}`;
         const active = pathname === href || pathname.startsWith(`${href}/`);
-        const Icon = TAB_ICONS[tab.slug];
+        const Icon = TAB_ICONS[tab.slug] ?? Users;
 
         return (
           <StableTabButton

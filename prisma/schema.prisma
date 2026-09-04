@@ -21,6 +21,10 @@ model Club {
   timezone       String   @default("America/Argentina/Buenos_Aires")
   currency       String   @default("ARS")
   locale         String   @default("es-AR")
+  /// Logo público del complejo (llaves, PDFs, encabezados).
+  logoUrl        String?
+  locality       String?
+  address        String?
   // Feature flags: m?dulos habilitados por club (sin tocar c?digo)
   enabledModules String[] @default([])
   categories     String[] @default(["1ra", "2da", "3ra", "4ta", "5ta", "6ta", "7ma", "8va"])
@@ -528,6 +532,10 @@ model TournamentSettings {
   finalPlayDates        String[]    @default([])
   /// Fixture armado de zonas (JSON): parejas por zona + partidos con d?a/hora/cancha.
   zonesFixture          Json?
+  /// Fixture armado de fase intermedia (JSON): rondas + partidos con d?a/hora/cancha.
+  intermediateFixture   Json?
+  /// Fixture armado de fase final (JSON): rondas + partidos con d?a/hora/cancha.
+  finalFixture          Json?
 
   category TournamentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 

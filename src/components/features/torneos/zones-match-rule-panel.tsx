@@ -12,13 +12,17 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { CALENDAR_PALETTE } from "@/modules/herramientas/domain/calendario-torneos";
 import { buildMatchesRuleGrid } from "@/modules/tournaments/domain/court-day-slots";
+import { formatAbbreviatedPairLabel } from "@/lib/person-name";
 import type {
+  PairListItem,
   TournamentCategoryItem,
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
 import {
+  ZONE_MATCH_KIND_LABELS,
   formatZoneMatchCode,
   formatZoneMatchSlotCode,
+  type ZoneMatchKind,
 } from "@/modules/tournaments/domain/zone-bracket";
 import {
   SlotRuleGrid,
@@ -32,12 +36,34 @@ function categoryColor(
   return category.color ?? CALENDAR_PALETTE[index % CALENDAR_PALETTE.length]!;
 }
 
+function pairSideLabel(
+  pairId: string | null,
+  pairById: Map<string, PairListItem>,
+  kind: ZoneMatchKind,
+  side: 1 | 2,
+): string {
+  if (pairId) {
+    const pair = pairById.get(pairId);
+    if (pair) {
+      return formatAbbreviatedPairLabel(
+        pair.player1.name,
+        pair.player2?.name ?? null,
+      );
+    }
+  }
+  if (kind === "winners") return "Ganador";
+  if (kind === "losers") return "Perdedor";
+  return side === 1 ? "Pareja 1" : "Pareja 2";
+}
+
 export function ZonesMatchRulePanel({
   categories,
+  pairs,
   config,
   courtCount,
 }: {
   categories: TournamentCategoryItem[];
+  pairs: PairListItem[];
   config: TournamentConfig | null;
   courtCount: number;
 }) {
@@ -89,6 +115,7 @@ export function ZonesMatchRulePanel({
     const abbreviationById = new Map(
       categories.map((category) => [category.id, category.abbreviation]),
     );
+    const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
     const matches = config.categories.flatMap((categoryConfig) =>
       (categoryConfig.zonesFixture?.zones ?? []).flatMap((zone) =>
         zone.matches
@@ -105,6 +132,18 @@ export function ZonesMatchRulePanel({
               zone.label,
               match.matchIndex + 1,
             ),
+            pair1Label: pairSideLabel(
+              match.pair1Id,
+              pairById,
+              match.kind,
+              1,
+            ),
+            pair2Label: pairSideLabel(
+              match.pair2Id,
+              pairById,
+              match.kind,
+              2,
+            ),
           })),
       ),
     );
@@ -117,7 +156,7 @@ export function ZonesMatchRulePanel({
       matches,
       zonesPlayDates,
     });
-  }, [categories, config, courtCount, selectedIds]);
+  }, [categories, config, courtCount, pairs, selectedIds]);
 
   const collisionCount = useMemo(() => {
     if (!config) return 0;
@@ -167,7 +206,8 @@ export function ZonesMatchRulePanel({
         <CardTitle>Regla de partidos</CardTitle>
         <CardDescription>
           Cada slot muestra horario, zona y número de partido (ej. A1). La bolita
-          indica la categoría.
+          indica la categoría. Al pasar el mouse o hacer clic se ven las
+          parejas.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

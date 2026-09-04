@@ -18,7 +18,7 @@ export function TorneosSubnav({ clubSlug }: { clubSlug: string }) {
   const router = useRouter();
   const base = `/${clubSlug}/torneos`;
 
-  // Solo Listado: no hace falta fila de pestañas (Soporte está en Configuración).
+  // Solo Listado: no hace falta fila de pestañas (Soporte está en el detalle del torneo).
   if (TORNEOS_TABS.length <= 1) return null;
 
   return (

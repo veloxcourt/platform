@@ -7,7 +7,11 @@ import { cn } from "@/lib/utils";
 import type { MatchFormat } from "@/modules/tournaments/domain/config-schema";
 import { MATCH_FORMAT_LABELS } from "@/modules/tournaments/domain/config-schema";
 import { comparePlayDaySchedule } from "@/modules/tournaments/domain/play-day";
-import { keysWithNoRestGap } from "@/modules/tournaments/domain/build-zones-fixture";
+import {
+  keysWithNoRestGap,
+  ZONE_RULE_BREAK_LABELS,
+  type ZoneRuleBreak,
+} from "@/modules/tournaments/domain/build-zones-fixture";
 import {
   resultColumnsForFormat,
   ZONE_MATCH_KIND_LABELS,
@@ -31,6 +35,7 @@ export type ZoneMatchDraft = {
   scores: Record<string, string>;
   /// Persistido desde el armado; la UI también lo recalcula en vivo.
   noRestGap?: boolean;
+  ruleBreaks?: ZoneRuleBreak[];
 };
 
 export type ZoneDraft = {
@@ -217,6 +222,9 @@ export function ZoneCard({
   const hasUnscheduled = orderedMatches.some(
     (m) => !m.playDate.trim() || !m.startTime.trim(),
   );
+  const informedBreaks = orderedMatches.flatMap((m) => m.ruleBreaks ?? []);
+  const hasDayPrefBreak = informedBreaks.includes("day_pref");
+  const hasCellPrefBreak = informedBreaks.includes("cell_pref");
   /// Zona fuera de regla: falta horario o alguna pareja sin celda de descanso.
   const zoneNeedsReview = noRestGapIds.size > 0 || hasUnscheduled;
 
@@ -279,6 +287,8 @@ export function ZoneCard({
             {noRestGapIds.size > 0
               ? " · sin descanso en algún partido"
               : null}
+            {hasDayPrefBreak ? " · pref. de día no respetada" : null}
+            {hasCellPrefBreak ? " · pref. de horario no respetada" : null}
             {hasUnscheduled ? " · horario incompleto" : null}
           </p>
         </div>
@@ -332,17 +342,26 @@ export function ZoneCard({
               const lacksRest = noRestGapIds.has(match.id);
               const lacksSchedule =
                 !match.playDate.trim() || !match.startTime.trim();
+              const infoBreaks = (match.ruleBreaks ?? []).filter(
+                (breakKey) => breakKey !== "rest",
+              );
               const rowNeedsReview = lacksRest || lacksSchedule;
+              const rowTitle = [
+                lacksRest
+                  ? "Sin celda de descanso entre partidos de una pareja — revisá horario"
+                  : null,
+                lacksSchedule ? "Partido sin día u horario asignado" : null,
+                ...infoBreaks.map(
+                  (breakKey) =>
+                    `${ZONE_RULE_BREAK_LABELS[breakKey]}: otra regla dura (oleada) tuvo prioridad`,
+                ),
+              ]
+                .filter(Boolean)
+                .join(" · ");
               return (
               <tr
                 key={match.id}
-                title={
-                  lacksRest
-                    ? "Sin celda de descanso entre partidos de una pareja — revisá horario"
-                    : lacksSchedule
-                      ? "Partido sin día u horario asignado"
-                      : undefined
-                }
+                title={rowTitle || undefined}
                 className={cn(
                   "border-b border-dashed last:border-0",
                   rowNeedsReview &&
@@ -362,6 +381,14 @@ export function ZoneCard({
                         Sin horario
                       </span>
                     ) : null}
+                    {infoBreaks.map((breakKey) => (
+                      <span
+                        key={breakKey}
+                        className="max-w-[4.5rem] text-[9px] font-medium leading-tight text-sky-800 dark:text-sky-200"
+                      >
+                        {ZONE_RULE_BREAK_LABELS[breakKey]}
+                      </span>
+                    ))}
                     {match.kind &&
                       (match.kind === "winners" ||
                         match.kind === "losers" ||

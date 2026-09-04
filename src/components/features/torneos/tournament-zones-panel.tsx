@@ -88,6 +88,7 @@ function zonesFromFixture(
         pair2Id: match.pair2Id,
         kind: match.kind,
         noRestGap: match.noRestGap ?? false,
+        ruleBreaks: match.ruleBreaks ?? [],
         scores: emptyScoresForFormat(format),
       }));
     return {

@@ -47,7 +47,12 @@ export interface CourtDaySlot {
   /// Partido real: código corto, ej. A1.
   matchCode?: string | null;
   /// Más de uno = choque de categorías en la misma cancha/hora.
-  occupants?: { categoryId: string; matchCode?: string | null }[];
+  occupants?: {
+    categoryId: string;
+    matchCode?: string | null;
+    pair1Label?: string | null;
+    pair2Label?: string | null;
+  }[];
 }
 
 export interface SlotReservationRef {
@@ -469,6 +474,9 @@ export type ScheduledMatchMark = {
   slotIndex?: number | null;
   pairLabel?: string | null;
   matchCode?: string | null;
+  pair1Label?: string | null;
+  pair2Label?: string | null;
+  projectedPhase?: SimulationPhaseKey;
 };
 
 /// Grilla de partidos reales (Regla de Partidos): pinta el slot donde quedó cada partido.
@@ -536,11 +544,13 @@ export function buildMatchesRuleGrid(input: {
         : undefined);
     if (!slot) continue;
     slot.status = "projected";
-    slot.projectedPhase = "zones";
+    slot.projectedPhase = match.projectedPhase ?? "zones";
     slot.projectedSource = "self";
     const occupant = {
       categoryId: match.categoryId,
       matchCode: match.matchCode ?? null,
+      pair1Label: match.pair1Label ?? null,
+      pair2Label: match.pair2Label ?? null,
     };
     const occupants = slot.occupants ?? [];
     if (

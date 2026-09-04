@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { BookOpen, Layers, SlidersHorizontal } from "lucide-react";
+import { Layers, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -20,17 +20,14 @@ import { StableTabButton } from "@/components/ui/stable-tab-button";
 import { copyCategoryPhaseConfigAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/configuracion/actions";
 import { TournamentCategoriesPanel } from "./tournament-categories-panel";
 import { TournamentConfigForm } from "./tournament-config-form";
-import { TorneosSoporteView } from "./torneos-soporte-view";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 
 const PARAMETERS_TAB = "parametros" as const;
 const CATEGORIES_TAB = "categorias" as const;
-const SUPPORT_TAB = "soporte" as const;
 
 type ConfigSubTab =
   | typeof PARAMETERS_TAB
   | typeof CATEGORIES_TAB
-  | typeof SUPPORT_TAB
   | string;
 
 type CategoryContextMenuState = {
@@ -65,11 +62,7 @@ export function TournamentConfigTabs({
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (
-      subTab === PARAMETERS_TAB ||
-      subTab === CATEGORIES_TAB ||
-      subTab === SUPPORT_TAB
-    ) {
+    if (subTab === PARAMETERS_TAB || subTab === CATEGORIES_TAB) {
       return;
     }
     const stillThere = categories.some((category) => category.id === subTab);
@@ -190,15 +183,6 @@ export function TournamentConfigTabs({
             {category.name}
           </StableTabButton>
         ))}
-        <StableTabButton
-          active={subTab === SUPPORT_TAB}
-          onSelect={() => setSubTab(SUPPORT_TAB)}
-          className="ml-auto"
-          title="Cómo se arma la llave según la cantidad de parejas"
-        >
-          <BookOpen />
-          Soporte
-        </StableTabButton>
       </div>
         </div>
       </div>
@@ -233,8 +217,6 @@ export function TournamentConfigTabs({
           courtCount={courtCount}
           showInscriptionStats={false}
         />
-      ) : subTab === SUPPORT_TAB ? (
-        <TorneosSoporteView />
       ) : config ? (
         <TournamentConfigForm
           key={`${subTab}-${config.categories

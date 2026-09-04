@@ -12,6 +12,10 @@ export default async function ControlUsuariosPage({
   const access = await getClubAccess(clubSlug);
   if (!access) redirect(`/login?next=/${clubSlug}/control-usuarios`);
 
+  if (access.role === "OWNER") {
+    redirect(`/${clubSlug}/control-usuarios/club`);
+  }
+
   const slug = firstControlUsuariosSlug(access.allowedModules);
   if (!slug) {
     const fallback = access.allowedModules[0];

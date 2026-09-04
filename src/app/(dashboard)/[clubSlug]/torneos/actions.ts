@@ -8,6 +8,7 @@ import { cloneTournament } from "@/modules/tournaments/application/clone-tournam
 import { deleteTournament } from "@/modules/tournaments/application/delete-tournament";
 import { updateTournament } from "@/modules/tournaments/application/update-tournament";
 import {
+  cloneTournamentNameSchema,
   createTournamentSchema,
   updateTournamentSchema,
   type CreateTournamentValues,
@@ -97,7 +98,16 @@ export async function cloneTournamentAction(
   clubSlug: string,
   tournamentId: string,
   includePairs: boolean,
+  name: string,
 ): Promise<Result> {
+  const parsed = cloneTournamentNameSchema.safeParse({ name });
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Ingresá el nombre del torneo",
+    };
+  }
+
   const { repo, clubId } = await resolveClubId(clubSlug);
   if (!clubId) return { ok: false, error: "Club no encontrado" };
 
@@ -106,6 +116,7 @@ export async function cloneTournamentAction(
     clubId,
     tournamentId,
     includePairs,
+    parsed.data.name,
   );
   if (!result.ok) return { ok: false, error: result.error };
   revalidate(clubSlug, result.id);

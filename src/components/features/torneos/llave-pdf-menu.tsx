@@ -12,20 +12,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import type { ZonesMatchGridRow } from "./zones-match-grid-model";
 import {
-  runGrillaPdfAction,
-  type GrillaPdfAction,
-} from "./zones-match-grid-pdf";
+  runLlavePdfAction,
+  type LlavePdfClub,
+  type LlavePdfDraw,
+} from "./llave-pdf";
+import type { GrillaPdfAction } from "./zones-match-grid-pdf";
 
-export function GrillaPdfMenu({
+export function LlavePdfMenu({
   tournamentName,
-  rows,
-  groupColumnLabel = "Zona",
+  draws,
+  club,
 }: {
   tournamentName: string;
-  rows: ZonesMatchGridRow[];
-  groupColumnLabel?: string;
+  draws: LlavePdfDraw[];
+  club?: LlavePdfClub;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -33,21 +34,16 @@ export function GrillaPdfMenu({
     if (busy) return;
     setBusy(true);
     try {
-      await runGrillaPdfAction({
-        action,
-        tournamentName,
-        rows,
-        groupColumnLabel,
-      });
+      await runLlavePdfAction({ action, tournamentName, draws, club });
       if (action === "copy") {
-        toast.success("Grilla copiada", {
+        toast.success("Llave copiada", {
           description: "Pegala en WhatsApp con Ctrl+V.",
         });
       }
     } catch (error) {
       toast.error(
         action === "copy"
-          ? "No se pudo copiar la grilla"
+          ? "No se pudo copiar la llave"
           : "No se pudo generar el PDF",
         {
           description:
@@ -62,7 +58,7 @@ export function GrillaPdfMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        disabled={rows.length === 0 || busy}
+        disabled={draws.length === 0 || busy}
         className={cn(
           buttonVariants({ variant: "outline", size: "sm" }),
           "shrink-0",
@@ -71,7 +67,7 @@ export function GrillaPdfMenu({
         <FileDown />
         {busy ? "PDF…" : "PDF"}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-auto min-w-52">
+      <DropdownMenuContent align="end" className="w-auto min-w-52">
         <DropdownMenuItem onClick={() => void handlePdf("open")}>
           <ExternalLink />
           Abrir

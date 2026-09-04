@@ -47,12 +47,7 @@ export function ZonesMatchGridPanel({
             después Cancha 2.
           </CardDescription>
         </div>
-        <GrillaPdfMenu
-          tournamentName={tournamentName}
-          categories={categories}
-          pairs={pairs}
-          config={config}
-        />
+        <GrillaPdfMenu tournamentName={tournamentName} rows={rows} />
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (

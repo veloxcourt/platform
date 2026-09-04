@@ -24,7 +24,15 @@ export type MutationResult = { ok: boolean; error?: string };
 export interface TournamentRepository {
   getClubBySlug(
     slug: string,
-  ): Promise<{ id: string; name: string; slug: string; currency: string } | null>;
+  ): Promise<{
+    id: string;
+    name: string;
+    slug: string;
+    currency: string;
+    logoUrl?: string | null;
+    locality?: string | null;
+    address?: string | null;
+  } | null>;
   getClubLevels(clubId: string): Promise<string[]>;
   listTournaments(clubId: string): Promise<TournamentListItem[]>;
   getZonasTournamentDetail(
@@ -129,6 +137,30 @@ export interface TournamentRepository {
     | { ok: true; fixture: ZonesFixturePersisted }
     | { ok: false; error: string }
   >;
+  buildAndSaveIntermediateFixture(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<
+    | {
+        ok: true;
+        warnings: string[];
+        categoryCount: number;
+        matchCount: number;
+      }
+    | { ok: false; error: string }
+  >;
+  buildAndSaveFinalFixture(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<
+    | {
+        ok: true;
+        warnings: string[];
+        categoryCount: number;
+        matchCount: number;
+      }
+    | { ok: false; error: string }
+  >;
   getTournamentConfig(
     clubId: string,
     tournamentId: string,
@@ -148,7 +180,7 @@ export interface TournamentRepository {
   cloneTournament(
     clubId: string,
     tournamentId: string,
-    input: { includePairs: boolean },
+    input: { includePairs: boolean; name: string },
   ): Promise<{ ok: true; id: string } | { ok: false; error: string }>;
   deleteTournament(
     clubId: string,

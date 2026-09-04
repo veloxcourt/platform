@@ -9,17 +9,21 @@ import {
 
 export type GrillaPdfAction = "open" | "create-open" | "copy";
 
-const HEAD = [
-  "Índice",
-  "Horario",
-  "Cancha",
-  "Categoría",
-  "Zona",
-  "Número",
-  "Pareja 1",
-  "Pareja 2",
-  "Observación",
-];
+const DEFAULT_GROUP_COLUMN = "Zona";
+
+function tableHead(groupColumnLabel: string) {
+  return [
+    "Índice",
+    "Horario",
+    "Cancha",
+    "Categoría",
+    groupColumnLabel,
+    "Número",
+    "Pareja 1",
+    "Pareja 2",
+    "Observación",
+  ];
+}
 
 type BuiltPdf = {
   blob: Blob;
@@ -66,6 +70,7 @@ function tableBody(rows: ZonesMatchGridRow[]) {
 function buildGrillaPdf(
   tournamentName: string,
   rows: ZonesMatchGridRow[],
+  groupColumnLabel: string,
 ): BuiltPdf {
   const doc = new jsPDF({
     orientation: "landscape",
@@ -90,7 +95,7 @@ function buildGrillaPdf(
 
   autoTable(doc, {
     startY: 22,
-    head: [HEAD],
+    head: [tableHead(groupColumnLabel)],
     body: tableBody(rows),
     theme: "grid",
     styles: {
@@ -117,7 +122,7 @@ function buildGrillaPdf(
       1: { cellWidth: 28 },
       2: { cellWidth: 16, halign: "center" },
       3: { cellWidth: 20, halign: "center" },
-      4: { cellWidth: 14, halign: "center" },
+      4: { cellWidth: 22, halign: "center" },
       5: { cellWidth: 16, halign: "center" },
       6: { cellWidth: 48 },
       7: { cellWidth: 48 },
@@ -169,6 +174,7 @@ function downloadPdfBlob(blob: Blob, filename: string) {
 function renderGrillaPng(
   tournamentName: string,
   rows: ZonesMatchGridRow[],
+  groupColumnLabel: string,
 ): Promise<Blob> {
   const scale = 2;
   const cols = [
@@ -176,7 +182,7 @@ function renderGrillaPng(
     { key: "horario", label: "Horario", width: 150 },
     { key: "cancha", label: "Cancha", width: 70 },
     { key: "categoria", label: "Categoría", width: 90 },
-    { key: "zona", label: "Zona", width: 56 },
+    { key: "zona", label: groupColumnLabel, width: 88 },
     { key: "numero", label: "Número", width: 70 },
     { key: "pair1", label: "Pareja 1", width: 220 },
     { key: "pair2", label: "Pareja 2", width: 220 },
@@ -281,12 +287,13 @@ async function copyForWhatsApp(
   pdf: BuiltPdf,
   rows: ZonesMatchGridRow[],
   tournamentName: string,
+  groupColumnLabel: string,
 ) {
   if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
     throw new Error("clipboard-unsupported");
   }
 
-  const png = await renderGrillaPng(tournamentName, rows);
+  const png = await renderGrillaPng(tournamentName, rows, groupColumnLabel);
   const pdfFile = new File([pdf.blob], pdf.filename, {
     type: "application/pdf",
   });
@@ -321,16 +328,18 @@ export async function runGrillaPdfAction({
   action,
   tournamentName,
   rows,
+  groupColumnLabel = DEFAULT_GROUP_COLUMN,
 }: {
   action: GrillaPdfAction;
   tournamentName: string;
   rows: ZonesMatchGridRow[];
+  groupColumnLabel?: string;
 }) {
   if (rows.length === 0) {
     throw new Error("No hay partidos para exportar");
   }
 
-  const pdf = buildGrillaPdf(tournamentName, rows);
+  const pdf = buildGrillaPdf(tournamentName, rows, groupColumnLabel);
 
   if (action === "open") {
     openPdfBlob(pdf.blob);
@@ -343,5 +352,5 @@ export async function runGrillaPdfAction({
     return;
   }
 
-  await copyForWhatsApp(pdf, rows, tournamentName);
+  await copyForWhatsApp(pdf, rows, tournamentName, groupColumnLabel);
 }

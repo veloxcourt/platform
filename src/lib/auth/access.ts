@@ -140,6 +140,7 @@ export const getClubAccess = cache(async (clubSlug: string) => {
     membershipId: membership.id,
     userTypeId: membership.userTypeId,
     userTypeName: membership.userType?.name ?? null,
+    role: membership.role,
     isOwner:
       membership.role === "OWNER" ||
       privilegesFromType.includes("tipos-usuario"),
@@ -161,6 +162,17 @@ export async function requireClubPrivilege(
   const access = await requireClubAccess(clubSlug);
   if (!access.allowedModules.includes(privilege)) {
     throw new AuthorizationError();
+  }
+  return access;
+}
+
+/** Dueño real del club (rol OWNER). No alcanza con privilegios de admin. */
+export async function requireClubOwnerRole(clubSlug: string) {
+  const access = await requireClubAccess(clubSlug);
+  if (access.role !== "OWNER") {
+    throw new AuthorizationError(
+      "Solo el dueño del club puede editar estos datos.",
+    );
   }
   return access;
 }
