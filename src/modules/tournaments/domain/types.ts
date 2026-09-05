@@ -6,6 +6,7 @@ import type {
 } from "./config-schema";
 import type { IntermediateFixturePersisted } from "./intermediate-fixture-schema";
 import type { FixtureEditMode } from "./fixture-edit-mode";
+import type { ZoneQualificationPersisted } from "./zone-qualification";
 import type { ZonesFixturePersisted } from "./zones-fixture-schema";
 import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
 
@@ -144,6 +145,8 @@ export interface CategoryPhaseConfig {
   intermediateFixture: IntermediateFixturePersisted | null;
   /// Fixture armado de fase final (si ya se generó).
   finalFixture: IntermediateFixturePersisted | null;
+  /// Puestos de zona calculados (quién pasa / queda afuera).
+  zoneQualification: ZoneQualificationPersisted | null;
 }
 
 export interface TournamentConfig {

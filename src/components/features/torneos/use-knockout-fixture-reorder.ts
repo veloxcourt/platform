@@ -1,17 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { saveKnockoutFixtureDraftAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 import type { FapCrossing } from "@/modules/tournaments/domain/fap-llaves";
 import {
+  seedKnockoutFixture,
   swapFixtureMatchSchedules,
   type IntermediateFixturePersisted,
   type KnockoutFixturePhase,
 } from "@/modules/tournaments/domain/intermediate-fixture-schema";
+import type { OfficialRound } from "@/modules/tournaments/domain/intermediate-phase";
+import { collectKnockoutScores, setKnockoutMatchScore } from "@/modules/tournaments/domain/match-scores";
 import { comparePlayDaySchedule } from "@/modules/tournaments/domain/play-day";
-import { useFixtureEditMode } from "./fixture-edit-mode-context";
+import {
+  useFixtureEditMode,
+  useRegisterFixturePersistFlush,
+} from "./fixture-edit-mode-context";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 import type { IntermediateCrossingSchedule } from "./intermediate-round-card";
 
@@ -22,6 +28,7 @@ export function useKnockoutFixtureReorder({
   phase,
   fixture,
   dayOpenByDate,
+  officialRounds,
 }: {
   clubSlug: string;
   tournamentId: string;
@@ -29,14 +36,85 @@ export function useKnockoutFixtureReorder({
   phase: KnockoutFixturePhase;
   fixture: IntermediateFixturePersisted | null | undefined;
   dayOpenByDate?: Record<string, string>;
+  officialRounds: OfficialRound[];
 }) {
   const readOnly = useTournamentReadOnly();
   const { isManual } = useFixtureEditMode();
   const [draft, setDraft] = useState(fixture ?? null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef<IntermediateFixturePersisted | null>(null);
+  const dirtyRef = useRef(false);
+  const flushPersistRef = useRef<() => Promise<unknown>>(async () => ({
+    ok: true,
+  }));
+  useRegisterFixturePersistFlush(() => flushPersistRef.current());
 
   useEffect(() => {
+    dirtyRef.current = false;
+    setDraft(fixture ?? null);
+  }, [categoryId, phase]);
+
+  useEffect(() => {
+    if (dirtyRef.current) return;
     setDraft(fixture ?? null);
   }, [fixture]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      const pending = pendingRef.current;
+      pendingRef.current = null;
+      if (pending) {
+        void saveKnockoutFixtureDraftAction(
+          clubSlug,
+          tournamentId,
+          categoryId,
+          phase,
+          pending,
+        );
+      }
+    };
+  }, [categoryId, clubSlug, phase, tournamentId]);
+
+  async function flushPersist() {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const pending = pendingRef.current;
+    if (!pending) return { ok: true as const };
+    pendingRef.current = null;
+    const result = await saveKnockoutFixtureDraftAction(
+      clubSlug,
+      tournamentId,
+      categoryId,
+      phase,
+      pending,
+    );
+    if (!result.ok) {
+      toast.error("No se pudo guardar el resultado", {
+        description: result.error,
+      });
+      dirtyRef.current = true;
+      return result;
+    }
+    if (!pendingRef.current) dirtyRef.current = false;
+    return result;
+  }
+  flushPersistRef.current = flushPersist;
+
+  function queueSave(next: IntermediateFixturePersisted, immediate = false) {
+    dirtyRef.current = true;
+    pendingRef.current = next;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (immediate) {
+      void flushPersist();
+      return;
+    }
+    saveTimerRef.current = setTimeout(() => {
+      void flushPersist();
+    }, 600);
+  }
 
   const scheduleByOfficialId = useMemo(() => {
     const map = new Map<number, IntermediateCrossingSchedule>();
@@ -53,7 +131,28 @@ export function useKnockoutFixtureReorder({
     return map;
   }, [draft]);
 
+  const scoresByOfficialId = useMemo(
+    () => collectKnockoutScores(draft),
+    [draft],
+  );
+
   const canReorder = isManual && !readOnly && Boolean(draft?.rounds.length);
+
+  function currentOrSeededDraft() {
+    return draft ?? seedKnockoutFixture(officialRounds);
+  }
+
+  function updateScore(officialId: number, key: string, value: string) {
+    if (readOnly) return;
+    const next = setKnockoutMatchScore(
+      currentOrSeededDraft(),
+      officialId,
+      key,
+      value,
+    );
+    setDraft(next);
+    queueSave(next);
+  }
 
   function orderedCrossings(crossings: FapCrossing[]): FapCrossing[] {
     return [...crossings].sort((left, right) => {
@@ -84,26 +183,16 @@ export function useKnockoutFixtureReorder({
     }
     const next = swapFixtureMatchSchedules(draft, officialId, other.id);
     setDraft(next);
-    void saveKnockoutFixtureDraftAction(
-      clubSlug,
-      tournamentId,
-      categoryId,
-      phase,
-      next,
-    ).then((result) => {
-      if (!result.ok) {
-        setDraft(draft);
-        toast.error("No se pudo guardar el orden", {
-          description: result.error,
-        });
-      }
-    });
+    queueSave(next, true);
   }
 
   return {
     scheduleByOfficialId,
+    scoresByOfficialId,
     canReorder,
     orderedCrossings,
     moveCrossing,
+    updateScore,
+    flushPersist,
   };
 }

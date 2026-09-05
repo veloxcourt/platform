@@ -510,6 +510,28 @@ export async function saveKnockoutFixtureDraftAction(
   return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };
 }
 
+export async function calculateZoneQualificationAction(
+  clubSlug: string,
+  tournamentId: string,
+): Promise<
+  | {
+      ok: true;
+      categoryCount: number;
+      seedCount: number;
+      warnings: string[];
+    }
+  | { ok: false; error: string }
+> {
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+  const result = await repo.calculateAndSaveZoneQualification(
+    clubId,
+    tournamentId,
+  );
+  if (result.ok) revalidate(clubSlug, tournamentId);
+  return result;
+}
+
 export async function getZonasTournamentDetailAction(
   clubSlug: string,
   tournamentId: string,

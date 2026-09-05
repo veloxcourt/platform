@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type { FapNode } from "@/modules/tournaments/domain/fap-llaves";
 import type { FinalPhaseStartRound } from "@/modules/tournaments/domain/config-schema";
 import { officialRoundPhase } from "@/modules/tournaments/domain/intermediate-phase";
@@ -66,12 +68,14 @@ export function OfficialBracketDiagram({
   startsAtRound,
   showPhaseLegend = false,
   scheduleByOfficialId,
+  resolveLabel,
 }: {
   root: FapNode;
   showOfficialId: boolean;
   startsAtRound?: FinalPhaseStartRound;
   showPhaseLegend?: boolean;
   scheduleByOfficialId?: Map<number, BracketMatchSchedule>;
+  resolveLabel?: (label: string) => string;
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -95,6 +99,7 @@ export function OfficialBracketDiagram({
             showOfficialId={showOfficialId}
             startsAtRound={startsAtRound}
             scheduleByOfficialId={scheduleByOfficialId}
+            resolveLabel={resolveLabel}
           />
         </div>
       </div>
@@ -108,15 +113,24 @@ function BracketBranch({
   showOfficialId,
   startsAtRound,
   scheduleByOfficialId,
+  resolveLabel,
 }: {
   node: FapNode;
   depth: number;
   showOfficialId: boolean;
   startsAtRound?: FinalPhaseStartRound;
   scheduleByOfficialId?: Map<number, BracketMatchSchedule>;
+  resolveLabel?: (label: string) => string;
 }) {
   if (node.kind !== "match") {
-    return <LeafBox label={sideLabel(node)} bye={node.kind === "bye"} />;
+    const seed = sideLabel(node);
+    return (
+      <LeafBox
+        label={resolveLabel?.(seed) ?? seed}
+        seed={resolveLabel && resolveLabel(seed) !== seed ? seed : undefined}
+        bye={node.kind === "bye"}
+      />
+    );
   }
 
   const label = ROUND_FROM_ROOT[depth] ?? "Ronda";
@@ -126,25 +140,31 @@ function BracketBranch({
 
   return (
     <div className="flex items-center">
-      <div className="flex flex-col justify-center">
-        <BracketBranch
-          node={node.left}
-          depth={depth + 1}
-          showOfficialId={showOfficialId}
-          startsAtRound={startsAtRound}
-          scheduleByOfficialId={scheduleByOfficialId}
-        />
-        <BracketBranch
-          node={node.right}
-          depth={depth + 1}
-          showOfficialId={showOfficialId}
-          startsAtRound={startsAtRound}
-          scheduleByOfficialId={scheduleByOfficialId}
-        />
+      <div className="grid w-max grid-cols-[auto_1.25rem]">
+        <BracketArm>
+          <BracketBranch
+            node={node.left}
+            depth={depth + 1}
+            showOfficialId={showOfficialId}
+            startsAtRound={startsAtRound}
+            scheduleByOfficialId={scheduleByOfficialId}
+            resolveLabel={resolveLabel}
+          />
+        </BracketArm>
+        <ElbowCap side="top" />
+        <BracketArm>
+          <BracketBranch
+            node={node.right}
+            depth={depth + 1}
+            showOfficialId={showOfficialId}
+            startsAtRound={startsAtRound}
+            scheduleByOfficialId={scheduleByOfficialId}
+            resolveLabel={resolveLabel}
+          />
+        </BracketArm>
+        <ElbowCap side="bottom" />
       </div>
-      <div className="flex w-5 self-stretch py-[1.35rem]">
-        <div className="h-full w-full rounded-r-sm border-y border-r border-border" />
-      </div>
+      <div className="h-px w-3 shrink-0 bg-border" aria-hidden />
       <MatchBox
         label={label}
         officialId={node.id}
@@ -156,17 +176,53 @@ function BracketBranch({
   );
 }
 
-function LeafBox({ label, bye }: { label: string; bye: boolean }) {
+function BracketArm({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-center">
+      {children}
+      <div className="h-px min-w-0 flex-1 bg-border" aria-hidden />
+    </div>
+  );
+}
+
+function ElbowCap({ side }: { side: "top" | "bottom" }) {
+  return (
+    <div className="relative self-stretch" aria-hidden>
+      <div className="absolute inset-x-0 top-1/2 h-px bg-border" />
+      {side === "top" ? (
+        <div className="absolute top-1/2 right-0 bottom-0 w-px bg-border" />
+      ) : (
+        <div className="absolute top-0 right-0 h-1/2 w-px bg-border" />
+      )}
+    </div>
+  );
+}
+
+function LeafBox({
+  label,
+  seed,
+  bye,
+}: {
+  label: string;
+  seed?: string;
+  bye: boolean;
+}) {
   return (
     <div
       className={cn(
-        "m-1 flex h-8 min-w-[5.5rem] items-center rounded-md border px-2 text-xs",
+        "m-1 flex min-h-8 min-w-[8.5rem] max-w-[12rem] flex-col justify-center rounded-md border px-2 py-0.5 text-xs",
         bye
           ? "border-dashed text-muted-foreground"
           : "border-input bg-background font-medium",
       )}
+      title={seed ? `${label} · ${seed}` : label}
     >
-      {label}
+      <span className="leading-tight">{label}</span>
+      {seed ? (
+        <span className="text-[10px] font-normal text-muted-foreground">
+          {seed}
+        </span>
+      ) : null}
     </div>
   );
 }

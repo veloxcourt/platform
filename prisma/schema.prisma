@@ -47,6 +47,7 @@ model Club {
   calendarPlannedTournaments CalendarPlannedTournament[]
   calendarPlannerSettings    CalendarPlannerSettings?
   calendarSearchLinks        CalendarSearchLink[]
+  improvements               ClubImprovement[]
 
   @@map("clubs")
 }
@@ -187,6 +188,7 @@ enum AdminModule {
   TOOLS_CALENDARIO
   USER_TYPES
   USERS
+  QUE_MEJORO
 }
 
 enum StaffAccessStatus {
@@ -538,6 +540,8 @@ model TournamentSettings {
   intermediateFixture   Json?
   /// Fixture armado de fase final (JSON): rondas + partidos con d?a/hora/cancha.
   finalFixture          Json?
+  /// Puestos de zona calculados (quién pasa / queda afuera) para completar llaves.
+  zoneQualification     Json?
 
   category TournamentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
@@ -798,4 +802,37 @@ model CalendarPlannerSettings {
   club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
 
   @@map("calendar_planner_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Módulo: Qué mejoro?
+// ---------------------------------------------------------------------------
+
+enum ImprovementKind {
+  IMPROVE
+  ADD
+}
+
+enum ImprovementStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+}
+
+model ClubImprovement {
+  id        String            @id @default(cuid())
+  clubId    String
+  title     String
+  detail    String?
+  kind      ImprovementKind   @default(IMPROVE)
+  status    ImprovementStatus @default(PENDING)
+  sortOrder Int               @default(0)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@index([clubId, sortOrder])
+  @@index([clubId, createdAt])
+  @@map("club_improvements")
 }

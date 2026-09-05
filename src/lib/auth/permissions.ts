@@ -17,6 +17,7 @@ export const MODULE_TO_DATABASE: Record<AdminModuleKey, AdminModule> = {
   calendario: "TOOLS_CALENDARIO",
   "tipos-usuario": "USER_TYPES",
   usuarios: "USERS",
+  "que-mejoro": "QUE_MEJORO",
 };
 
 const DATABASE_TO_MODULE: Partial<Record<AdminModule, AdminModuleKey>> = {
@@ -29,6 +30,7 @@ const DATABASE_TO_MODULE: Partial<Record<AdminModule, AdminModuleKey>> = {
   TOOLS_CALENDARIO: "calendario",
   USER_TYPES: "tipos-usuario",
   USERS: "usuarios",
+  QUE_MEJORO: "que-mejoro",
 };
 
 export function toDatabaseModules(modules: AdminModuleKey[]): AdminModule[] {

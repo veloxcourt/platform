@@ -9,6 +9,7 @@ import { buildFinalFixtureAction } from "@/app/(dashboard)/[clubSlug]/torneos/[t
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -34,6 +35,7 @@ import {
 } from "./final-match-grid-model";
 import { useFixtureEditMode } from "./fixture-edit-mode-context";
 import { GrillaPdfMenu } from "./grilla-pdf-menu";
+import { categoryKnockoutNameResolver } from "./knockout-name-resolver";
 import { useKnockoutFixtureReorder } from "./use-knockout-fixture-reorder";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 
@@ -101,14 +103,22 @@ export function FinalPhasePanel({
     return map;
   }, [config?.playDays]);
 
-  const { scheduleByOfficialId, canReorder, orderedCrossings, moveCrossing } =
-    useKnockoutFixtureReorder({
+  const {
+    scheduleByOfficialId,
+    scoresByOfficialId,
+    canReorder,
+    orderedCrossings,
+    moveCrossing,
+    updateScore,
+    flushPersist,
+  } = useKnockoutFixtureReorder({
       clubSlug,
       tournamentId,
       categoryId,
       phase: "final",
       fixture,
       dayOpenByDate,
+      officialRounds: rounds,
     });
 
   const matchCount = rounds.reduce(
@@ -120,6 +130,16 @@ export function FinalPhasePanel({
   const readOnly = useTournamentReadOnly();
   const { isManual } = useFixtureEditMode();
   const hasFixture = Boolean(fixture?.rounds.length);
+  const resolveLabel = useMemo(
+    () =>
+      categoryKnockoutNameResolver({
+        config,
+        categoryId,
+        pairs,
+        matchFormat: settings.matchFormat,
+      }),
+    [categoryId, config, pairs, settings.matchFormat],
+  );
   const pdfRows = useMemo(() => {
     if (!category) return [];
     return toGrillaPdfRows(
@@ -133,6 +153,7 @@ export function FinalPhasePanel({
 
   function handleActualizar() {
     startTransition(async () => {
+      await flushPersist();
       const result = await buildFinalFixtureAction(
         clubSlug,
         tournamentId,
@@ -163,27 +184,22 @@ export function FinalPhasePanel({
 
   return (
     <Card>
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            <Trophy className="size-4 text-muted-foreground" />
-            Fase Final{category ? ` · ${category.name}` : ""}
-          </CardTitle>
-          <CardDescription>
-            Llave oficial {regulation}. Desde {startsAtLabel} hasta la Final. Los
-            cruces usan los puestos de zona y los ganadores de la fase intermedia.{" "}
-            <span className="font-medium text-foreground">Actualizar</span>{" "}
-            asigna día, horario y cancha en el último día del torneo. En Modo
-            Manual podés cambiar el orden de los partidos.
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Trophy className="size-4 text-muted-foreground" />
+          Fase Final{category ? ` · ${category.name}` : ""}
+        </CardTitle>
+        <CardDescription>
+          Llave oficial {regulation}. Desde {startsAtLabel} hasta la Final. Los
+          cruces usan los puestos de zona y los ganadores de la fase intermedia.{" "}
+          <span className="font-medium text-foreground">Actualizar</span>{" "}
+          asigna día, horario y cancha en el último día del torneo. En Modo
+            Manual podés cambiar el orden de los partidos. Los resultados se
+            guardan solos.
             {!hasFixture ? " Todavía no hay un armado guardado." : null}
-          </CardDescription>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <GrillaPdfMenu
-            tournamentName={config?.tournamentName ?? ""}
-            rows={pdfRows}
-            groupColumnLabel="Ronda"
-          />
+        </CardDescription>
+        <CardAction>
+          <div className="flex flex-wrap items-center justify-end gap-2">
           {!readOnly && (
             <ActualizarHoverHint
               heading={
@@ -225,7 +241,13 @@ export function FinalPhasePanel({
               </Button>
             </ActualizarHoverHint>
           )}
-        </div>
+          <GrillaPdfMenu
+            tournamentName={config?.tournamentName ?? ""}
+            rows={pdfRows}
+            groupColumnLabel="Ronda"
+          />
+          </div>
+        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-xs text-muted-foreground">
@@ -248,6 +270,10 @@ export function FinalPhasePanel({
               dayOptions={dayOptions}
               showOfficialId={settings.zone4Advancers === 3}
               scheduleByOfficialId={scheduleByOfficialId}
+              scoresByOfficialId={scoresByOfficialId}
+              onScoreChange={updateScore}
+              scoresReadOnly={readOnly}
+              resolveLabel={resolveLabel}
               canReorder={canReorder}
               onMove={(officialId, direction) =>
                 moveCrossing(round.crossings, officialId, direction)

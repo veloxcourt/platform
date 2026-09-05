@@ -1,5 +1,11 @@
 import { jsPDF } from "jspdf";
 
+import { copyPdfToClipboard } from "@/lib/clipboard-pdf";
+import {
+  copyPngToClipboard,
+  downloadPngBlob,
+  openPngBlob,
+} from "@/lib/clipboard-png";
 import type { FinalPhaseStartRound } from "@/modules/tournaments/domain/config-schema";
 import type { FapNode } from "@/modules/tournaments/domain/fap-llaves";
 import { officialRoundPhase } from "@/modules/tournaments/domain/intermediate-phase";
@@ -24,6 +30,7 @@ export type LlavePdfDraw = {
   showOfficialId: boolean;
   startsAtRound?: FinalPhaseStartRound;
   scheduleByOfficialId?: Map<number, BracketMatchSchedule>;
+  resolveLabel?: (label: string) => string;
 };
 
 const ROUND_FROM_ROOT = [
@@ -35,7 +42,7 @@ const ROUND_FROM_ROOT = [
   "32 avos",
 ] as const;
 
-const LEAF_W = 28;
+const LEAF_W = 36;
 const LEAF_H = 6.2;
 const MATCH_W = 34;
 const MATCH_H = 12;
@@ -56,16 +63,21 @@ type Box = {
 };
 
 type Elbow = {
-  x: number;
+  xTop: number;
+  xBottom: number;
+  xSpine: number;
   top: number;
   bottom: number;
-  width: number;
 };
 
-function leafLabel(node: FapNode): string {
-  if (node.kind === "bye") return "Bye";
-  if (node.kind === "qualifier") return node.qualifier.label;
-  return `Ganador n° ${node.id}`;
+function leafLabel(node: FapNode, resolveLabel?: (label: string) => string): string {
+  const seed =
+    node.kind === "bye"
+      ? "Bye"
+      : node.kind === "qualifier"
+        ? node.qualifier.label
+        : `Ganador n° ${node.id}`;
+  return resolveLabel?.(seed) ?? seed;
 }
 
 function layout(
@@ -87,7 +99,7 @@ function layout(
           w: LEAF_W,
           h: LEAF_H,
           kind: "leaf",
-          title: leafLabel(node),
+          title: leafLabel(node, draw.resolveLabel),
           bye: node.kind === "bye",
         },
       ],
@@ -127,7 +139,13 @@ function layout(
     elbows: [
       ...left.elbows,
       ...right.elbows,
-      { x: x + childW, top: left.mid, bottom: right.mid, width: CONN_W },
+      {
+        xTop: x + left.w,
+        xBottom: x + right.w,
+        xSpine: matchX,
+        top: left.mid,
+        bottom: right.mid,
+      },
     ],
   };
 }
@@ -141,7 +159,7 @@ function slugifyName(name: string): string {
     .slice(0, 50);
 }
 
-function uniqueFilename(name: string): string {
+function uniqueFilename(name: string, ext: "pdf" | "png" = "pdf"): string {
   const now = new Date();
   const stamp = [
     now.getFullYear(),
@@ -152,7 +170,7 @@ function uniqueFilename(name: string): string {
     String(now.getMinutes()).padStart(2, "0"),
     String(now.getSeconds()).padStart(2, "0"),
   ].join("");
-  return `llave-${slugifyName(name) || "torneo"}-${stamp}.pdf`;
+  return `llave-${slugifyName(name) || "torneo"}-${stamp}.${ext}`;
 }
 
 function fillFor(box: Box): [number, number, number] {
@@ -276,15 +294,16 @@ function drawPage(
   }
 
   for (const elbow of laid.elbows) {
-    const x = originX + elbow.x * scale;
+    const xTop = originX + elbow.xTop * scale;
+    const xBottom = originX + elbow.xBottom * scale;
+    const xSpine = originX + elbow.xSpine * scale;
     const top = originY + elbow.top * scale;
     const bottom = originY + elbow.bottom * scale;
-    const w = elbow.width * scale;
     doc.setDrawColor(161, 161, 170);
     doc.setLineWidth(0.25);
-    doc.line(x, top, x + w, top);
-    doc.line(x + w, top, x + w, bottom);
-    doc.line(x, bottom, x + w, bottom);
+    doc.line(xTop, top, xSpine, top);
+    doc.line(xSpine, top, xSpine, bottom);
+    doc.line(xBottom, bottom, xSpine, bottom);
   }
 
   for (const box of laid.boxes) {
@@ -410,13 +429,152 @@ export async function runLlavePdfAction({
     return;
   }
 
-  if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
-    throw new Error("clipboard-unsupported");
+  await copyPdfToClipboard(pdf.blob, pdf.filename);
+}
+
+function rgb(color: [number, number, number]): string {
+  return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+}
+
+function buildLlavePng(
+  tournamentName: string,
+  draws: LlavePdfDraw[],
+): Promise<{ blob: Blob; filename: string }> {
+  const px = 5;
+  const pad = 28;
+  const headerH = 48;
+  const gap = 22;
+  const laidDraws = draws
+    .filter((draw) => draw.tree)
+    .map((draw) => ({
+      draw,
+      laid: layout(draw.tree, 0, 0, 0, draw),
+    }));
+  if (laidDraws.length === 0) {
+    return Promise.reject(new Error("No hay llave para exportar"));
   }
-  const pdfFile = new File([pdf.blob], pdf.filename, {
-    type: "application/pdf",
+  const contentW = Math.max(...laidDraws.map((item) => item.laid.w), 40);
+  const contentH = laidDraws.reduce(
+    (sum, item) => sum + item.laid.h + gap,
+    0,
+  );
+  const width = pad * 2 + contentW * px;
+  const height = pad * 2 + headerH + contentH * px;
+  const canvas = document.createElement("canvas");
+  const scale = 2;
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return Promise.reject(new Error("No se pudo crear la imagen"));
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#18181b";
+  ctx.font = "bold 20px Helvetica, Arial, sans-serif";
+  ctx.fillText(tournamentName || "Llave", pad, pad + 16);
+  ctx.fillStyle = "#71717a";
+  ctx.font = "12px Helvetica, Arial, sans-serif";
+  const first = laidDraws[0]!.draw;
+  ctx.fillText(
+    `${first.categoryName} · ${first.regulation} · ${first.pairCount} pareja${first.pairCount === 1 ? "" : "s"}`,
+    pad,
+    pad + 34,
+  );
+
+  let originY = pad + headerH;
+  const originX = pad;
+  for (const item of laidDraws) {
+    if (laidDraws.length > 1) {
+      ctx.fillStyle = "#18181b";
+      ctx.font = "bold 13px Helvetica, Arial, sans-serif";
+      ctx.fillText(
+        `${item.draw.categoryName} · ${item.draw.regulation}`,
+        originX,
+        originY + 4,
+      );
+      originY += 16;
+    }
+    ctx.strokeStyle = "#a1a1aa";
+    ctx.lineWidth = 1;
+    for (const elbow of item.laid.elbows) {
+      const xTop = originX + elbow.xTop * px;
+      const xBottom = originX + elbow.xBottom * px;
+      const xSpine = originX + elbow.xSpine * px;
+      const top = originY + elbow.top * px;
+      const bottom = originY + elbow.bottom * px;
+      ctx.beginPath();
+      ctx.moveTo(xTop, top);
+      ctx.lineTo(xSpine, top);
+      ctx.lineTo(xSpine, bottom);
+      ctx.lineTo(xBottom, bottom);
+      ctx.stroke();
+    }
+    for (const box of item.laid.boxes) {
+      const x = originX + box.x * px;
+      const y = originY + box.y * px;
+      const w = box.w * px;
+      const h = box.h * px;
+      const radius = 4;
+      ctx.fillStyle = rgb(fillFor(box));
+      ctx.strokeStyle = rgb(strokeFor(box));
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, radius);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#18181b";
+      if (box.kind === "leaf") {
+        ctx.font = `${box.bye ? "normal" : "bold"} 11px Helvetica, Arial, sans-serif`;
+        ctx.fillText(box.title, x + 6, y + h / 2 + 4, w - 10);
+        continue;
+      }
+      ctx.font = "10px Helvetica, Arial, sans-serif";
+      ctx.fillStyle = "#52525b";
+      ctx.fillText(box.title, x + 6, y + 12, w - 10);
+      ctx.fillStyle = "#18181b";
+      ctx.font = "bold 11px Helvetica, Arial, sans-serif";
+      ctx.fillText(box.subtitle ?? "", x + 6, y + 26, w - 10);
+      ctx.font = "10px Helvetica, Arial, sans-serif";
+      ctx.fillStyle =
+        box.horario && box.horario !== "Sin horario" ? "#18181b" : "#71717a";
+      ctx.fillText(box.horario ?? "Sin horario", x + 6, y + 40, w - 10);
+    }
+    originY += item.laid.h * px + gap;
+  }
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      blob
+        ? resolve({
+            blob,
+            filename: uniqueFilename(`${tournamentName}-${first.categoryName}`, "png"),
+          })
+        : reject(new Error("No se pudo crear la imagen"));
+    }, "image/png");
   });
-  await navigator.clipboard.write([
-    new ClipboardItem({ "application/pdf": pdfFile }),
-  ]);
+}
+
+export async function runLlavePngAction({
+  action,
+  tournamentName,
+  draws,
+}: {
+  action: GrillaPdfAction;
+  tournamentName: string;
+  draws: LlavePdfDraw[];
+}) {
+  if (draws.length === 0) {
+    throw new Error("No hay llave para exportar");
+  }
+  const png = await buildLlavePng(tournamentName, draws);
+  if (action === "open") {
+    openPngBlob(png.blob);
+    return;
+  }
+  if (action === "create-open") {
+    downloadPngBlob(png.blob, png.filename);
+    openPngBlob(png.blob);
+    return;
+  }
+  await copyPngToClipboard(png.blob, png.filename);
 }

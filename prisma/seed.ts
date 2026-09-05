@@ -74,6 +74,7 @@ async function main() {
     "TOOLS_CALENDARIO",
     "USER_TYPES",
     "USERS",
+    "QUE_MEJORO",
   ] as const;
 
   const ownerType = await prisma.clubUserType.upsert({

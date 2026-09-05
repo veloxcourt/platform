@@ -10,6 +10,7 @@ import type {
   TournamentCategoryItem,
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
+import { categoryKnockoutNameResolver } from "./knockout-name-resolver";
 import {
   buildIntermediateMatchGridRows,
   toGrillaPdfRows,
@@ -76,6 +77,12 @@ export function buildFinalMatchGridRows({
         round.matches.map((match) => [match.officialId, match] as const),
       ),
     );
+    const resolveLabel = categoryKnockoutNameResolver({
+      config,
+      categoryId: category.id,
+      pairs,
+      matchFormat: settings.matchFormat,
+    });
 
     for (const round of rounds) {
       round.crossings.forEach((crossing, index) => {
@@ -94,8 +101,8 @@ export function buildFinalMatchGridRows({
           roundLabel: round.label,
           matchNumber: index + 1,
           officialId: crossing.id,
-          pair1: crossing.left,
-          pair2: crossing.right,
+          pair1: resolveLabel(crossing.left),
+          pair2: resolveLabel(crossing.right),
           startTime: scheduled?.startTime ?? null,
           courtIndex: scheduled?.courtIndex ?? null,
           observation: notes.join(" · "),

@@ -133,6 +133,9 @@ export const getClubAccess = cache(async (clubSlug: string) => {
           ? ALL_PRIVILEGES
           : toModuleKeys(membership.allowedModules);
 
+  const allowedModules =
+    membership.role === "OWNER" ? ALL_PRIVILEGES : privilegesFromType;
+
   return {
     club: { id: club.id, name: club.name, slug: club.slug },
     user: current.user,
@@ -144,7 +147,7 @@ export const getClubAccess = cache(async (clubSlug: string) => {
     isOwner:
       membership.role === "OWNER" ||
       privilegesFromType.includes("tipos-usuario"),
-    allowedModules: privilegesFromType,
+    allowedModules,
     navOrder: membership.navOrder ?? [],
   };
 });
@@ -213,7 +216,8 @@ export async function enforceClubModulePage(
         item !== "usuarios" &&
         item !== "menu-precios" &&
         item !== "eco-torneo" &&
-        item !== "calendario",
+        item !== "calendario" &&
+        item !== "que-mejoro",
     );
     if (fallback) redirect(`/${clubSlug}/${fallback}`);
     if (access.allowedModules.includes("menu-precios")) {

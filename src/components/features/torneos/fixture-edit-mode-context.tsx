@@ -1,17 +1,28 @@
 "use client";
 
-import { createContext, useContext, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 
 import {
   parseFixtureEditMode,
   type FixtureEditMode,
 } from "@/modules/tournaments/domain/fixture-edit-mode";
 
+type FlushFn = () => Promise<unknown>;
+
 type FixtureEditModeContextValue = {
   mode: FixtureEditMode;
   isManual: boolean;
   scheduleLocked: boolean;
   setMode: (mode: FixtureEditMode) => void;
+  registerPersistFlush: (fn: FlushFn) => () => void;
+  flushPendingPersists: () => Promise<void>;
 };
 
 const FixtureEditModeContext = createContext<FixtureEditModeContextValue>({
@@ -19,6 +30,8 @@ const FixtureEditModeContext = createContext<FixtureEditModeContextValue>({
   isManual: false,
   scheduleLocked: true,
   setMode: () => {},
+  registerPersistFlush: () => () => {},
+  flushPendingPersists: async () => {},
 });
 
 export function FixtureEditModeProvider({
@@ -34,6 +47,19 @@ export function FixtureEditModeProvider({
 }) {
   const parsed = parseFixtureEditMode(mode);
   const isManual = parsed === "MANUAL";
+  const flushesRef = useRef(new Set<FlushFn>());
+
+  const registerPersistFlush = useCallback((fn: FlushFn) => {
+    flushesRef.current.add(fn);
+    return () => {
+      flushesRef.current.delete(fn);
+    };
+  }, []);
+
+  const flushPendingPersists = useCallback(async () => {
+    await Promise.all([...flushesRef.current].map((fn) => fn()));
+  }, []);
+
   return (
     <FixtureEditModeContext.Provider
       value={{
@@ -41,6 +67,8 @@ export function FixtureEditModeProvider({
         isManual,
         scheduleLocked: readOnly || !isManual,
         setMode,
+        registerPersistFlush,
+        flushPendingPersists,
       }}
     >
       {children}
@@ -50,4 +78,24 @@ export function FixtureEditModeProvider({
 
 export function useFixtureEditMode() {
   return useContext(FixtureEditModeContext);
+}
+
+export function useRegisterFixturePersistFlush(fn: FlushFn) {
+  const { registerPersistFlush } = useFixtureEditMode();
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+
+  useEffect(() => {
+    return registerPersistFlush(() => fnRef.current());
+  }, [registerPersistFlush]);
+}
+
+export function FixturePersistFlushBinder({
+  flushRef,
+}: {
+  flushRef: { current: () => Promise<void> };
+}) {
+  const { flushPendingPersists } = useFixtureEditMode();
+  flushRef.current = flushPendingPersists;
+  return null;
 }

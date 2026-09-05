@@ -4,6 +4,7 @@ import { useMemo } from "react";
 
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -39,15 +40,15 @@ export function ZonesMatchGridPanel({
 
   return (
     <Card>
-      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
-        <div className="space-y-1.5">
-          <CardTitle>Grilla</CardTitle>
-          <CardDescription>
-            Orden de largada de los partidos. A igual horario, primero Cancha 1 y
-            después Cancha 2.
-          </CardDescription>
-        </div>
-        <GrillaPdfMenu tournamentName={tournamentName} rows={rows} />
+      <CardHeader>
+        <CardTitle>Grilla</CardTitle>
+        <CardDescription>
+          Orden de largada de los partidos. A igual horario, primero Cancha 1 y
+          después Cancha 2.
+        </CardDescription>
+        <CardAction>
+          <GrillaPdfMenu tournamentName={tournamentName} rows={rows} />
+        </CardAction>
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (

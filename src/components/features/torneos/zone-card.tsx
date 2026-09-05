@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { ChevronDown } from "lucide-react";
+import { Calculator, ChevronDown } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { MatchFormat } from "@/modules/tournaments/domain/config-schema";
@@ -20,6 +21,8 @@ import {
   type ZoneMatchKind,
   type ZoneResultColumn,
 } from "@/modules/tournaments/domain/zone-bracket";
+import { computeZoneStandings } from "@/modules/tournaments/domain/zone-standings";
+import { ZoneStandingsDialog } from "./zone-standings-dialog";
 
 export type ZonePairOption = {
   id: string;
@@ -205,6 +208,7 @@ export function ZoneCard({
   onChange,
   onChangePairRequest,
   onChangeScheduleRequest,
+  zone4Advancers = 3,
   className,
 }: {
   zone: ZoneDraft;
@@ -230,10 +234,12 @@ export function ZoneCard({
   onChange: (next: ZoneDraft, meta?: { matchId?: string }) => void;
   onChangePairRequest?: (fromPairId: string) => void;
   onChangeScheduleRequest?: (matchId: string, field: ScheduleField) => void;
+  zone4Advancers?: 2 | 3;
   className?: string;
 }) {
   const fieldsLocked = readOnly || scheduleLocked;
   const [fieldMenu, setFieldMenu] = useState<FieldMenu | null>(null);
+  const [standingsOpen, setStandingsOpen] = useState(false);
   const fieldMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -418,7 +424,17 @@ export function ZoneCard({
             {hasUnscheduled ? " · horario incompleto" : null}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setStandingsOpen(true)}
+          >
+            <Calculator />
+            Calcular
+          </Button>
+          <div className="flex flex-wrap gap-1.5">
           {zone.pairIds.length === 0 ? (
             <span className="rounded-md border border-dashed px-2 py-1 text-xs text-muted-foreground">
               Sin parejas asignadas
@@ -450,6 +466,7 @@ export function ZoneCard({
               );
             })
           )}
+          </div>
         </div>
       </div>
 
@@ -737,6 +754,19 @@ export function ZoneCard({
           </button>
         </div>
       ) : null}
+
+      <ZoneStandingsDialog
+        open={standingsOpen}
+        onOpenChange={setStandingsOpen}
+        zoneLabel={zone.label}
+        pairOptions={pairOptions}
+        standings={computeZoneStandings({
+          pairIds: zone.pairIds,
+          matches: zone.matches,
+          format: matchFormat,
+          zone4Advancers,
+        })}
+      />
     </div>
   );
 }

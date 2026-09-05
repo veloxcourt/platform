@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -62,43 +63,43 @@ export function FinalMatchGridPanel({
 
   return (
     <Card>
-      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
-        <div className="space-y-1.5">
-          <CardTitle>Grilla</CardTitle>
-          <CardDescription>
-            Orden de los cruces de fase final. Día, horario y cancha salen de
-            Actualizar.{" "}
-            <span className="font-medium text-foreground">
-              Incluir fases anteriores
-            </span>{" "}
-            arma la grilla completa.
-          </CardDescription>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
-            <Checkbox
-              checked={includeZones}
-              onCheckedChange={(value) => setIncludeZones(value === true)}
-              aria-label="Incluir partidos de Zona"
+      <CardHeader>
+        <CardTitle>Grilla</CardTitle>
+        <CardDescription>
+          Orden de los cruces de fase final. Día, horario y cancha salen de
+          Actualizar.{" "}
+          <span className="font-medium text-foreground">
+            Incluir fases anteriores
+          </span>{" "}
+          arma la grilla completa.
+        </CardDescription>
+        <CardAction>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <label className="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
+              <Checkbox
+                checked={includeZones}
+                onCheckedChange={(value) => setIncludeZones(value === true)}
+                aria-label="Incluir partidos de Zona"
+              />
+              Incluir partidos de Zona
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
+              <Checkbox
+                checked={includeIntermediate}
+                onCheckedChange={(value) =>
+                  setIncludeIntermediate(value === true)
+                }
+                aria-label="Incluir fase intermedia"
+              />
+              Incluir fase intermedia
+            </label>
+            <GrillaPdfMenu
+              tournamentName={tournamentName}
+              rows={pdfRows}
+              groupColumnLabel={groupColumnLabel}
             />
-            Incluir partidos de Zona
-          </label>
-          <label className="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
-            <Checkbox
-              checked={includeIntermediate}
-              onCheckedChange={(value) =>
-                setIncludeIntermediate(value === true)
-              }
-              aria-label="Incluir fase intermedia"
-            />
-            Incluir fase intermedia
-          </label>
-          <GrillaPdfMenu
-            tournamentName={tournamentName}
-            rows={pdfRows}
-            groupColumnLabel={groupColumnLabel}
-          />
-        </div>
+          </div>
+        </CardAction>
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (

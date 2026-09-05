@@ -193,6 +193,18 @@ export interface TournamentRepository {
     phase: KnockoutFixturePhase,
     fixture: IntermediateFixturePersisted,
   ): Promise<MutationResult>;
+  calculateAndSaveZoneQualification(
+    clubId: string,
+    tournamentId: string,
+  ): Promise<
+    | {
+        ok: true;
+        categoryCount: number;
+        seedCount: number;
+        warnings: string[];
+      }
+    | { ok: false; error: string }
+  >;
   getTournamentConfig(
     clubId: string,
     tournamentId: string,

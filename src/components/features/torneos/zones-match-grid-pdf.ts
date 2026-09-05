@@ -1,6 +1,12 @@
 import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 
+import { copyPdfToClipboard } from "@/lib/clipboard-pdf";
+import {
+  copyPngToClipboard,
+  downloadPngBlob,
+  openPngBlob,
+} from "@/lib/clipboard-png";
 import {
   formatGridCourt,
   formatGridHorario,
@@ -39,7 +45,7 @@ function slugifyName(name: string): string {
     .slice(0, 60);
 }
 
-function uniqueFilename(name: string): string {
+function uniqueFilename(name: string, ext: "pdf" | "png" = "pdf"): string {
   const now = new Date();
   const stamp = [
     now.getFullYear(),
@@ -50,7 +56,7 @@ function uniqueFilename(name: string): string {
     String(now.getMinutes()).padStart(2, "0"),
     String(now.getSeconds()).padStart(2, "0"),
   ].join("");
-  return `grilla-${slugifyName(name) || "torneo"}-${stamp}.pdf`;
+  return `grilla-${slugifyName(name) || "torneo"}-${stamp}.${ext}`;
 }
 
 function tableBody(rows: ZonesMatchGridRow[]) {
@@ -283,47 +289,6 @@ function renderGrillaPng(
   });
 }
 
-async function copyForWhatsApp(
-  pdf: BuiltPdf,
-  rows: ZonesMatchGridRow[],
-  tournamentName: string,
-  groupColumnLabel: string,
-) {
-  if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
-    throw new Error("clipboard-unsupported");
-  }
-
-  const png = await renderGrillaPng(tournamentName, rows, groupColumnLabel);
-  const pdfFile = new File([pdf.blob], pdf.filename, {
-    type: "application/pdf",
-  });
-
-  try {
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        "application/pdf": pdfFile,
-        "image/png": png,
-      }),
-    ]);
-    return;
-  } catch {
-    // WhatsApp Web pega imagen; el PDF no siempre entra al portapapeles.
-  }
-
-  try {
-    await navigator.clipboard.write([
-      new ClipboardItem({ "application/pdf": pdfFile }),
-    ]);
-    return;
-  } catch {
-    // Seguir con PNG.
-  }
-
-  await navigator.clipboard.write([
-    new ClipboardItem({ "image/png": png }),
-  ]);
-}
-
 export async function runGrillaPdfAction({
   action,
   tournamentName,
@@ -352,5 +317,33 @@ export async function runGrillaPdfAction({
     return;
   }
 
-  await copyForWhatsApp(pdf, rows, tournamentName, groupColumnLabel);
+  await copyPdfToClipboard(pdf.blob, pdf.filename);
+}
+
+export async function runGrillaPngAction({
+  action,
+  tournamentName,
+  rows,
+  groupColumnLabel = DEFAULT_GROUP_COLUMN,
+}: {
+  action: GrillaPdfAction;
+  tournamentName: string;
+  rows: ZonesMatchGridRow[];
+  groupColumnLabel?: string;
+}) {
+  if (rows.length === 0) {
+    throw new Error("No hay partidos para exportar");
+  }
+  const blob = await renderGrillaPng(tournamentName, rows, groupColumnLabel);
+  const filename = uniqueFilename(tournamentName, "png");
+  if (action === "open") {
+    openPngBlob(blob);
+    return;
+  }
+  if (action === "create-open") {
+    downloadPngBlob(blob, filename);
+    openPngBlob(blob);
+    return;
+  }
+  await copyPngToClipboard(blob, filename);
 }

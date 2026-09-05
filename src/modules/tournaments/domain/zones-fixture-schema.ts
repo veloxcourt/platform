@@ -1,5 +1,10 @@
 import { z } from "zod";
 import type { ZonesFixtureResult } from "./build-zones-fixture";
+import {
+  applyZoneScores,
+  collectZoneScores,
+  matchScoresSchema,
+} from "./match-scores";
 
 export const zonesFixtureMatchSchema = z.object({
   matchIndex: z.number().int().min(0),
@@ -15,6 +20,7 @@ export const zonesFixtureMatchSchema = z.object({
   ruleBreaks: z
     .array(z.enum(["rest", "day_pref", "cell_pref"]))
     .optional(),
+  scores: matchScoresSchema.optional(),
 });
 
 export const zonesFixtureZoneSchema = z.object({
@@ -56,6 +62,7 @@ export const zonesFixtureDraftSchema = z.object({
           ruleBreaks: z
             .array(z.enum(["rest", "day_pref", "cell_pref"]))
             .optional(),
+          scores: matchScoresSchema.optional(),
         }),
       ),
     }),
@@ -95,12 +102,27 @@ export function zonesDraftToPersisted(
         pair2Id: match.pair2Id,
         noRestGap: match.noRestGap,
         ruleBreaks: match.ruleBreaks,
+        scores: match.scores,
       })),
     })),
     warnings: previous?.warnings ?? [],
     unassignedPairIds: previous?.unassignedPairIds ?? [],
     builtAt: previous?.builtAt ?? new Date().toISOString(),
   };
+}
+
+export function mergeZoneDraftScores(
+  previous: ZonesFixturePersisted,
+  draft: ZonesFixtureDraftInput,
+): ZonesFixturePersisted {
+  return applyZoneScores(previous, collectZoneScores(draft));
+}
+
+export function carryZoneScores(
+  previous: ZonesFixturePersisted | null | undefined,
+  next: ZonesFixturePersisted,
+): ZonesFixturePersisted {
+  return applyZoneScores(next, collectZoneScores(previous));
 }
 
 export function toPersistedZonesFixture(

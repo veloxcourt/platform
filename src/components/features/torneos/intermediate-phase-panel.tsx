@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -33,6 +34,7 @@ import {
   buildIntermediateMatchGridRows,
   toGrillaPdfRows,
 } from "./intermediate-match-grid-model";
+import { categoryKnockoutNameResolver } from "./knockout-name-resolver";
 import { useKnockoutFixtureReorder } from "./use-knockout-fixture-reorder";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 
@@ -102,14 +104,22 @@ export function IntermediatePhasePanel({
     return map;
   }, [config?.playDays]);
 
-  const { scheduleByOfficialId, canReorder, orderedCrossings, moveCrossing } =
-    useKnockoutFixtureReorder({
+  const {
+    scheduleByOfficialId,
+    scoresByOfficialId,
+    canReorder,
+    orderedCrossings,
+    moveCrossing,
+    updateScore,
+    flushPersist,
+  } = useKnockoutFixtureReorder({
       clubSlug,
       tournamentId,
       categoryId,
       phase: "intermediate",
       fixture,
       dayOpenByDate,
+      officialRounds: rounds,
     });
 
   const matchCount = rounds.reduce(
@@ -118,6 +128,16 @@ export function IntermediatePhasePanel({
   );
   const regulation = settings.zone4Advancers === 2 ? "APA" : "FAP";
   const hasFixture = Boolean(fixture?.rounds.length);
+  const resolveLabel = useMemo(
+    () =>
+      categoryKnockoutNameResolver({
+        config,
+        categoryId,
+        pairs,
+        matchFormat: settings.matchFormat,
+      }),
+    [categoryId, config, pairs, settings.matchFormat],
+  );
   const pdfRows = useMemo(() => {
     if (!category) return [];
     return toGrillaPdfRows(
@@ -131,6 +151,7 @@ export function IntermediatePhasePanel({
 
   function handleActualizar() {
     startTransition(async () => {
+      await flushPersist();
       const result = await buildIntermediateFixtureAction(
         clubSlug,
         tournamentId,
@@ -161,27 +182,22 @@ export function IntermediatePhasePanel({
 
   return (
     <Card>
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            <GitBranch className="size-4 text-muted-foreground" />
-            Fase Intermedia{category ? ` · ${category.name}` : ""}
-          </CardTitle>
-          <CardDescription>
-            Llave oficial {regulation}. Los cruces usan los puestos de zona (1° A,
-            2° B).{" "}
-            <span className="font-medium text-foreground">Actualizar</span>{" "}
-            asigna día, horario y cancha según las reglas de intermedia. En
-            Modo Manual podés cambiar el orden de los partidos.
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <GitBranch className="size-4 text-muted-foreground" />
+          Fase Intermedia{category ? ` · ${category.name}` : ""}
+        </CardTitle>
+        <CardDescription>
+          Llave oficial {regulation}. Los cruces usan los puestos de zona (1° A,
+          2° B).{" "}
+          <span className="font-medium text-foreground">Actualizar</span>{" "}
+          asigna día, horario y cancha según las reglas de intermedia. En
+            Modo Manual podés cambiar el orden de los partidos. Los
+            resultados se guardan solos.
             {!hasFixture ? " Todavía no hay un armado guardado." : null}
-          </CardDescription>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <GrillaPdfMenu
-            tournamentName={config?.tournamentName ?? ""}
-            rows={pdfRows}
-            groupColumnLabel="Ronda"
-          />
+        </CardDescription>
+        <CardAction>
+          <div className="flex flex-wrap items-center justify-end gap-2">
           {!readOnly && (
             <ActualizarHoverHint
               heading={
@@ -224,7 +240,13 @@ export function IntermediatePhasePanel({
               </Button>
             </ActualizarHoverHint>
           )}
-        </div>
+          <GrillaPdfMenu
+            tournamentName={config?.tournamentName ?? ""}
+            rows={pdfRows}
+            groupColumnLabel="Ronda"
+          />
+          </div>
+        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-xs text-muted-foreground">
@@ -247,6 +269,10 @@ export function IntermediatePhasePanel({
               dayOptions={dayOptions}
               showOfficialId={settings.zone4Advancers === 3}
               scheduleByOfficialId={scheduleByOfficialId}
+              scoresByOfficialId={scoresByOfficialId}
+              onScoreChange={updateScore}
+              scoresReadOnly={readOnly}
+              resolveLabel={resolveLabel}
               canReorder={canReorder}
               onMove={(officialId, direction) =>
                 moveCrossing(round.crossings, officialId, direction)

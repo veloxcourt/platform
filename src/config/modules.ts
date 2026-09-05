@@ -17,6 +17,7 @@ export const NAV_TAB_IDS = [
   "estadisticas",
   "herramientas",
   "control-usuarios",
+  "que-mejoro",
 ] as const;
 
 export type NavTabId = (typeof NAV_TAB_IDS)[number];
@@ -39,6 +40,7 @@ export const NAV_TAB_LABELS: Record<NavTabId, string> = {
   estadisticas: "Estadísticas",
   herramientas: "Herramientas",
   "control-usuarios": "Control Usuarios",
+  "que-mejoro": "Qué mejoro?",
 };
 
 export function navTabHref(clubSlug: string, tabId: NavTabId): string {
@@ -54,7 +56,7 @@ export function navTabHref(clubSlug: string, tabId: NavTabId): string {
   }
 }
 
-/** Aplica un orden guardado sobre las pestañas disponibles; las nuevas van al final. */
+/** Aplica un orden guardado; las pestañas nuevas se insertan tras su vecina por defecto. */
 export function applyNavOrder(
   available: NavTabId[],
   saved: string[] | null | undefined,
@@ -65,7 +67,18 @@ export function applyNavOrder(
     avail.has(id as NavTabId),
   );
   const remaining = available.filter((id) => !ordered.includes(id));
-  return [...ordered, ...remaining];
+  const result = [...ordered];
+  for (const id of remaining) {
+    const defaultIndex = NAV_TAB_IDS.indexOf(id);
+    const predecessor = defaultIndex > 0 ? NAV_TAB_IDS[defaultIndex - 1] : null;
+    const predPos = predecessor ? result.indexOf(predecessor) : -1;
+    if (predPos >= 0) {
+      result.splice(predPos + 1, 0, id);
+    } else {
+      result.push(id);
+    }
+  }
+  return result;
 }
 
 /// Módulos de la plataforma. Se habilitan por club (feature flags) sin tocar código.
@@ -153,6 +166,7 @@ export const ADMIN_MODULES = [
   "calendario",
   "tipos-usuario",
   "usuarios",
+  "que-mejoro",
 ] as const;
 
 export type AdminModuleKey = (typeof ADMIN_MODULES)[number];
@@ -167,6 +181,7 @@ export const ADMIN_MODULE_LABELS: Record<AdminModuleKey, string> = {
   calendario: "Calendario",
   "tipos-usuario": "Tipo Usuario",
   usuarios: "Usuarios",
+  "que-mejoro": "Qué mejoro?",
 };
 
 export const ALL_PRIVILEGES: AdminModuleKey[] = [...ADMIN_MODULES];
@@ -222,6 +237,11 @@ export const PRIVILEGE_GROUPS: PrivilegeGroup[] = [
       { key: "tipos-usuario", label: "Tipo Usuario" },
       { key: "usuarios", label: "Usuarios" },
     ],
+  },
+  {
+    id: "que-mejoro",
+    label: "Qué mejoro?",
+    options: [{ key: "que-mejoro", label: "Acceso" }],
   },
 ];
 

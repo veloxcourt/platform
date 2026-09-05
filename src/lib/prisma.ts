@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 41;
+const PRISMA_SCHEMA_REVISION = 44;
 
 /** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
 const PG_POOL_MAX = 1;
@@ -64,6 +64,8 @@ function schemaFingerprint(): string {
     "logoUrl" in Prisma.ClubScalarFieldEnum ? "1" : "0",
     "TOOLS_ECO_TORNEO" in $Enums.AdminModule ? "1" : "0",
     "TOOLS_CALENDARIO" in $Enums.AdminModule ? "1" : "0",
+    "QUE_MEJORO" in $Enums.AdminModule ? "1" : "0",
+    "clubImprovement" in Prisma.ModelName ? "1" : "0",
   ].join(":");
 }
 
@@ -89,7 +91,10 @@ function clientHasCurrentDelegates(client: PrismaClient): boolean {
       .calendarPlannerVenue?.findMany === "function" &&
     "calendarSearchLink" in client &&
     typeof (client as { calendarSearchLink?: { findMany?: unknown } })
-      .calendarSearchLink?.findMany === "function"
+      .calendarSearchLink?.findMany === "function" &&
+    "clubImprovement" in client &&
+    typeof (client as { clubImprovement?: { findMany?: unknown } })
+      .clubImprovement?.findMany === "function"
   );
 }
 
@@ -154,9 +159,9 @@ function getPrismaClient(): PrismaClient {
  * tras recrear el singleton.
  */
 export const prisma = new Proxy({} as PrismaClient, {
-  get(_target, prop, receiver) {
+  get(_target, prop) {
     const client = getPrismaClient();
-    const value = Reflect.get(client as object, prop, receiver);
+    const value = Reflect.get(client as object, prop, client);
     return typeof value === "function"
       ? (value as (...args: unknown[]) => unknown).bind(client)
       : value;

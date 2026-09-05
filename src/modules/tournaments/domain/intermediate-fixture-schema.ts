@@ -1,5 +1,11 @@
 import { z } from "zod";
 import type { IntermediateFixtureCategoryResult } from "./build-intermediate-fixture";
+import type { OfficialRound } from "./intermediate-phase";
+import {
+  applyKnockoutScores,
+  collectKnockoutScores,
+  matchScoresSchema,
+} from "./match-scores";
 
 export const intermediateFixtureMatchSchema = z.object({
   officialId: z.number().int(),
@@ -13,6 +19,7 @@ export const intermediateFixtureMatchSchema = z.object({
   courtIndex: z.number().int().min(0).nullable(),
   slotIndex: z.number().int().min(0).nullable().optional(),
   noRestGap: z.boolean().optional(),
+  scores: matchScoresSchema.optional(),
 });
 
 export const intermediateFixtureSchema = z.object({
@@ -52,6 +59,42 @@ export const toPersistedFinalFixture = toPersistedIntermediateFixture;
 export type FinalFixturePersisted = IntermediateFixturePersisted;
 
 export type KnockoutFixturePhase = "intermediate" | "final";
+
+export function carryKnockoutScores(
+  previous: IntermediateFixturePersisted | null | undefined,
+  next: IntermediateFixturePersisted,
+): IntermediateFixturePersisted {
+  return applyKnockoutScores(next, collectKnockoutScores(previous));
+}
+
+export function mergeKnockoutDraftScores(
+  previous: IntermediateFixturePersisted,
+  incoming: IntermediateFixturePersisted,
+): IntermediateFixturePersisted {
+  return applyKnockoutScores(previous, collectKnockoutScores(incoming));
+}
+
+export function seedKnockoutFixture(
+  rounds: OfficialRound[],
+): IntermediateFixturePersisted {
+  return {
+    rounds: rounds.map((round) => ({
+      label: round.label,
+      matches: round.crossings.map((crossing, matchIndex) => ({
+        officialId: crossing.id,
+        roundLabel: round.label,
+        matchIndex,
+        left: crossing.left,
+        right: crossing.right,
+        playDate: null,
+        startTime: null,
+        courtIndex: null,
+      })),
+    })),
+    warnings: [],
+    builtAt: new Date().toISOString(),
+  };
+}
 
 export function knockoutFixtureStamps(
   fixture: IntermediateFixturePersisted | null | undefined,

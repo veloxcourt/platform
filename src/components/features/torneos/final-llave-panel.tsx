@@ -5,6 +5,7 @@ import { Workflow } from "lucide-react";
 
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -24,6 +25,7 @@ import type {
 } from "@/modules/tournaments/domain/types";
 import { LlavePdfMenu } from "./llave-pdf-menu";
 import type { LlavePdfClub, LlavePdfDraw } from "./llave-pdf";
+import { categoryKnockoutNameResolver } from "./knockout-name-resolver";
 import {
   OfficialBracketDiagram,
   bracketScheduleFromFixture,
@@ -71,6 +73,18 @@ export function FinalLlavePanel({
     }
     return map;
   }, [config, selected?.id]);
+  const resolveLabel = useMemo(
+    () =>
+      selected
+        ? categoryKnockoutNameResolver({
+            config,
+            categoryId: selected.id,
+            pairs,
+            matchFormat: settings.matchFormat,
+          })
+        : (label: string) => label,
+    [config, pairs, selected, settings.matchFormat],
+  );
   const pdfDraws = useMemo<LlavePdfDraw[]>(
     () =>
       tree && selected
@@ -83,11 +97,13 @@ export function FinalLlavePanel({
               showOfficialId: settings.zone4Advancers === 3,
               startsAtRound: settings.startsAtRound,
               scheduleByOfficialId,
+              resolveLabel,
             },
           ]
         : [],
     [
       pairCount,
+      resolveLabel,
       scheduleByOfficialId,
       selected,
       settings.startsAtRound,
@@ -110,6 +126,13 @@ export function FinalLlavePanel({
           intermedia; violeta es fase final (desde {startsAtLabel}). Cada
           cruce muestra día, hora y cancha cuando ya hay armado.
         </CardDescription>
+        <CardAction>
+          <LlavePdfMenu
+            tournamentName={tournamentName}
+            draws={pdfDraws}
+            club={club}
+          />
+        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {categories.length === 0 ? (
@@ -119,27 +142,20 @@ export function FinalLlavePanel({
           </p>
         ) : (
           <>
-            <div className="flex w-full min-w-0 items-center gap-2">
-              <div
-                className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
-                role="tablist"
-                aria-label="Categoría de la llave"
-              >
-                {categories.map((category) => (
-                  <StableTabButton
-                    key={category.id}
-                    active={selected?.id === category.id}
-                    onSelect={() => onCategoryChange(category.id)}
-                  >
-                    {category.name}
-                  </StableTabButton>
-                ))}
-              </div>
-              <LlavePdfMenu
-                tournamentName={tournamentName}
-                draws={pdfDraws}
-                club={club}
-              />
+            <div
+              className="flex min-w-0 flex-wrap items-center gap-2"
+              role="tablist"
+              aria-label="Categoría de la llave"
+            >
+              {categories.map((category) => (
+                <StableTabButton
+                  key={category.id}
+                  active={selected?.id === category.id}
+                  onSelect={() => onCategoryChange(category.id)}
+                >
+                  {category.name}
+                </StableTabButton>
+              ))}
             </div>
             <p className="text-xs text-muted-foreground">
               Llave oficial {regulation} · {pairCount} pareja
@@ -152,6 +168,7 @@ export function FinalLlavePanel({
                 startsAtRound={settings.startsAtRound}
                 showPhaseLegend
                 scheduleByOfficialId={scheduleByOfficialId}
+                resolveLabel={resolveLabel}
               />
             ) : (
               <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">

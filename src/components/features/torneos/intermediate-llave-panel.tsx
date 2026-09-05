@@ -5,6 +5,7 @@ import { Workflow } from "lucide-react";
 
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -21,19 +22,26 @@ import type {
   TournamentCategoryItem,
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
+import { LlavePdfMenu } from "./llave-pdf-menu";
+import type { LlavePdfClub, LlavePdfDraw } from "./llave-pdf";
+import { categoryKnockoutNameResolver } from "./knockout-name-resolver";
 import {
   OfficialBracketDiagram,
   bracketScheduleFromFixture,
 } from "./official-bracket-diagram";
 
 export function IntermediateLlavePanel({
+  tournamentName,
   categories,
   pairs,
   config,
+  club,
 }: {
+  tournamentName: string;
   categories: TournamentCategoryItem[];
   pairs: PairListItem[];
   config: TournamentConfig | null;
+  club?: LlavePdfClub;
 }) {
   const draws = useMemo(
     () =>
@@ -54,9 +62,31 @@ export function IntermediateLlavePanel({
             config?.categories.find((item) => item.categoryId === category.id)
               ?.intermediateFixture,
           ),
+          resolveLabel: categoryKnockoutNameResolver({
+            config,
+            categoryId: category.id,
+            pairs,
+            matchFormat: settings.matchFormat,
+          }),
         };
       }),
     [categories, config, pairs],
+  );
+  const pdfDraws = useMemo<LlavePdfDraw[]>(
+    () =>
+      draws
+        .filter((draw) => draw.tree)
+        .map((draw) => ({
+          categoryName: draw.category.name,
+          regulation: draw.regulation,
+          pairCount: draw.pairCount,
+          tree: draw.tree!,
+          showOfficialId: draw.showOfficialId,
+          startsAtRound: draw.startsAtRound,
+          scheduleByOfficialId: draw.scheduleByOfficialId,
+          resolveLabel: draw.resolveLabel,
+        })),
+    [draws],
   );
 
   return (
@@ -67,9 +97,16 @@ export function IntermediateLlavePanel({
           Llave
         </CardTitle>
         <CardDescription>
-          Diagrama oficial del cuadro. Los nombres son puestos de zona (1° A,
-          2° B) hasta que se completen los resultados.
+          Diagrama oficial del cuadro. Tocá Calcular para traer los nombres
+          que clasificaron de zona.
         </CardDescription>
+        <CardAction>
+          <LlavePdfMenu
+            tournamentName={tournamentName}
+            draws={pdfDraws}
+            club={club}
+          />
+        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
         {draws.length === 0 ? (
@@ -98,6 +135,7 @@ export function IntermediateLlavePanel({
                   startsAtRound={draw.startsAtRound}
                   showPhaseLegend
                   scheduleByOfficialId={draw.scheduleByOfficialId}
+                  resolveLabel={draw.resolveLabel}
                 />
               ) : (
                 <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">

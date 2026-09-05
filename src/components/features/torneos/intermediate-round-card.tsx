@@ -75,6 +75,10 @@ export function IntermediateRoundCard({
   scheduleByOfficialId,
   canReorder = false,
   onMove,
+  scoresByOfficialId,
+  onScoreChange,
+  scoresReadOnly = false,
+  resolveLabel,
 }: {
   label: string;
   crossings: FapCrossing[];
@@ -85,6 +89,10 @@ export function IntermediateRoundCard({
   scheduleByOfficialId?: Map<number, IntermediateCrossingSchedule>;
   canReorder?: boolean;
   onMove?: (officialId: number, direction: "up" | "down") => void;
+  scoresByOfficialId?: Map<number, Record<string, string>>;
+  onScoreChange?: (officialId: number, key: string, value: string) => void;
+  scoresReadOnly?: boolean;
+  resolveLabel?: (label: string) => string;
 }) {
   const columns = resultColumnsForFormat(matchFormat);
   const hasUnscheduled = crossings.some((crossing) => {
@@ -252,10 +260,16 @@ export function IntermediateRoundCard({
                   </select>
                 </td>
                 <td className="min-w-0 py-1.5 pr-1.5 align-middle">
-                  <PlaceholderPair label={crossing.left} />
+                  <CrossingPair
+                    seed={crossing.left}
+                    name={resolveLabel?.(crossing.left) ?? crossing.left}
+                  />
                 </td>
                 <td className="min-w-0 py-1.5 pr-1.5 align-middle">
-                  <PlaceholderPair label={crossing.right} />
+                  <CrossingPair
+                    seed={crossing.right}
+                    name={resolveLabel?.(crossing.right) ?? crossing.right}
+                  />
                 </td>
                 <td className="py-1.5 align-middle">
                   <div className="flex justify-end gap-0.5">
@@ -263,9 +277,18 @@ export function IntermediateRoundCard({
                       <input
                         key={col.key}
                         className={cn(SCORE_CLASS)}
-                        disabled
-                        readOnly
-                        value=""
+                        disabled={scoresReadOnly || !onScoreChange}
+                        readOnly={scoresReadOnly || !onScoreChange}
+                        value={
+                          scoresByOfficialId?.get(crossing.id)?.[col.key] ?? ""
+                        }
+                        onChange={(event) =>
+                          onScoreChange?.(
+                            crossing.id,
+                            col.key,
+                            event.target.value,
+                          )
+                        }
                         aria-label={`${col.group ?? ""} ${col.label} partido ${index + 1}`}
                       />
                     ))}
@@ -281,10 +304,17 @@ export function IntermediateRoundCard({
   );
 }
 
-function PlaceholderPair({ label }: { label: string }) {
+function CrossingPair({ seed, name }: { seed: string; name: string }) {
+  const resolved = name !== seed;
   return (
-    <div className="flex min-h-8 items-center rounded-lg border border-input bg-background px-2 text-xs">
-      {label}
+    <div
+      className="flex min-h-8 flex-col justify-center rounded-lg border border-input bg-background px-2 py-0.5"
+      title={resolved ? `${name} · ${seed}` : seed}
+    >
+      <span className="text-xs font-medium leading-tight">{name}</span>
+      {resolved ? (
+        <span className="text-[10px] text-muted-foreground">{seed}</span>
+      ) : null}
     </div>
   );
 }

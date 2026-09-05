@@ -51,6 +51,13 @@ export function visibleNavTabs(
       continue;
     }
 
+    if (id === "que-mejoro") {
+      if (allowedModules.includes("que-mejoro")) {
+        items.push({ id, enabled: true });
+      }
+      continue;
+    }
+
     // Resto: módulos de MODULES
     if (!(MODULES as readonly string[]).includes(id)) continue;
 

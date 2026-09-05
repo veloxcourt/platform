@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   BookOpen,
+  Calculator,
+  CalendarDays,
   ChevronLeft,
   ClipboardList,
   Copy,
@@ -23,6 +25,7 @@ import {
   buildAllZonesFixturesAction,
   buildFinalFixtureAction,
   buildIntermediateFixtureAction,
+  calculateZoneQualificationAction,
 } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 
 import { Badge } from "@/components/ui/badge";
@@ -61,11 +64,16 @@ import { StableTabButton } from "@/components/ui/stable-tab-button";
 import { TournamentConfigTabs } from "./tournament-config-tabs";
 import { TorneosSoporteView } from "./torneos-soporte-view";
 import { TournamentEditForm } from "./tournament-form-dialog";
+import { DailyMatchesPanel } from "./daily-matches-panel";
+import { tournamentPlayDayOptions } from "./daily-matches-model";
 import { TournamentZonesPanel } from "./tournament-zones-panel";
 import { ZonesMatchGridPanel } from "./zones-match-grid-panel";
 import { ZonesMatchRulePanel } from "./zones-match-rule-panel";
 import { ActualizarHoverHint } from "./actualizar-hover-hint";
-import { FixtureEditModeProvider } from "./fixture-edit-mode-context";
+import {
+  FixtureEditModeProvider,
+  FixturePersistFlushBinder,
+} from "./fixture-edit-mode-context";
 import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 import { parseFixtureEditMode } from "@/modules/tournaments/domain/fixture-edit-mode";
@@ -87,6 +95,7 @@ type TournamentTab =
   | "configuracion"
   | "fase-intermedia"
   | "fase-final"
+  | "partidos-del-dia"
   | "soporte";
 
 const REGLA_PARTIDOS_TAB = "regla-partidos";
@@ -111,6 +120,7 @@ const TABS: {
   { id: "zonas", label: "Zonas", icon: Grid3x3 },
   { id: "fase-intermedia", label: "Fase Intermedia", icon: GitBranch },
   { id: "fase-final", label: "Fase Final", icon: Trophy },
+  { id: "partidos-del-dia", label: "Partidos del día", icon: CalendarDays },
 ];
 
 export function ZonasTournamentDetail({
@@ -142,10 +152,12 @@ export function ZonasTournamentDetail({
   const [isUpdatingAllZones, startUpdateAllZones] = useTransition();
   const [isUpdatingIntermediate, startUpdateIntermediate] = useTransition();
   const [isUpdatingFinal, startUpdateFinal] = useTransition();
+  const [isCalculating, startCalculate] = useTransition();
   const [fixtureEditMode, setFixtureEditMode] = useState(() =>
     parseFixtureEditMode(tournament.fixtureEditMode),
   );
   const [zonesPanelKey, setZonesPanelKey] = useState(0);
+  const flushPendingPersistsRef = useRef<() => Promise<void>>(async () => {});
   const [activeTab, setActiveTab] = useState<TournamentTab>("inscripciones");
   const [categoryFilterId, setCategoryFilterId] = useState<string>(
     () => tournament.categories[0]?.id ?? "",
@@ -161,6 +173,13 @@ export function ZonasTournamentDetail({
   );
   const [finalLlaveCategoryId, setFinalLlaveCategoryId] = useState<string>(
     () => tournament.categories[0]?.id ?? "",
+  );
+  const playDayOptions = useMemo(
+    () => tournamentPlayDayOptions(config),
+    [config],
+  );
+  const [dailySubTab, setDailySubTab] = useState<string>(
+    () => tournamentPlayDayOptions(config)[0]?.date ?? "",
   );
 
   const intermediateCategories = useMemo(
@@ -227,6 +246,15 @@ export function ZonasTournamentDetail({
     setFixtureEditMode(parseFixtureEditMode(tournament.fixtureEditMode));
   }, [tournament.fixtureEditMode]);
 
+  useEffect(() => {
+    if (playDayOptions.length === 0) {
+      if (dailySubTab) setDailySubTab("");
+      return;
+    }
+    const stillValid = playDayOptions.some((day) => day.date === dailySubTab);
+    if (!stillValid) setDailySubTab(playDayOptions[0]!.date);
+  }, [dailySubTab, playDayOptions]);
+
   const selectedCategory =
     tournament.categories.find((c) => c.id === categoryFilterId) ?? null;
 
@@ -244,6 +272,7 @@ export function ZonasTournamentDetail({
 
   function handleActualizarTodasLasZonas() {
     startUpdateAllZones(async () => {
+      await flushPendingPersistsRef.current();
       const result = await buildAllZonesFixturesAction(
         clubSlug,
         tournament.id,
@@ -274,6 +303,7 @@ export function ZonasTournamentDetail({
 
   function handleActualizarTodaIntermedia() {
     startUpdateIntermediate(async () => {
+      await flushPendingPersistsRef.current();
       const result = await buildIntermediateFixtureAction(
         clubSlug,
         tournament.id,
@@ -301,8 +331,40 @@ export function ZonasTournamentDetail({
     });
   }
 
+  function handleCalcularClasificacion() {
+    startCalculate(async () => {
+      await flushPendingPersistsRef.current();
+      const result = await calculateZoneQualificationAction(
+        clubSlug,
+        tournament.id,
+      );
+      if (!result.ok) {
+        toast.error("No se pudo calcular la clasificación", {
+          description: result.error,
+        });
+        return;
+      }
+      router.refresh();
+      toast.success("Clasificación calculada", {
+        description: [
+          `${result.seedCount} puesto${result.seedCount === 1 ? "" : "s"} definido${result.seedCount === 1 ? "" : "s"}`,
+          `${result.categoryCount} categoría${result.categoryCount === 1 ? "" : "s"}`,
+          result.warnings[0],
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
+      if (result.warnings.length > 1) {
+        for (const warning of result.warnings.slice(1, 4)) {
+          toast.message(warning);
+        }
+      }
+    });
+  }
+
   function handleActualizarFaseFinal() {
     startUpdateFinal(async () => {
+      await flushPendingPersistsRef.current();
       const result = await buildFinalFixtureAction(clubSlug, tournament.id);
       if (!result.ok) {
         toast.error("No se pudo armar la fase final", {
@@ -419,6 +481,7 @@ export function ZonasTournamentDetail({
       readOnly={readOnly}
       setMode={setFixtureEditMode}
     >
+    <FixturePersistFlushBinder flushRef={flushPendingPersistsRef} />
     <div className="flex w-full min-w-0 flex-col">
       {activeTab === "configuracion" ? (
         <TournamentConfigTabs
@@ -559,6 +622,29 @@ export function ZonasTournamentDetail({
               </div>
                 {!readOnly && intermediateCategories.length > 0 ? (
                   <>
+                    <ActualizarHoverHint
+                      heading="Calcula quién clasifica de cada zona"
+                      effects={[
+                        "Recalcula 1.ª, 2.ª y quién queda afuera con los resultados guardados",
+                        "Completa los nombres en intermedia, llaves y grillas",
+                        "No cambia día, horario ni cancha",
+                      ]}
+                      note="Si hay empate para definir el puesto, ese cruce queda pendiente hasta el desempate en cancha."
+                    >
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0"
+                        onClick={handleCalcularClasificacion}
+                        disabled={isCalculating}
+                      >
+                        <Calculator
+                          className={`size-4 ${isCalculating ? "animate-pulse" : ""}`}
+                        />
+                        Calcular
+                      </Button>
+                    </ActualizarHoverHint>
                     <FixtureEditModeSelect
                       clubSlug={clubSlug}
                       tournamentId={tournament.id}
@@ -708,6 +794,29 @@ export function ZonasTournamentDetail({
                 ) : null}
               </div>
             ) : null}
+            {activeTab === "partidos-del-dia" ? (
+              <div
+                className="mt-3 flex min-w-0 items-center gap-2 overflow-x-auto"
+                role="tablist"
+                aria-label="Días del torneo"
+              >
+                {playDayOptions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Definí los días de juego en Configuración.
+                  </p>
+                ) : (
+                  playDayOptions.map((day) => (
+                    <StableTabButton
+                      key={day.date}
+                      active={dailySubTab === day.date}
+                      onSelect={() => setDailySubTab(day.date)}
+                    >
+                      {day.label}
+                    </StableTabButton>
+                  ))
+                )}
+              </div>
+            ) : null}
           </div>
           <div className="w-full min-w-0 overflow-x-clip pt-4">
       {activeTab === "soporte" ? <TorneosSoporteView /> : null}
@@ -839,9 +948,11 @@ export function ZonasTournamentDetail({
           />
         ) : intermediaSubTab === LLAVE_TAB ? (
           <IntermediateLlavePanel
+            tournamentName={tournament.name}
             categories={intermediateCategories}
             pairs={tournament.pairs}
             config={config}
+            club={club}
           />
         ) : intermediateCategories.length === 0 ? (
           <Card>
@@ -912,6 +1023,33 @@ export function ZonasTournamentDetail({
             config={config}
             courtCount={courtCount}
             categoryId={finalSubTab}
+          />
+        )
+      ) : null}
+
+      {activeTab === "partidos-del-dia" ? (
+        playDayOptions.length === 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Partidos del día</CardTitle>
+              <CardDescription>
+                Cargá los días de juego en Configuración para ver los
+                enfrentamientos de cada jornada.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        ) : (
+          <DailyMatchesPanel
+            tournamentName={tournament.name}
+            dayLabel={
+              playDayOptions.find((day) => day.date === dailySubTab)?.label ??
+              ""
+            }
+            categories={tournament.categories}
+            pairs={tournament.pairs}
+            config={config}
+            playDate={dailySubTab}
+            club={club}
           />
         )
       ) : null}
