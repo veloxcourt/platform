@@ -167,3 +167,53 @@ export const prisma = new Proxy({} as PrismaClient, {
       : value;
   },
 });
+
+let runtimeSchemaPromise: Promise<void> | null = null;
+
+async function applyRuntimeSchema() {
+  const statements = [
+    `ALTER TYPE "AdminModule" ADD VALUE IF NOT EXISTS 'QUE_MEJORO'`,
+    `DO $$ BEGIN CREATE TYPE "ImprovementKind" AS ENUM ('IMPROVE', 'ADD'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE "ImprovementStatus" AS ENUM ('PENDING', 'IN_PROGRESS', 'DONE'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "zoneQualification" JSONB`,
+    `CREATE TABLE IF NOT EXISTS "club_improvements" (
+      "id" TEXT NOT NULL,
+      "clubId" TEXT NOT NULL,
+      "title" TEXT NOT NULL,
+      "detail" TEXT,
+      "kind" "ImprovementKind" NOT NULL DEFAULT 'IMPROVE',
+      "status" "ImprovementStatus" NOT NULL DEFAULT 'PENDING',
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL,
+      CONSTRAINT "club_improvements_pkey" PRIMARY KEY ("id")
+    )`,
+    `DO $$ BEGIN
+      ALTER TABLE "club_improvements"
+        ADD CONSTRAINT "club_improvements_clubId_fkey"
+        FOREIGN KEY ("clubId") REFERENCES "clubs"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `CREATE INDEX IF NOT EXISTS "club_improvements_clubId_sortOrder_idx" ON "club_improvements"("clubId", "sortOrder")`,
+    `CREATE INDEX IF NOT EXISTS "club_improvements_clubId_createdAt_idx" ON "club_improvements"("clubId", "createdAt")`,
+  ];
+  for (const sql of statements) {
+    try {
+      await getPrismaClient().$executeRawUnsafe(sql);
+    } catch (error) {
+      console.error("[prisma] ensureRuntimeSchema", sql.slice(0, 80), error);
+    }
+  }
+}
+
+/** Completa columnas/tablas nuevas en producción antes del primer SELECT de Prisma. */
+export async function ensureRuntimeSchema() {
+  if (!runtimeSchemaPromise) {
+    runtimeSchemaPromise = applyRuntimeSchema().catch((error) => {
+      runtimeSchemaPromise = null;
+      throw error;
+    });
+  }
+  await runtimeSchemaPromise;
+}

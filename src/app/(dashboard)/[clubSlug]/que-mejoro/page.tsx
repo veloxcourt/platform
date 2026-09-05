@@ -1,6 +1,6 @@
 import { ImprovementsTable } from "@/components/features/improvements/improvements-table";
 import { getClubAccess } from "@/lib/auth/access";
-import { prisma } from "@/lib/prisma";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 
 export const metadata = {
   title: "Qué mejoro? · VeloxCourt",
@@ -14,6 +14,7 @@ export default async function QueMejoroPage({
   const { clubSlug } = await params;
   const access = await getClubAccess(clubSlug);
   if (!access) return null;
+  await ensureRuntimeSchema();
 
   const items = await prisma.clubImprovement.findMany({
     where: { clubId: access.club.id },

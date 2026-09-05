@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import type {
   TournamentRepository,
   MutationResult,
@@ -113,7 +113,6 @@ function fromDbDate(date: Date): string {
 
 let intermediateFixtureColumnReady = false;
 let finalFixtureColumnReady = false;
-let zoneQualificationColumnReady = false;
 let fixtureEditModeColumnReady = false;
 
 async function ensureFixtureEditModeColumn() {
@@ -150,11 +149,7 @@ async function ensureFinalFixtureColumn() {
 }
 
 async function ensureZoneQualificationColumn() {
-  if (zoneQualificationColumnReady) return;
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "zoneQualification" JSONB`,
-  );
-  zoneQualificationColumnReady = true;
+  await ensureRuntimeSchema();
 }
 
 function mapStoredPlayDay(day: {
@@ -794,6 +789,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     tournamentId: string,
     input: { includePairs: boolean; name: string },
   ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+    await ensureRuntimeSchema();
     const source = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId },
       include: {
@@ -1635,6 +1631,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     });
     if (!tournament) return { ok: false, error: "Torneo no encontrado" };
 
+    await ensureRuntimeSchema();
     const category = await prisma.tournamentCategory.findFirst({
       where: { id: categoryId, tournamentId },
       include: { settings: true },
@@ -2326,6 +2323,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     clubId: string,
     tournamentId: string,
   ): Promise<TournamentConfig | null> {
+    await ensureRuntimeSchema();
     const tournament = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId, type: "ZONAS" },
       include: {
@@ -2531,6 +2529,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     });
     if (!tournament) return { ok: false, error: "Torneo no encontrado" };
 
+    await ensureRuntimeSchema();
     const [source, target] = await Promise.all([
       prisma.tournamentCategory.findFirst({
         where: { id: sourceCategoryId, tournamentId },

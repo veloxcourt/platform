@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireClubPrivilege } from "@/lib/auth/access";
-import { prisma } from "@/lib/prisma";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import { improvementSchema } from "@/modules/improvements/domain/schema";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
