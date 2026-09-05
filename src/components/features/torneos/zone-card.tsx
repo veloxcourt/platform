@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -50,6 +52,22 @@ const SELECT_CLASS =
 
 const COURT_SELECT_CLASS = `${SELECT_CLASS} text-center [text-align-last:center]`;
 
+const FIELD_CONFLICT_CLASS =
+  "border-red-500 dark:border-red-600 text-red-900 dark:text-red-100";
+
+export type ScheduleField = "day" | "time" | "court";
+
+type FieldMenu =
+  | { type: "pair"; x: number; y: number; pairId: string }
+  | { type: ScheduleField; x: number; y: number; matchId: string };
+
+const FIELD_MENU_LABEL: Record<FieldMenu["type"], string> = {
+  pair: "Cambiar pareja",
+  day: "Cambiar día",
+  time: "Cambiar horario",
+  court: "Cambiar cancha",
+};
+
 const KIND_ROW_ORDER: Record<ZoneMatchKind, number> = {
   opening: 0,
   round_robin: 1,
@@ -73,21 +91,36 @@ function PairSelect({
   value,
   options,
   disabled,
+  conflict,
   onChange,
+  onContextMenu,
   ariaLabel,
 }: {
   value: string;
   options: ZonePairOption[];
   disabled?: boolean;
+  conflict?: boolean;
   onChange: (id: string | null) => void;
+  onContextMenu?: (event: ReactMouseEvent) => void;
   ariaLabel: string;
 }) {
   const label = pairLabel(value || null, options);
   return (
-    <div className="relative min-w-0 rounded-lg border border-input bg-background focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+    <div
+      className={cn(
+        "relative min-w-0 rounded-lg border bg-background focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
+        conflict
+          ? "border-red-500 dark:border-red-600"
+          : "border-input",
+      )}
+      onContextMenu={onContextMenu}
+    >
       <div
         aria-hidden
-        className="min-h-8 px-1.5 py-1 pr-6 text-xs leading-snug break-words whitespace-normal"
+        className={cn(
+          "min-h-8 px-1.5 py-1 pr-6 text-xs leading-snug break-words whitespace-normal",
+          conflict && "text-red-800 dark:text-red-200",
+        )}
       >
         {label}
       </div>
@@ -96,6 +129,7 @@ function PairSelect({
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value || null)}
+        onContextMenu={onContextMenu}
         aria-label={ariaLabel}
         title={label}
       >
@@ -162,7 +196,15 @@ export function ZoneCard({
   slotMinutes,
   readOnly = false,
   scheduleLocked = false,
+  canManualEdit = false,
+  hasPairInconsistency = false,
+  hasScheduleConflict = false,
+  inconsistentPairIds,
+  courtConflictMatchIds,
+  pairTimeConflictMatchIds,
   onChange,
+  onChangePairRequest,
+  onChangeScheduleRequest,
   className,
 }: {
   zone: ZoneDraft;
@@ -178,10 +220,69 @@ export function ZoneCard({
   readOnly?: boolean;
   /// Bloquea día, horario, cancha y parejas (Modo Automático).
   scheduleLocked?: boolean;
-  onChange: (next: ZoneDraft) => void;
+  /// Clic derecho para cambiar pareja, día, horario o cancha.
+  canManualEdit?: boolean;
+  hasPairInconsistency?: boolean;
+  hasScheduleConflict?: boolean;
+  inconsistentPairIds?: Set<string>;
+  courtConflictMatchIds?: Set<string>;
+  pairTimeConflictMatchIds?: Set<string>;
+  onChange: (next: ZoneDraft, meta?: { matchId?: string }) => void;
+  onChangePairRequest?: (fromPairId: string) => void;
+  onChangeScheduleRequest?: (matchId: string, field: ScheduleField) => void;
   className?: string;
 }) {
   const fieldsLocked = readOnly || scheduleLocked;
+  const [fieldMenu, setFieldMenu] = useState<FieldMenu | null>(null);
+  const fieldMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!fieldMenu) return;
+
+    function onPointerDown(event: MouseEvent) {
+      if (!fieldMenuRef.current?.contains(event.target as Node)) {
+        setFieldMenu(null);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setFieldMenu(null);
+    }
+    function onScroll() {
+      setFieldMenu(null);
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [fieldMenu]);
+
+  function openPairMenu(event: ReactMouseEvent, pairId: string | null) {
+    if (!canManualEdit || !pairId || !onChangePairRequest) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setFieldMenu({
+      type: "pair",
+      x: event.clientX,
+      y: event.clientY,
+      pairId,
+    });
+  }
+
+  function openScheduleMenu(
+    event: ReactMouseEvent,
+    matchId: string,
+    field: ScheduleField,
+  ) {
+    if (!canManualEdit || !onChangeScheduleRequest) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setFieldMenu({ type: field, x: event.clientX, y: event.clientY, matchId });
+  }
   const columns = resultColumnsForFormat(matchFormat);
   const zonePairOptions = pairOptions.filter((p) =>
     zone.pairIds.includes(p.id),
@@ -243,14 +344,17 @@ export function ZoneCard({
       "startTime" in patch ||
       "pair1Id" in patch ||
       "pair2Id" in patch;
-    onChange({
-      ...zone,
-      matches: touchesSchedule
-        ? [...nextMatches].sort((a, b) =>
-            comparePlayDaySchedule(a, b, dayOpenByDate),
-          )
-        : nextMatches,
-    });
+    onChange(
+      {
+        ...zone,
+        matches: touchesSchedule
+          ? [...nextMatches].sort((a, b) =>
+              comparePlayDaySchedule(a, b, dayOpenByDate),
+            )
+          : nextMatches,
+      },
+      { matchId },
+    );
   }
 
   function updateScore(matchId: string, key: string, value: string) {
@@ -264,15 +368,21 @@ export function ZoneCard({
   return (
     <div
       title={
-        zoneNeedsReview
-          ? "Esta zona quedó fuera de alguna regla (horario o descanso). Revisá y ajustá a mano."
-          : undefined
+        hasPairInconsistency
+          ? "Esta zona tiene una pareja que también está en otra zona."
+          : hasScheduleConflict
+            ? "Esta zona tiene un choque de cancha u horario con otro partido u otra categoría."
+            : zoneNeedsReview
+              ? "Esta zona quedó fuera de alguna regla (horario o descanso). Revisá y ajustá a mano."
+              : undefined
       }
       className={cn(
         "rounded-lg border p-3",
-        zoneNeedsReview
-          ? "border-amber-400 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40"
-          : "border-teal-200/80 bg-teal-50/80 dark:border-teal-900 dark:bg-teal-950/30",
+        hasPairInconsistency || hasScheduleConflict
+          ? "border-red-500 bg-red-50 dark:border-red-700 dark:bg-red-950/40"
+          : zoneNeedsReview
+            ? "border-amber-400 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40"
+            : "border-teal-200/80 bg-teal-50/80 dark:border-teal-900 dark:bg-teal-950/30",
         className,
       )}
     >
@@ -280,6 +390,16 @@ export function ZoneCard({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-semibold">{zone.label}</p>
+            {hasPairInconsistency && (
+              <span className="rounded-md border border-red-500/70 bg-red-200/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-red-950 dark:border-red-600 dark:bg-red-900/70 dark:text-red-100">
+                Pareja duplicada
+              </span>
+            )}
+            {hasScheduleConflict && (
+              <span className="rounded-md border border-red-500/70 bg-red-200/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-red-950 dark:border-red-600 dark:bg-red-900/70 dark:text-red-100">
+                Choque
+              </span>
+            )}
             {zoneNeedsReview && (
               <span className="rounded-md border border-amber-500/60 bg-amber-200/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-950 dark:border-amber-600 dark:bg-amber-900/60 dark:text-amber-100">
                 Revisar
@@ -304,19 +424,31 @@ export function ZoneCard({
               Sin parejas asignadas
             </span>
           ) : (
-            zone.pairIds.map((id) => (
+            zone.pairIds.map((id) => {
+              const pairConflict = inconsistentPairIds?.has(id) ?? false;
+              return (
               <span
                 key={id}
+                onContextMenu={(event) => openPairMenu(event, id)}
+                title={
+                  canManualEdit
+                    ? "Clic derecho: cambiar pareja"
+                    : undefined
+                }
                 className={cn(
-                  "rounded-md border bg-background/80 px-2 py-1 text-xs",
-                  zoneNeedsReview
-                    ? "border-amber-300/80"
-                    : "border-teal-200/80",
+                  "rounded-md border px-2 py-1 text-xs",
+                  canManualEdit && "cursor-context-menu",
+                  pairConflict
+                    ? "border-red-500 bg-red-100 text-red-950 dark:border-red-600 dark:bg-red-900/70 dark:text-red-100"
+                    : zoneNeedsReview
+                      ? "border-amber-300/80 bg-background/80"
+                      : "border-teal-200/80 bg-background/80",
                 )}
               >
                 {pairLabel(id, pairOptions)}
               </span>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -352,7 +484,19 @@ export function ZoneCard({
                 (breakKey) => breakKey !== "rest",
               );
               const rowNeedsReview = lacksRest || lacksSchedule;
+              const hasCourtConflict =
+                courtConflictMatchIds?.has(match.id) ?? false;
+              const hasPairTimeConflict =
+                pairTimeConflictMatchIds?.has(match.id) ?? false;
+              const hasScheduleRowConflict =
+                hasCourtConflict || hasPairTimeConflict;
               const rowTitle = [
+                hasCourtConflict
+                  ? "Misma cancha, día y horario que otro partido"
+                  : null,
+                hasPairTimeConflict
+                  ? "Una pareja ya juega en este día y horario"
+                  : null,
                 lacksRest
                   ? "Sin celda de descanso entre partidos de una pareja — revisá horario"
                   : null,
@@ -370,8 +514,11 @@ export function ZoneCard({
                 title={rowTitle || undefined}
                 className={cn(
                   "border-b border-dashed last:border-0",
-                  rowNeedsReview &&
-                    "bg-amber-200/70 dark:bg-amber-900/50",
+                  hasScheduleRowConflict
+                    ? "bg-red-200/70 dark:bg-red-900/50"
+                    : rowNeedsReview
+                      ? "bg-amber-200/70 dark:bg-amber-900/50"
+                      : null,
                 )}
               >
                 <td className="py-1.5 pr-1.5 align-middle tabular-nums text-muted-foreground">
@@ -382,6 +529,11 @@ export function ZoneCard({
                         Sin descanso
                       </span>
                     )}
+                    {hasScheduleRowConflict ? (
+                      <span className="max-w-[4.5rem] text-[9px] font-medium leading-tight text-red-800 dark:text-red-200">
+                        {hasCourtConflict ? "Cancha ocupada" : "Pareja ocupada"}
+                      </span>
+                    ) : null}
                     {lacksSchedule ? (
                       <span className="max-w-[4.5rem] text-[9px] font-medium leading-tight text-amber-900 dark:text-amber-100">
                         Sin horario
@@ -407,9 +559,19 @@ export function ZoneCard({
                 </td>
                 <td className="py-1.5 pr-1.5 align-middle">
                   <select
-                    className={SELECT_CLASS}
+                    className={cn(
+                      SELECT_CLASS,
+                      canManualEdit && "cursor-context-menu",
+                      hasScheduleRowConflict && FIELD_CONFLICT_CLASS,
+                    )}
                     value={match.playDate}
                     disabled={fieldsLocked}
+                    title={
+                      canManualEdit ? "Clic derecho: cambiar día" : undefined
+                    }
+                    onContextMenu={(event) =>
+                      openScheduleMenu(event, match.id, "day")
+                    }
                     onChange={(e) =>
                       updateMatch(match.id, { playDate: e.target.value })
                     }
@@ -427,9 +589,21 @@ export function ZoneCard({
                   <Input
                     value={match.startTime}
                     placeholder="17:00"
-                    className="h-8 w-full min-w-0 px-1.5 text-center text-xs tabular-nums"
+                    className={cn(
+                      "h-8 w-full min-w-0 px-1.5 text-center text-xs tabular-nums",
+                      canManualEdit && "cursor-context-menu",
+                      hasScheduleRowConflict && FIELD_CONFLICT_CLASS,
+                    )}
                     disabled={fieldsLocked}
                     readOnly={fieldsLocked}
+                    title={
+                      canManualEdit
+                        ? "Clic derecho: cambiar horario"
+                        : undefined
+                    }
+                    onContextMenu={(event) =>
+                      openScheduleMenu(event, match.id, "time")
+                    }
                     onChange={(e) =>
                       updateMatch(match.id, { startTime: e.target.value })
                     }
@@ -438,9 +612,21 @@ export function ZoneCard({
                 </td>
                 <td className="py-1.5 pr-1.5 align-middle">
                   <select
-                    className={COURT_SELECT_CLASS}
+                    className={cn(
+                      COURT_SELECT_CLASS,
+                      canManualEdit && "cursor-context-menu",
+                      hasCourtConflict && FIELD_CONFLICT_CLASS,
+                    )}
                     value={match.courtIndex ?? ""}
                     disabled={fieldsLocked}
+                    title={
+                      canManualEdit
+                        ? "Clic derecho: cambiar cancha"
+                        : undefined
+                    }
+                    onContextMenu={(event) =>
+                      openScheduleMenu(event, match.id, "court")
+                    }
                     onChange={(e) =>
                       updateMatch(match.id, {
                         courtIndex:
@@ -464,7 +650,15 @@ export function ZoneCard({
                     value={match.pair1Id ?? ""}
                     options={selectOptions}
                     disabled={fieldsLocked}
+                    conflict={
+                      Boolean(
+                        match.pair1Id && inconsistentPairIds?.has(match.pair1Id),
+                      )
+                    }
                     onChange={(id) => updateMatch(match.id, { pair1Id: id })}
+                    onContextMenu={(event) =>
+                      openPairMenu(event, match.pair1Id)
+                    }
                     ariaLabel={`Pareja 1 partido ${index + 1}`}
                   />
                 </td>
@@ -473,7 +667,15 @@ export function ZoneCard({
                     value={match.pair2Id ?? ""}
                     options={selectOptions}
                     disabled={fieldsLocked}
+                    conflict={
+                      Boolean(
+                        match.pair2Id && inconsistentPairIds?.has(match.pair2Id),
+                      )
+                    }
                     onChange={(id) => updateMatch(match.id, { pair2Id: id })}
+                    onContextMenu={(event) =>
+                      openPairMenu(event, match.pair2Id)
+                    }
                     ariaLabel={`Pareja 2 partido ${index + 1}`}
                   />
                 </td>
@@ -501,6 +703,40 @@ export function ZoneCard({
           </tbody>
         </table>
       </div>
+
+      {fieldMenu ? (
+        <div
+          ref={fieldMenuRef}
+          role="menu"
+          className="fixed z-50 min-w-44 rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
+          style={{
+            left: Math.min(fieldMenu.x, window.innerWidth - 200),
+            top: Math.min(fieldMenu.y, window.innerHeight - 80),
+          }}
+        >
+          <p className="px-2 py-1 text-xs text-muted-foreground">
+            {fieldMenu.type === "pair"
+              ? pairLabel(fieldMenu.pairId, pairOptions)
+              : zone.label}
+          </p>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+            onClick={() => {
+              const menu = fieldMenu;
+              setFieldMenu(null);
+              if (menu.type === "pair") {
+                onChangePairRequest?.(menu.pairId);
+                return;
+              }
+              onChangeScheduleRequest?.(menu.matchId, menu.type);
+            }}
+          >
+            {FIELD_MENU_LABEL[fieldMenu.type]}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

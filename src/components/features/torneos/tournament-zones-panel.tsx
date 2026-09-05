@@ -37,7 +37,24 @@ import {
   type ZoneMatchKind,
 } from "@/modules/tournaments/domain/zone-bracket";
 import {
+  inconsistentPairIdsInZone,
+  inconsistentZoneIds,
+  pairZoneLabelsById,
+  replacePairInZone,
+} from "@/modules/tournaments/domain/replace-zone-pair";
+import {
+  collectExternalCourtSlots,
+  labelsForCourtSlot,
+  scheduleConflictMatchIds,
+  scheduleConflictZoneIds,
+  slotOccupants,
+  startTimesForPlayDay,
+} from "@/modules/tournaments/domain/zone-schedule-conflicts";
+import { ChangeZoneListDialog } from "./change-zone-list-dialog";
+import { ChangeZonePairDialog } from "./change-zone-pair-dialog";
+import {
   ZoneCard,
+  type ScheduleField,
   type ZoneDraft,
   type ZonePairOption,
 } from "./zone-card";
@@ -239,6 +256,21 @@ export function TournamentZonesPanel({
     Record<string, ZoneDraft[]>
   >({});
   const [rebuildToken, setRebuildToken] = useState(0);
+  const [lastEditedZoneId, setLastEditedZoneId] = useState<string | null>(
+    null,
+  );
+  const [lastEditedMatchId, setLastEditedMatchId] = useState<string | null>(
+    null,
+  );
+  const [changePairRequest, setChangePairRequest] = useState<{
+    zoneId: string;
+    pairId: string;
+  } | null>(null);
+  const [changeScheduleRequest, setChangeScheduleRequest] = useState<{
+    zoneId: string;
+    matchId: string;
+    field: ScheduleField;
+  } | null>(null);
 
   const activeCategoryId =
     initialCategoryId && categories.some((c) => c.id === initialCategoryId)
@@ -354,6 +386,158 @@ export function TournamentZonesPanel({
     dayOpenByDate,
   ]);
 
+  const externalCourtSlots = useMemo(
+    () =>
+      collectExternalCourtSlots({
+        categories: config?.categories ?? [],
+        activeCategoryId,
+        localZonesByCategory: zonesByCategory,
+      }),
+    [config?.categories, activeCategoryId, zonesByCategory],
+  );
+
+  const conflictZoneIds = useMemo(
+    () => inconsistentZoneIds(zones, lastEditedZoneId),
+    [zones, lastEditedZoneId],
+  );
+  const scheduleConflicts = useMemo(
+    () => scheduleConflictMatchIds(zones, externalCourtSlots),
+    [zones, externalCourtSlots],
+  );
+  const scheduleConflictZones = useMemo(
+    () =>
+      scheduleConflictZoneIds(
+        zones,
+        scheduleConflicts.all,
+        lastEditedMatchId,
+        scheduleConflicts.externalCourt,
+      ),
+    [zones, scheduleConflicts, lastEditedMatchId],
+  );
+  const pairLabelsById = useMemo(() => pairZoneLabelsById(zones), [zones]);
+
+  const changePairZone = changePairRequest
+    ? zones.find((zone) => zone.id === changePairRequest.zoneId)
+    : undefined;
+  const changeScheduleZone = changeScheduleRequest
+    ? zones.find((zone) => zone.id === changeScheduleRequest.zoneId)
+    : undefined;
+  const changeScheduleMatch = changeScheduleZone?.matches.find(
+    (match) => match.id === changeScheduleRequest?.matchId,
+  );
+  const changeScheduleOptions = useMemo(() => {
+    if (!changeScheduleRequest || !changeScheduleMatch) return [];
+    const excludeId = changeScheduleMatch.id;
+    const busyPairIds =
+      changeScheduleMatch.kind === "winners" ||
+      changeScheduleMatch.kind === "losers"
+        ? (changeScheduleZone?.pairIds ?? [])
+        : [changeScheduleMatch.pair1Id, changeScheduleMatch.pair2Id].filter(
+            (id): id is string => Boolean(id),
+          );
+    const occupantHint = (
+      playDate: string,
+      startTime: string,
+      courtIndex: number | null,
+    ) => {
+      const occupants = slotOccupants(
+        zones,
+        playDate,
+        startTime,
+        courtIndex,
+        excludeId,
+        busyPairIds,
+        externalCourtSlots,
+      );
+      if (occupants.length === 0) return "Libre";
+      const labels = [...new Set(occupants.map((item) => item.zoneLabel))];
+      const reason = occupants.some((item) => item.reason === "court")
+        ? "Cancha ocupada"
+        : "Pareja ocupada";
+      return `${reason} · ${labels.join(", ")}`;
+    };
+
+    if (changeScheduleRequest.field === "day") {
+      return dayOptions.map((option) => ({
+        value: option.value,
+        label: option.label,
+        hint: occupantHint(
+          option.value,
+          changeScheduleMatch.startTime,
+          changeScheduleMatch.courtIndex,
+        ),
+      }));
+    }
+
+    if (changeScheduleRequest.field === "court") {
+      return Array.from({ length: Math.max(1, courtCount) }, (_, index) => ({
+        value: String(index),
+        label: `Cancha ${index + 1}`,
+        hint: occupantHint(
+          changeScheduleMatch.playDate,
+          changeScheduleMatch.startTime,
+          index,
+        ),
+      }));
+    }
+
+    const playDay = (config?.playDays ?? []).find(
+      (day) => day.date === changeScheduleMatch.playDate,
+    );
+    const times = playDay
+      ? startTimesForPlayDay(playDay, slotMinutes)
+      : [
+          ...new Set(
+            (config?.playDays ?? []).flatMap((day) =>
+              startTimesForPlayDay(day, slotMinutes),
+            ),
+          ),
+        ];
+    if (
+      changeScheduleMatch.startTime &&
+      !times.includes(changeScheduleMatch.startTime)
+    ) {
+      times.unshift(changeScheduleMatch.startTime);
+    }
+    return times.map((time) => ({
+      value: time,
+      label: time,
+      hint: occupantHint(
+        changeScheduleMatch.playDate,
+        time,
+        changeScheduleMatch.courtIndex,
+      ),
+    }));
+  }, [
+    changeScheduleRequest,
+    changeScheduleMatch,
+    changeScheduleZone,
+    dayOptions,
+    courtCount,
+    config?.playDays,
+    slotMinutes,
+    zones,
+    externalCourtSlots,
+  ]);
+  const changePairOptions = useMemo(
+    () =>
+      categoryPairs
+        .filter((pair) => Boolean(pair.player2))
+        .map((pair) => ({
+          id: pair.id,
+          label: pairOptionLabel(pair),
+          zoneLabels: pairLabelsById.get(pair.id) ?? [],
+        })),
+    [categoryPairs, pairLabelsById],
+  );
+
+  useEffect(() => {
+    setLastEditedZoneId(null);
+    setLastEditedMatchId(null);
+    setChangePairRequest(null);
+    setChangeScheduleRequest(null);
+  }, [activeCategoryId]);
+
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -394,10 +578,120 @@ export function TournamentZonesPanel({
     setZonesByCategory((prev) => ({ ...prev, [activeCategoryId]: next }));
   }
 
-  function updateZone(zoneId: string, next: ZoneDraft) {
-    const nextZones = zones.map((z) => (z.id === zoneId ? next : z));
+  function toastConflictZones(labels: string[], kind: "pair" | "schedule") {
+    if (labels.length === 0) return;
+    toast.message(
+      kind === "pair"
+        ? "Hay zonas con la misma pareja"
+        : "Hay zonas con choque de horario o cancha",
+      {
+        description:
+          labels.length === 1
+            ? `${labels[0]} quedó marcada en rojo.`
+            : `${labels.join(", ")} quedaron marcadas en rojo.`,
+      },
+    );
+  }
+
+  function applyZones(
+    nextZones: ZoneDraft[],
+    edited: { zoneId: string; matchId?: string },
+  ) {
+    setLastEditedZoneId(edited.zoneId);
+    setLastEditedMatchId(edited.matchId ?? null);
     setZones(nextZones);
     persistZones(nextZones);
+  }
+
+  function updateZone(
+    zoneId: string,
+    next: ZoneDraft,
+    meta?: { matchId?: string },
+  ) {
+    const nextZones = zones.map((z) => (z.id === zoneId ? next : z));
+    applyZones(nextZones, { zoneId, matchId: meta?.matchId });
+    if (meta?.matchId) {
+      const conflicts = scheduleConflictMatchIds(
+        nextZones,
+        externalCourtSlots,
+      );
+      const editedMatch = nextZones
+        .flatMap((zone) => zone.matches)
+        .find((match) => match.id === meta.matchId);
+      const otherCategoryLabels = editedMatch
+        ? labelsForCourtSlot(
+            externalCourtSlots,
+            editedMatch.playDate,
+            editedMatch.startTime,
+            editedMatch.courtIndex,
+          )
+        : [];
+      if (otherCategoryLabels.length > 0) {
+        toast.message("Hay choque con otra categoría", {
+          description: otherCategoryLabels.join(", "),
+        });
+      }
+      toastConflictZones(
+        nextZones
+          .filter((zone) =>
+            scheduleConflictZoneIds(
+              nextZones,
+              conflicts.all,
+              meta.matchId,
+              conflicts.externalCourt,
+            ).has(zone.id),
+          )
+          .map((zone) => zone.label)
+          .filter((label) => !otherCategoryLabels.includes(label)),
+        "schedule",
+      );
+    }
+  }
+
+  function patchMatch(
+    zoneId: string,
+    matchId: string,
+    patch: Partial<ZoneDraft["matches"][number]>,
+  ) {
+    const current = zones.find((zone) => zone.id === zoneId);
+    if (!current) return;
+    const nextMatches = current.matches.map((match) =>
+      match.id === matchId ? { ...match, ...patch } : match,
+    );
+    const touchesSchedule =
+      "playDate" in patch ||
+      "startTime" in patch ||
+      "pair1Id" in patch ||
+      "pair2Id" in patch;
+    updateZone(
+      zoneId,
+      {
+        ...current,
+        matches: touchesSchedule
+          ? [...nextMatches].sort((a, b) =>
+              comparePlayDaySchedule(a, b, dayOpenByDate),
+            )
+          : nextMatches,
+      },
+      { matchId },
+    );
+  }
+
+  function replaceZonePair(zoneId: string, fromPairId: string, toPairId: string) {
+    const current = zones.find((zone) => zone.id === zoneId);
+    if (!current) return;
+    const replaced = replacePairInZone(current, fromPairId, toPairId);
+    if (replaced === current) return;
+    const nextZones = zones.map((zone) =>
+      zone.id === zoneId ? replaced : zone,
+    );
+    applyZones(nextZones, { zoneId });
+    toastConflictZones(
+      nextZones
+        .filter((zone) => inconsistentZoneIds(nextZones, zoneId).has(zone.id))
+        .map((zone) => zone.label),
+      "pair",
+    );
   }
 
   function handleActualizar() {
@@ -421,6 +715,10 @@ export function TournamentZonesPanel({
         delete copy[activeCategoryId];
         return copy;
       });
+      setLastEditedZoneId(null);
+      setLastEditedMatchId(null);
+      setChangePairRequest(null);
+      setChangeScheduleRequest(null);
       setRebuildToken((n) => n + 1);
       router.refresh();
 
@@ -461,8 +759,8 @@ export function TournamentZonesPanel({
             {zone4Advancers}
             {zone4Advancers === 2 ? " · APA" : " · FAP"}).{" "}
             <span className="font-medium text-foreground">Actualizar</span>{" "}
-            arma en Modo Automático. Para retocar día, horario o cancha, pasá a
-            Modo Manual.
+            arma en Modo Automático. Para retocar día, horario, cancha o
+            parejas, pasá a Modo Manual.
             {!hasAssigned
               ? " Todavía no hay un armado guardado."
               : null}
@@ -487,6 +785,7 @@ export function TournamentZonesPanel({
                   ? [
                       "En Manual no se regeneran zonas ni horarios",
                       "Ajustá día, horario, cancha y parejas a mano",
+                      "Clic derecho en pareja, día, horario o cancha",
                     ]
                   : [
                       "Reasigna las parejas de cada zona",
@@ -522,14 +821,23 @@ export function TournamentZonesPanel({
           Preferencias usadas: {pairsWithPreferences} pareja(s) ·{" "}
           {preferenceCount} celda(s). El armado intenta respetar todas las
           reglas; si algo no entra, la zona queda en ámbar (badge Revisar). En
-          Modo Manual los cambios de día, horario y cancha se guardan.
+          Modo Manual los cambios de día, horario, cancha y parejas se
+          guardan. Clic derecho en pareja, día, horario o cancha para
+          cambiarlos; las otras zonas o categorías con la misma pareja o un
+          choque de cancha/horario se marcan en rojo.
         </p>
         {categories.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Creá una categoría para ver las zonas.
           </p>
         ) : (
-          zones.map((zone) => (
+          zones.map((zone) => {
+            const hasPairInconsistency = conflictZoneIds.has(zone.id);
+            const hasScheduleConflict = scheduleConflictZones.has(zone.id);
+            const inconsistentPairIds = hasPairInconsistency
+              ? inconsistentPairIdsInZone(zone, zones)
+              : undefined;
+            return (
             <ZoneCard
               key={zone.id}
               zone={zone}
@@ -541,10 +849,97 @@ export function TournamentZonesPanel({
               slotMinutes={slotMinutes}
               readOnly={readOnly}
               scheduleLocked={scheduleLocked}
-              onChange={(next) => updateZone(zone.id, next)}
+              canManualEdit={isManual && !readOnly}
+              hasPairInconsistency={hasPairInconsistency}
+              hasScheduleConflict={hasScheduleConflict}
+              inconsistentPairIds={inconsistentPairIds}
+              courtConflictMatchIds={scheduleConflicts.court}
+              pairTimeConflictMatchIds={scheduleConflicts.pair}
+              onChange={(next, meta) => updateZone(zone.id, next, meta)}
+              onChangePairRequest={(pairId) =>
+                setChangePairRequest({ zoneId: zone.id, pairId })
+              }
+              onChangeScheduleRequest={(matchId, field) =>
+                setChangeScheduleRequest({
+                  zoneId: zone.id,
+                  matchId,
+                  field,
+                })
+              }
             />
-          ))
+            );
+          })
         )}
+        <ChangeZonePairDialog
+          open={Boolean(changePairRequest && changePairZone)}
+          onOpenChange={(open) => {
+            if (!open) setChangePairRequest(null);
+          }}
+          zoneLabel={changePairZone?.label ?? ""}
+          currentPairId={changePairRequest?.pairId ?? ""}
+          currentPairLabel={
+            pairOptions.find((option) => option.id === changePairRequest?.pairId)
+              ?.label ?? "esta pareja"
+          }
+          zonePairIds={changePairZone?.pairIds ?? []}
+          options={changePairOptions}
+          onSelect={(toPairId) => {
+            if (!changePairRequest) return;
+            replaceZonePair(
+              changePairRequest.zoneId,
+              changePairRequest.pairId,
+              toPairId,
+            );
+            setChangePairRequest(null);
+          }}
+        />
+        <ChangeZoneListDialog
+          open={Boolean(changeScheduleRequest && changeScheduleMatch)}
+          onOpenChange={(open) => {
+            if (!open) setChangeScheduleRequest(null);
+          }}
+          title={
+            changeScheduleRequest?.field === "day"
+              ? "Cambiar día"
+              : changeScheduleRequest?.field === "court"
+                ? "Cambiar cancha"
+                : "Cambiar horario"
+          }
+          description={
+            changeScheduleZone
+              ? `Partido de ${changeScheduleZone.label}. Las celdas ocupadas se indican a la derecha.`
+              : "Elegí una opción."
+          }
+          currentValue={
+            changeScheduleRequest?.field === "court"
+              ? changeScheduleMatch?.courtIndex != null
+                ? String(changeScheduleMatch.courtIndex)
+                : ""
+              : changeScheduleRequest?.field === "day"
+                ? (changeScheduleMatch?.playDate ?? "")
+                : (changeScheduleMatch?.startTime ?? "")
+          }
+          options={changeScheduleOptions}
+          searchable={changeScheduleRequest?.field === "time"}
+          searchPlaceholder="Buscar horario"
+          onSelect={(value) => {
+            if (!changeScheduleRequest) return;
+            if (changeScheduleRequest.field === "day") {
+              patchMatch(changeScheduleRequest.zoneId, changeScheduleRequest.matchId, {
+                playDate: value,
+              });
+            } else if (changeScheduleRequest.field === "time") {
+              patchMatch(changeScheduleRequest.zoneId, changeScheduleRequest.matchId, {
+                startTime: value,
+              });
+            } else {
+              patchMatch(changeScheduleRequest.zoneId, changeScheduleRequest.matchId, {
+                courtIndex: Number(value),
+              });
+            }
+            setChangeScheduleRequest(null);
+          }}
+        />
       </CardContent>
     </Card>
   );
