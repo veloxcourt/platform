@@ -369,8 +369,9 @@ async function buildDailyMatchesPng(
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(pageW * scale);
   canvas.height = Math.round(pageH * pages * scale);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return Promise.reject(new Error("No se pudo crear la imagen"));
+  const rawCtx = canvas.getContext("2d");
+  if (!rawCtx) return Promise.reject(new Error("No se pudo crear la imagen"));
+  const ctx: CanvasRenderingContext2D = rawCtx;
   ctx.scale(scale, scale);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, pageW, pageH * pages);
