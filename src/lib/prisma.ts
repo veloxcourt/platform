@@ -170,7 +170,15 @@ export const prisma = new Proxy({} as PrismaClient, {
 
 let runtimeSchemaPromise: Promise<void> | null = null;
 
+/**
+ * DDL por una conexión aparte (DIRECT_URL / session). Nunca usar el cliente
+ * Prisma del request: el transaction pooler (6543) aborta ALTER y deja
+ * la sesión inutilizable, y la app no carga.
+ */
 async function applyRuntimeSchema() {
+  const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
+  if (!url) return;
+
   const statements = [
     `ALTER TYPE "AdminModule" ADD VALUE IF NOT EXISTS 'QUE_MEJORO'`,
     `DO $$ BEGIN CREATE TYPE "ImprovementKind" AS ENUM ('IMPROVE', 'ADD'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
@@ -198,16 +206,27 @@ async function applyRuntimeSchema() {
     `CREATE INDEX IF NOT EXISTS "club_improvements_clubId_sortOrder_idx" ON "club_improvements"("clubId", "sortOrder")`,
     `CREATE INDEX IF NOT EXISTS "club_improvements_clubId_createdAt_idx" ON "club_improvements"("clubId", "createdAt")`,
   ];
-  for (const sql of statements) {
-    try {
-      await getPrismaClient().$executeRawUnsafe(sql);
-    } catch (error) {
-      console.error("[prisma] ensureRuntimeSchema", sql.slice(0, 80), error);
+
+  const pool = new Pool({
+    connectionString: url,
+    max: 1,
+    idleTimeoutMillis: 5_000,
+    connectionTimeoutMillis: 10_000,
+  });
+  try {
+    for (const sql of statements) {
+      try {
+        await pool.query(sql);
+      } catch (error) {
+        console.error("[prisma] ensureRuntimeSchema", sql.slice(0, 80), error);
+      }
     }
+  } finally {
+    await pool.end().catch(() => {});
   }
 }
 
-/** Completa columnas/tablas nuevas en producción antes del primer SELECT de Prisma. */
+/** Completa columnas/tablas nuevas. Usar solo en pantallas que las necesitan. */
 export async function ensureRuntimeSchema() {
   if (!runtimeSchemaPromise) {
     runtimeSchemaPromise = applyRuntimeSchema().catch((error) => {

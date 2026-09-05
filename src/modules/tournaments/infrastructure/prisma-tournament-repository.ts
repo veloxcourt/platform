@@ -258,6 +258,29 @@ const CATEGORY_INCLUDE = {
   },
 } as const;
 
+/** Sin zoneQualification: Prisma no debe SELECT-ear columnas que aún no existen. */
+const SETTINGS_SELECT = {
+  categoryId: true,
+  zonesMatchFormat: true,
+  zonesMatchDurationMin: true,
+  knockoutMatchFormat: true,
+  knockoutMatchDurationMin: true,
+  finalMatchFormat: true,
+  finalMatchDurationMin: true,
+  finalStartsAtRound: true,
+  intervalMin: true,
+  pairsPerZone: true,
+  zone4Advancers: true,
+  zonesPlayDates: true,
+  knockoutPlayDates: true,
+  finalPlayDates: true,
+  zonesFixture: true,
+  intermediateFixture: true,
+  finalFixture: true,
+} as const;
+
+const SETTINGS_INCLUDE = { select: SETTINGS_SELECT } as const;
+
 function mapTournament(row: {
   id: string;
   type: string;
@@ -796,7 +819,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
         playDays: { orderBy: { date: "asc" } },
         categories: {
           orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-          include: { settings: true },
+          include: { settings: SETTINGS_INCLUDE },
         },
         pairs: true,
         slotReservations: true,
@@ -1634,7 +1657,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     await ensureRuntimeSchema();
     const category = await prisma.tournamentCategory.findFirst({
       where: { id: categoryId, tournamentId },
-      include: { settings: true },
+      include: { settings: SETTINGS_INCLUDE },
     });
     if (!category) return { ok: false, error: "Categoría no encontrada" };
 
@@ -2323,14 +2346,13 @@ export class PrismaTournamentRepository implements TournamentRepository {
     clubId: string,
     tournamentId: string,
   ): Promise<TournamentConfig | null> {
-    await ensureRuntimeSchema();
     const tournament = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId, type: "ZONAS" },
       include: {
         playDays: { orderBy: { date: "asc" } },
         categories: {
           orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-          include: { settings: true },
+          include: { settings: SETTINGS_INCLUDE },
         },
       },
     });
@@ -2347,7 +2369,6 @@ export class PrismaTournamentRepository implements TournamentRepository {
     const categoryIds = tournament.categories.map((c) => c.id);
     await ensureIntermediateFixtureColumn();
     await ensureFinalFixtureColumn();
-    await ensureZoneQualificationColumn();
     const fixtureRows =
       categoryIds.length === 0
         ? []
@@ -2357,10 +2378,9 @@ export class PrismaTournamentRepository implements TournamentRepository {
               zonesFixture: unknown;
               intermediateFixture: unknown;
               finalFixture: unknown;
-              zoneQualification: unknown;
             }>
           >(
-            `SELECT "categoryId", "zonesFixture", "intermediateFixture", "finalFixture", "zoneQualification" FROM "tournament_settings" WHERE "categoryId" = ANY($1::text[])`,
+            `SELECT "categoryId", "zonesFixture", "intermediateFixture", "finalFixture" FROM "tournament_settings" WHERE "categoryId" = ANY($1::text[])`,
             categoryIds,
           );
     const fixtureByCategory = new Map(
@@ -2372,9 +2392,23 @@ export class PrismaTournamentRepository implements TournamentRepository {
     const finalByCategory = new Map(
       fixtureRows.map((row) => [row.categoryId, row.finalFixture]),
     );
-    const qualificationByCategory = new Map(
-      fixtureRows.map((row) => [row.categoryId, row.zoneQualification]),
-    );
+    const qualificationByCategory = new Map<string, unknown>();
+    try {
+      await ensureRuntimeSchema();
+      if (categoryIds.length > 0) {
+        const qualificationRows = await prisma.$queryRawUnsafe<
+          Array<{ categoryId: string; zoneQualification: unknown }>
+        >(
+          `SELECT "categoryId", "zoneQualification" FROM "tournament_settings" WHERE "categoryId" = ANY($1::text[])`,
+          categoryIds,
+        );
+        for (const row of qualificationRows) {
+          qualificationByCategory.set(row.categoryId, row.zoneQualification);
+        }
+      }
+    } catch (error) {
+      console.error("[tournaments] zoneQualification unavailable", error);
+    }
 
     return {
       tournamentId: tournament.id,
@@ -2533,11 +2567,11 @@ export class PrismaTournamentRepository implements TournamentRepository {
     const [source, target] = await Promise.all([
       prisma.tournamentCategory.findFirst({
         where: { id: sourceCategoryId, tournamentId },
-        include: { settings: true },
+        include: { settings: SETTINGS_INCLUDE },
       }),
       prisma.tournamentCategory.findFirst({
         where: { id: targetCategoryId, tournamentId },
-        include: { settings: true },
+        include: { settings: SETTINGS_INCLUDE },
       }),
     ]);
     if (!source?.settings) {

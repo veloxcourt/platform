@@ -16,10 +16,15 @@ export default async function QueMejoroPage({
   if (!access) return null;
   await ensureRuntimeSchema();
 
-  const items = await prisma.clubImprovement.findMany({
-    where: { clubId: access.club.id },
-    orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { createdAt: "desc" }],
-  });
+  let items: Awaited<ReturnType<typeof prisma.clubImprovement.findMany>> = [];
+  try {
+    items = await prisma.clubImprovement.findMany({
+      where: { clubId: access.club.id },
+      orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { createdAt: "desc" }],
+    });
+  } catch (error) {
+    console.error("[que-mejoro] club_improvements unavailable", error);
+  }
 
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-4">

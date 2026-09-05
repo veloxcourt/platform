@@ -9,7 +9,7 @@ import {
   firstHerramientasSlug,
   type AdminModuleKey,
 } from "@/config/modules";
-import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import { toModuleKeys } from "./permissions";
@@ -38,8 +38,6 @@ const getCurrentUserRecord = cache(async () => {
   if (error || !authUser || !authUser.email) {
     return null;
   }
-
-  await ensureRuntimeSchema();
 
   let user = await prisma.user.findFirst({
     where: {
@@ -80,7 +78,6 @@ export async function requireCurrentUser() {
 export const getClubAccess = cache(async (clubSlug: string) => {
   const current = await getCurrentUserRecord();
   if (!current) return null;
-  await ensureRuntimeSchema();
 
   const club = await prisma.club.findUnique({
     where: { slug: clubSlug },
