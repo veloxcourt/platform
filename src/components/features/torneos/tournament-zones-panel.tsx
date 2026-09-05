@@ -969,7 +969,7 @@ export function TournamentZonesPanel({
                   ? [
                       "En Manual no se regeneran zonas ni horarios",
                       "Ajustá día, horario, cancha y parejas a mano",
-                      "Clic derecho en pareja, día, horario o cancha",
+                      "Tocá la pareja, o clic derecho / pulsación larga en día, horario o cancha",
                     ]
                   : [
                       "Reasigna las parejas de cada zona",
@@ -1008,9 +1008,10 @@ export function TournamentZonesPanel({
           {preferenceCount} celda(s). El armado intenta respetar todas las
           reglas; si algo no entra, la zona queda en ámbar (badge Revisar). En
           Modo Manual los cambios de día, horario, cancha y parejas se
-          guardan. Clic derecho en pareja, día, horario o cancha para
-          cambiarlos; las otras zonas o categorías con la misma pareja o un
-          choque de cancha/horario se marcan en rojo.
+          guardan. En tablet, tocá la pareja; en día, horario o cancha
+          mantené pulsado. Con mouse, clic derecho. Las otras zonas o
+          categorías con la misma pareja o un choque de cancha/horario se
+          marcan en rojo.
         </p>
         {categories.length === 0 ? (
           <p className="text-sm text-muted-foreground">

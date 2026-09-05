@@ -39,9 +39,6 @@ export function toDatabaseModules(modules: AdminModuleKey[]): AdminModule[] {
 
   for (const module of modules) {
     const value = MODULE_TO_DATABASE[module];
-    // No persistir QUE_MEJORO: el deploy en vivo aún no conoce el enum y Prisma
-    // explota al leer memberships/tipos. El dueño lo ve igual en memoria.
-    if (value === "QUE_MEJORO") continue;
     if (known.has(value)) {
       result.push(value);
       continue;

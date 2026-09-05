@@ -23,6 +23,10 @@ import {
 } from "@/modules/tournaments/domain/zone-bracket";
 import { computeZoneStandings } from "@/modules/tournaments/domain/zone-standings";
 import { ZoneStandingsDialog } from "./zone-standings-dialog";
+import {
+  bindFieldMenuTrigger,
+  type MenuPoint,
+} from "./field-menu-trigger";
 
 export type ZonePairOption = {
   id: string;
@@ -97,6 +101,10 @@ function PairSelect({
   conflict,
   onChange,
   onContextMenu,
+  onPointerDown,
+  onPointerUp,
+  onPointerCancel,
+  onPointerLeave,
   ariaLabel,
 }: {
   value: string;
@@ -105,6 +113,10 @@ function PairSelect({
   conflict?: boolean;
   onChange: (id: string | null) => void;
   onContextMenu?: (event: ReactMouseEvent) => void;
+  onPointerDown?: (event: React.PointerEvent) => void;
+  onPointerUp?: () => void;
+  onPointerCancel?: () => void;
+  onPointerLeave?: () => void;
   ariaLabel: string;
 }) {
   const label = pairLabel(value || null, options);
@@ -117,6 +129,10 @@ function PairSelect({
           : "border-input",
       )}
       onContextMenu={onContextMenu}
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onPointerLeave={onPointerLeave}
     >
       <div
         aria-hidden
@@ -224,7 +240,7 @@ export function ZoneCard({
   readOnly?: boolean;
   /// Bloquea día, horario, cancha y parejas (Modo Automático).
   scheduleLocked?: boolean;
-  /// Clic derecho para cambiar pareja, día, horario o cancha.
+  /// Tocá la pareja, o clic derecho / pulsación larga para cambiar día, horario o cancha.
   canManualEdit?: boolean;
   hasPairInconsistency?: boolean;
   hasScheduleConflict?: boolean;
@@ -241,6 +257,13 @@ export function ZoneCard({
   const [fieldMenu, setFieldMenu] = useState<FieldMenu | null>(null);
   const [standingsOpen, setStandingsOpen] = useState(false);
   const fieldMenuRef = useRef<HTMLDivElement>(null);
+  const menuHoldRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (menuHoldRef.current != null) window.clearTimeout(menuHoldRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!fieldMenu) return;
@@ -267,28 +290,27 @@ export function ZoneCard({
     };
   }, [fieldMenu]);
 
-  function openPairMenu(event: ReactMouseEvent, pairId: string | null) {
+  function openPairMenuAt(point: MenuPoint, pairId: string | null) {
     if (!canManualEdit || !pairId || !onChangePairRequest) return;
-    event.preventDefault();
-    event.stopPropagation();
     setFieldMenu({
       type: "pair",
-      x: event.clientX,
-      y: event.clientY,
+      x: point.x,
+      y: point.y,
       pairId,
     });
   }
 
-  function openScheduleMenu(
-    event: ReactMouseEvent,
+  function openScheduleMenuAt(
+    point: MenuPoint,
     matchId: string,
     field: ScheduleField,
   ) {
     if (!canManualEdit || !onChangeScheduleRequest) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setFieldMenu({ type: field, x: event.clientX, y: event.clientY, matchId });
+    setFieldMenu({ type: field, x: point.x, y: point.y, matchId });
   }
+
+  const pairMenuEnabled = canManualEdit && Boolean(onChangePairRequest);
+  const scheduleMenuEnabled = canManualEdit && Boolean(onChangeScheduleRequest);
   const columns = resultColumnsForFormat(matchFormat);
   const zonePairOptions = pairOptions.filter((p) =>
     zone.pairIds.includes(p.id),
@@ -445,15 +467,26 @@ export function ZoneCard({
               return (
               <span
                 key={id}
-                onContextMenu={(event) => openPairMenu(event, id)}
+                {...bindFieldMenuTrigger(
+                  pairMenuEnabled,
+                  (point) => openPairMenuAt(point, id),
+                  menuHoldRef,
+                )}
+                onClick={(event) => {
+                  if (!pairMenuEnabled) return;
+                  openPairMenuAt(
+                    { x: event.clientX, y: event.clientY },
+                    id,
+                  );
+                }}
                 title={
                   canManualEdit
-                    ? "Clic derecho: cambiar pareja"
+                    ? "Tocá o clic derecho: cambiar pareja"
                     : undefined
                 }
                 className={cn(
-                  "rounded-md border px-2 py-1 text-xs",
-                  canManualEdit && "cursor-context-menu",
+                  "select-none rounded-md border px-2 py-1 text-xs",
+                  canManualEdit && "cursor-pointer",
                   pairConflict
                     ? "border-red-500 bg-red-100 text-red-950 dark:border-red-600 dark:bg-red-900/70 dark:text-red-100"
                     : zoneNeedsReview
@@ -584,11 +617,15 @@ export function ZoneCard({
                     value={match.playDate}
                     disabled={fieldsLocked}
                     title={
-                      canManualEdit ? "Clic derecho: cambiar día" : undefined
+                      canManualEdit
+                        ? "Clic derecho o mantené pulsado: cambiar día"
+                        : undefined
                     }
-                    onContextMenu={(event) =>
-                      openScheduleMenu(event, match.id, "day")
-                    }
+                    {...bindFieldMenuTrigger(
+                      scheduleMenuEnabled,
+                      (point) => openScheduleMenuAt(point, match.id, "day"),
+                      menuHoldRef,
+                    )}
                     onChange={(e) =>
                       updateMatch(match.id, { playDate: e.target.value })
                     }
@@ -615,12 +652,14 @@ export function ZoneCard({
                     readOnly={fieldsLocked}
                     title={
                       canManualEdit
-                        ? "Clic derecho: cambiar horario"
+                        ? "Clic derecho o mantené pulsado: cambiar horario"
                         : undefined
                     }
-                    onContextMenu={(event) =>
-                      openScheduleMenu(event, match.id, "time")
-                    }
+                    {...bindFieldMenuTrigger(
+                      scheduleMenuEnabled,
+                      (point) => openScheduleMenuAt(point, match.id, "time"),
+                      menuHoldRef,
+                    )}
                     onChange={(e) =>
                       updateMatch(match.id, { startTime: e.target.value })
                     }
@@ -638,12 +677,14 @@ export function ZoneCard({
                     disabled={fieldsLocked}
                     title={
                       canManualEdit
-                        ? "Clic derecho: cambiar cancha"
+                        ? "Clic derecho o mantené pulsado: cambiar cancha"
                         : undefined
                     }
-                    onContextMenu={(event) =>
-                      openScheduleMenu(event, match.id, "court")
-                    }
+                    {...bindFieldMenuTrigger(
+                      scheduleMenuEnabled,
+                      (point) => openScheduleMenuAt(point, match.id, "court"),
+                      menuHoldRef,
+                    )}
                     onChange={(e) =>
                       updateMatch(match.id, {
                         courtIndex:
@@ -673,9 +714,11 @@ export function ZoneCard({
                       )
                     }
                     onChange={(id) => updateMatch(match.id, { pair1Id: id })}
-                    onContextMenu={(event) =>
-                      openPairMenu(event, match.pair1Id)
-                    }
+                    {...bindFieldMenuTrigger(
+                      pairMenuEnabled && Boolean(match.pair1Id),
+                      (point) => openPairMenuAt(point, match.pair1Id),
+                      menuHoldRef,
+                    )}
                     ariaLabel={`Pareja 1 partido ${index + 1}`}
                   />
                 </td>
@@ -690,9 +733,11 @@ export function ZoneCard({
                       )
                     }
                     onChange={(id) => updateMatch(match.id, { pair2Id: id })}
-                    onContextMenu={(event) =>
-                      openPairMenu(event, match.pair2Id)
-                    }
+                    {...bindFieldMenuTrigger(
+                      pairMenuEnabled && Boolean(match.pair2Id),
+                      (point) => openPairMenuAt(point, match.pair2Id),
+                      menuHoldRef,
+                    )}
                     ariaLabel={`Pareja 2 partido ${index + 1}`}
                   />
                 </td>

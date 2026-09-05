@@ -6,7 +6,7 @@ import { requireClubPrivilege } from "@/lib/auth/access";
 import { toDatabaseModules } from "@/lib/auth/permissions";
 import { ensureClubUserTypes } from "@/lib/auth/user-types";
 import { applyPrivilegeToggle, type AdminModuleKey } from "@/config/modules";
-import { prisma } from "@/lib/prisma";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import { userTypeSchema } from "@/modules/admins/domain/user-type-schema";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -27,6 +27,7 @@ export async function createUserTypeAction(
   input: unknown,
 ): Promise<ActionResult> {
   const access = await requireClubPrivilege(clubSlug, "tipos-usuario");
+  await ensureRuntimeSchema();
   await ensureClubUserTypes(access.club.id);
 
   const parsed = userTypeSchema.safeParse(input);
@@ -60,6 +61,7 @@ export async function updateUserTypeAction(
   input: unknown,
 ): Promise<ActionResult> {
   const access = await requireClubPrivilege(clubSlug, "tipos-usuario");
+  await ensureRuntimeSchema();
   const parsed = userTypeSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
