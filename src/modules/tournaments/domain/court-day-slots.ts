@@ -53,6 +53,40 @@ export interface CourtDaySlot {
     pair1Label?: string | null;
     pair2Label?: string | null;
   }[];
+  /// Parejas que ya marcaron este horario (preferencia, indistinto de cancha).
+  preferenceCount?: number;
+  /// Canchas en paralelo: tope visual de saturación.
+  courtCapacity?: number;
+}
+
+export type PreferenceDensityLevel = "empty" | "low" | "mid" | "full";
+
+export function preferenceDensityLevel(
+  count: number,
+  capacity: number,
+): PreferenceDensityLevel {
+  if (count <= 0) return "empty";
+  const ratio = count / Math.max(1, capacity);
+  if (ratio >= 1) return "full";
+  if (ratio >= 0.5) return "mid";
+  return "low";
+}
+
+export function preferenceDensityLabel(
+  count: number,
+  capacity: number,
+): string {
+  const cap = Math.max(1, capacity);
+  switch (preferenceDensityLevel(count, cap)) {
+    case "empty":
+      return "Libre";
+    case "low":
+      return `Poco pedido (${count}/${cap})`;
+    case "mid":
+      return `Pedido (${count}/${cap})`;
+    case "full":
+      return `Saturado (${count}/${cap})`;
+  }
 }
 
 export interface SlotReservationRef {
@@ -393,6 +427,7 @@ export function buildZonesRegistrationGrid(
     input.reservations ?? [],
     input.currentPairId,
     input.preferenceMode === true,
+    input.courtCount,
   );
 
   // Re-numerar labels Día N según orden de playDays del torneo (no solo zonas).
@@ -678,7 +713,23 @@ function applyReservations(
   reservations: SlotReservationRef[],
   currentPairId?: string | null,
   preferenceMode = false,
+  courtCount = 1,
 ): void {
+  const pairsByTime = new Map<string, Set<string>>();
+  for (const res of reservations) {
+    const timeKey = `${res.playDate}:${res.slotIndex}`;
+    const set = pairsByTime.get(timeKey) ?? new Set<string>();
+    set.add(res.pairId);
+    pairsByTime.set(timeKey, set);
+  }
+
+  const capacity = Math.max(1, courtCount);
+  for (const slot of slots) {
+    slot.courtCapacity = capacity;
+    slot.preferenceCount =
+      pairsByTime.get(`${slot.playDate}:${slot.slotIndex}`)?.size ?? 0;
+  }
+
   const byKey = new Map(
     slots.map((s) => [`${s.playDate}:${s.courtIndex}:${s.slotIndex}`, s]),
   );
@@ -741,6 +792,11 @@ export function mergeRegistrationDaySlots(day: CourtDayRule): CourtDaySlot[] {
         blockReason: blocked?.blockReason ?? canonical.blockReason,
         pairId: mine?.pairId ?? reserved?.pairId ?? canonical.pairId,
         pairLabel: mine?.pairLabel ?? reserved?.pairLabel ?? canonical.pairLabel,
+        preferenceCount: Math.max(
+          ...slots.map((slot) => slot.preferenceCount ?? 0),
+          0,
+        ),
+        courtCapacity: canonical.courtCapacity,
       };
     });
 }

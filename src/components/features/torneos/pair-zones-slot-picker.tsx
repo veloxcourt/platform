@@ -77,6 +77,8 @@ export function PairZonesSlotPicker({
   persist = true,
   onDraftChange,
   onChanged,
+  title = "Rangos de preferencia",
+  hint,
 }: {
   clubSlug: string;
   tournamentId: string;
@@ -90,6 +92,8 @@ export function PairZonesSlotPicker({
   persist?: boolean;
   onDraftChange?: (draft: PairDraftPreferences) => void;
   onChanged?: () => void;
+  title?: string;
+  hint?: string;
 }) {
   const inFlightRef = useRef(new Set<string>());
   const expectedFingerprintRef = useRef<string | null>(null);
@@ -167,13 +171,24 @@ export function PairZonesSlotPicker({
       category?.confirmedCount ??
       8;
 
-    const preferenceRefs = localReservations.map((r) => ({
-      pairId: r.pairId,
-      pairLabel: r.pairLabel,
-      playDate: r.playDate,
-      courtIndex: r.courtIndex,
-      slotIndex: r.slotIndex,
-    }));
+    const preferenceRefs = [
+      ...reservations
+        .filter((r) => r.pairId !== pairId)
+        .map((r) => ({
+          pairId: r.pairId,
+          pairLabel: r.pairLabel,
+          playDate: r.playDate,
+          courtIndex: r.courtIndex,
+          slotIndex: r.slotIndex,
+        })),
+      ...localReservations.map((r) => ({
+        pairId: r.pairId,
+        pairLabel: r.pairLabel,
+        playDate: r.playDate,
+        courtIndex: r.courtIndex,
+        slotIndex: r.slotIndex,
+      })),
+    ];
 
     let intermediateMatches = 0;
     for (const cat of config.categories) {
@@ -210,6 +225,7 @@ export function PairZonesSlotPicker({
     category,
     categories,
     localReservations,
+    reservations,
     categoryId,
     pairId,
   ]);
@@ -467,12 +483,10 @@ export function PairZonesSlotPicker({
   return (
     <div className="space-y-3">
       <div>
-        <p className="text-sm font-medium">Rangos de preferencia</p>
+        <p className="text-sm font-medium">{title}</p>
         <p className="text-xs text-muted-foreground">
-          Solo días de la fase de zonas. Marcá los horarios en los que la pareja
-          podría jugar sus 2 partidos (indistinto de cancha). Varias parejas
-          pueden marcar el mismo horario. Los tramos de intermedia en días
-          compartidos aparecen bloqueados.
+          {hint ??
+            "Solo días de la fase de zonas. Marcá en azul los horarios en los que la pareja podría jugar (indistinto de cancha). El verde son horarios libres. Los tramos de intermedia en días compartidos aparecen bloqueados."}
         </p>
       </div>
 

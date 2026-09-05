@@ -8,11 +8,14 @@ import { formatWeekdayName } from "@/lib/date";
 import type {
   CourtDayRule,
   CourtDaySlot,
+  PreferenceDensityLevel,
   SlotCellStatus,
 } from "@/modules/tournaments/domain/court-day-slots";
 import {
   listSelectablePreferenceSlotsForDay,
   mergeRegistrationDaySlots,
+  preferenceDensityLabel,
+  preferenceDensityLevel,
 } from "@/modules/tournaments/domain/court-day-slots";
 import {
   PLAY_DAY_START_MINUTES,
@@ -79,6 +82,20 @@ function cellClass(
     default:
       return "border-border bg-muted";
   }
+}
+
+const HEAT_CELL_CLASS: Record<PreferenceDensityLevel, string> = {
+  empty: "border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/70",
+  low: "border-lime-300 bg-lime-300 dark:border-lime-700 dark:bg-lime-700",
+  mid: "border-amber-400 bg-amber-400 dark:border-amber-600 dark:bg-amber-600",
+  full: "border-rose-400 bg-rose-500 dark:border-rose-700 dark:bg-rose-600",
+};
+
+function heatLevel(slot: CourtDaySlot): PreferenceDensityLevel {
+  return preferenceDensityLevel(
+    slot.preferenceCount ?? 0,
+    slot.courtCapacity ?? 1,
+  );
 }
 
 function isClickable(
@@ -272,6 +289,10 @@ export function SlotRuleGrid({
               className={cellClass("blocked")}
               label="Bloqueado (intermedia)"
             />
+            <LegendSwatch className={HEAT_CELL_CLASS.empty} label="Sin pedidos" />
+            <LegendSwatch className={HEAT_CELL_CLASS.low} label="Poco pedido" />
+            <LegendSwatch className={HEAT_CELL_CLASS.mid} label="Pedido" />
+            <LegendSwatch className={HEAT_CELL_CLASS.full} label="Saturado" />
           </>
         )}
       </div>
@@ -329,40 +350,69 @@ export function SlotRuleGrid({
           </p>
           {mode === "registration" ? (
             <div className="max-w-full overflow-x-auto">
-              <div className="flex w-max flex-nowrap items-center gap-1.5">
-              {daySlots?.map((slot) => {
-                const clickable = isClickable(mode, slot, interactive);
-                const titleParts = [
-                  STATUS_LABEL[slot.status],
-                  `${slot.startTime}–${slot.endTime}`,
-                  slot.blockReason === "knockout"
-                    ? "Reservado fase intermedia"
-                    : null,
-                ].filter(Boolean);
+              <div className="flex w-max flex-nowrap items-end gap-1.5">
+              <div className="flex flex-col gap-1">
+                <div className="flex flex-nowrap gap-1.5">
+                  {daySlots?.map((slot) => {
+                    const blocked = slot.status === "blocked";
+                    const count = slot.preferenceCount ?? 0;
+                    const capacity = slot.courtCapacity ?? 1;
+                    const level = blocked ? "empty" : heatLevel(slot);
+                    return (
+                      <div
+                        key={`${slot.id}-heat`}
+                        title={
+                          blocked
+                            ? "Reservado fase intermedia"
+                            : preferenceDensityLabel(count, capacity)
+                        }
+                        aria-hidden
+                        className={cn(
+                          "h-3.5 min-w-10 rounded-sm border",
+                          blocked
+                            ? "border-zinc-300 bg-zinc-200/80 dark:border-zinc-700 dark:bg-zinc-800/60"
+                            : HEAT_CELL_CLASS[level],
+                        )}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="flex flex-nowrap gap-1.5">
+                  {daySlots?.map((slot) => {
+                    const clickable = isClickable(mode, slot, interactive);
+                    const titleParts = [
+                      STATUS_LABEL[slot.status],
+                      `${slot.startTime}–${slot.endTime}`,
+                      slot.blockReason === "knockout"
+                        ? "Reservado fase intermedia"
+                        : null,
+                    ].filter(Boolean);
 
-                return (
-                  <button
-                    key={slot.id}
-                    type="button"
-                    disabled={!clickable}
-                    title={titleParts.join(" · ")}
-                    aria-label={`${slot.startTime} ${STATUS_LABEL[slot.status]}`}
-                    onClick={() => clickable && onToggleSlot?.(slot)}
-                    className={cn(
-                      "flex h-10 min-w-10 flex-col items-center justify-center rounded-md border px-1.5 text-[10px] leading-tight transition-colors",
-                      cellClass(slot.status, slot.projectedPhase, slot.projectedSource),
-                      clickable && "cursor-pointer",
-                      !clickable && "cursor-default opacity-95",
-                    )}
-                  >
-                    <span className="font-semibold tabular-nums">
-                      {slot.startTime}
-                    </span>
-                  </button>
-                );
-              })}
+                    return (
+                      <button
+                        key={slot.id}
+                        type="button"
+                        disabled={!clickable}
+                        title={titleParts.join(" · ")}
+                        aria-label={`${slot.startTime} ${STATUS_LABEL[slot.status]}`}
+                        onClick={() => clickable && onToggleSlot?.(slot)}
+                        className={cn(
+                          "flex h-10 min-w-10 flex-col items-center justify-center rounded-md border px-1.5 text-[10px] leading-tight transition-colors",
+                          cellClass(slot.status),
+                          clickable && "cursor-pointer",
+                          !clickable && "cursor-default opacity-95",
+                        )}
+                      >
+                        <span className="font-semibold tabular-nums">
+                          {slot.startTime}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               {showDayActions && (
-                <>
+                <div className="flex gap-1.5">
                   <Button
                     type="button"
                     variant="outline"
@@ -387,7 +437,7 @@ export function SlotRuleGrid({
                   >
                     Desmarcar todas
                   </Button>
-                </>
+                </div>
               )}
               </div>
             </div>

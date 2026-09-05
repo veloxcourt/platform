@@ -26,7 +26,7 @@ export default async function PublicInscriptionPage({
 
   return (
     <main className="min-h-screen bg-muted/30 px-4 py-10">
-      <div className="mx-auto w-full max-w-xl space-y-6">
+      <div className="mx-auto w-full max-w-4xl space-y-6">
         <header className="flex items-start gap-3">
           {tournament.club.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -63,6 +63,9 @@ export default async function PublicInscriptionPage({
           <PublicInscriptionForm
             publicSlug={tournament.publicSlug}
             categories={tournament.categories}
+            config={tournament.config}
+            pickerCategories={tournament.pickerCategories}
+            preferenceReservations={tournament.preferenceReservations}
           />
         ) : (
           <p className="rounded-xl border bg-background p-4 text-sm text-muted-foreground">

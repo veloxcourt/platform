@@ -1,5 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { getClubProfile } from "@/modules/clubs/infrastructure/club-profile";
+import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
+import type {
+  SlotReservationItem,
+  TournamentCategoryItem,
+  TournamentConfig,
+} from "@/modules/tournaments/domain/types";
 
 function fromDbDate(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -22,6 +28,10 @@ export type PublicTournament = {
     currency: string;
   };
   categories: { id: string; name: string }[];
+  config: TournamentConfig | null;
+  pickerCategories: TournamentCategoryItem[];
+  /// Preferencias ya cargadas, sin nombres (solo para densidad horaria).
+  preferenceReservations: SlotReservationItem[];
 };
 
 export async function getPublicTournament(
@@ -40,6 +50,12 @@ export async function getPublicTournament(
   if (!tournament) return null;
 
   const profile = await getClubProfile(tournament.club.id);
+  const repo = getTournamentRepository();
+  const [config, pickerCategories, slotReservations] = await Promise.all([
+    repo.getTournamentConfig(tournament.club.id, tournament.id),
+    repo.listTournamentCategories(tournament.club.id, tournament.id),
+    repo.listSlotReservations(tournament.club.id, tournament.id),
+  ]);
 
   return {
     publicSlug: tournament.publicSlug,
@@ -61,5 +77,11 @@ export async function getPublicTournament(
       currency: tournament.club.currency,
     },
     categories: tournament.categories,
+    config,
+    pickerCategories: pickerCategories ?? [],
+    preferenceReservations: slotReservations.map((row) => ({
+      ...row,
+      pairLabel: "",
+    })),
   };
 }

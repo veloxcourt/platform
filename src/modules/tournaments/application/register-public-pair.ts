@@ -126,6 +126,30 @@ export async function registerPublicPair(
   });
   if (!result.ok) return { ok: false, error: result.error };
 
+  if (parsed.data.slots.length > 0) {
+    const prefs = await repo.replacePairSlotPreferences(
+      tournament.clubId,
+      tournament.id,
+      result.id,
+      { slots: parsed.data.slots },
+    );
+    if (!prefs.ok) {
+      console.error("[public-inscription] slot preferences", prefs.error);
+    }
+  }
+
+  if (parsed.data.zonesDayPreference !== "ANY") {
+    const prefs = await repo.updatePairZonesDayPreference(
+      tournament.clubId,
+      tournament.id,
+      result.id,
+      parsed.data.zonesDayPreference,
+    );
+    if (!prefs.ok) {
+      console.error("[public-inscription] day preference", prefs.error);
+    }
+  }
+
   revalidatePath(`/${tournament.club.slug}/torneos`);
   revalidatePath(`/${tournament.club.slug}/torneos/${tournament.id}`);
   revalidatePath(`/inscripcion/${tournament.publicSlug}`);

@@ -27,7 +27,7 @@ export function parseCategoryGenderFromName(
   return null;
 }
 
-function requiredPlayerGender(
+export function requiredPlayerGender(
   categoryGender: TournamentCategoryGender,
 ): Gender | null {
   if (
@@ -43,6 +43,14 @@ function requiredPlayerGender(
     return "MALE";
   }
   return null;
+}
+
+export function requiredGenderFromCategoryName(
+  categoryName: string,
+): Gender | null {
+  const categoryGender = parseCategoryGenderFromName(categoryName);
+  if (!categoryGender) return null;
+  return requiredPlayerGender(categoryGender);
 }
 
 export function isPlayerEligibleForCategory(

@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { GENDERS } from "@/modules/bookings/domain/new-player-schema";
 import { DEFAULT_PHONE_DIAL, normalizeToE164 } from "@/lib/phone";
+import { pairPreferenceSlotSchema } from "@/modules/tournaments/domain/slot-reservation-schema";
+import { zonesDayPreferenceSchema } from "@/modules/tournaments/domain/zones-day-preference";
 
 const playerSchema = z.object({
   firstName: z.string().trim().min(1, "Ingresá el nombre").max(60),
@@ -16,6 +18,8 @@ export const publicInscriptionSchema = z
     categoryId: z.string().min(1, "Elegí la categoría"),
     player1: playerSchema,
     player2: playerSchema,
+    zonesDayPreference: zonesDayPreferenceSchema.optional().default("ANY"),
+    slots: z.array(pairPreferenceSlotSchema).optional().default([]),
   })
   .superRefine((data, ctx) => {
     const phone1 = normalizeToE164(data.player1.phone, DEFAULT_PHONE_DIAL);
