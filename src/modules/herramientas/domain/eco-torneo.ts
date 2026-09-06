@@ -12,6 +12,7 @@ export const ECO_ENTRADA_CATEGORIES = [
 
 export const ECO_SALIDA_CATEGORIES = [
   "PREMIOS_PLATA",
+  "PREMIOS_PLATA_MANUAL",
   "REMUNERACION_AYUDANTE",
   "USO_CANCHAS",
   "PELOTAS",
@@ -64,9 +65,16 @@ export const ECO_CATEGORY_DEFS: Record<EcoCategory, EcoCategoryDef> = {
   },
   PREMIOS_PLATA: {
     key: "PREMIOS_PLATA",
-    label: "Premios plata",
+    label: "Premio Plata [%]",
     flow: "SALIDA",
     formula: "pct_inscripciones",
+  },
+  PREMIOS_PLATA_MANUAL: {
+    key: "PREMIOS_PLATA_MANUAL",
+    label: "Premio Plata [Manual]",
+    flow: "SALIDA",
+    formula: "valor",
+    valorLabel: "Importe",
   },
   REMUNERACION_AYUDANTE: {
     key: "REMUNERACION_AYUDANTE",
@@ -102,6 +110,12 @@ export const ECO_CATEGORY_DEFS: Record<EcoCategory, EcoCategoryDef> = {
     formula: "cantidad_x_valor",
     valorLabel: "Costo",
   },
+};
+
+export type EcoGroup = {
+  id: string;
+  name: string;
+  itemIds: string[];
 };
 
 export type EcoItem = {
@@ -213,6 +227,51 @@ export function cloneEcoItems(items: EcoItem[]): EcoItem[] {
   }));
 }
 
+export function nextGroupName(existingNames: string[]): string {
+  let n = existingNames.length + 1;
+  const used = new Set(existingNames.map((name) => name.trim().toLowerCase()));
+  while (used.has(`grupo ${n}`)) n += 1;
+  return `Grupo ${n}`;
+}
+
+export function createEcoGroup(
+  itemIds: string[],
+  existingNames: string[],
+  name?: string,
+): EcoGroup {
+  return {
+    id: crypto.randomUUID(),
+    name: (name?.trim() || nextGroupName(existingNames)).slice(0, 80),
+    itemIds: [...new Set(itemIds)],
+  };
+}
+
+export function cloneEcoGroups(
+  groups: EcoGroup[],
+  idMap: Map<string, string>,
+): EcoGroup[] {
+  return groups.map((group) => ({
+    id: crypto.randomUUID(),
+    name: group.name,
+    itemIds: group.itemIds
+      .map((id) => idMap.get(id))
+      .filter((id): id is string => Boolean(id)),
+  }));
+}
+
+export function cloneEcoPlanilla(
+  items: EcoItem[],
+  groups: EcoGroup[],
+): { items: EcoItem[]; groups: EcoGroup[] } {
+  const idMap = new Map<string, string>();
+  const nextItems = items.map((item) => {
+    const id = crypto.randomUUID();
+    idMap.set(item.id, id);
+    return { ...item, id };
+  });
+  return { items: nextItems, groups: cloneEcoGroups(groups, idMap) };
+}
+
 export function totalInscripcionesCents(items: EcoItem[]): number {
   let total = 0;
   for (const item of items) {
@@ -304,4 +363,17 @@ export function computePlanilla(items: EcoItem[]) {
     totalHaberCents,
     saldoCents: totalDebeCents - totalHaberCents,
   };
+}
+
+export function computeGroupSaldoCents(
+  group: EcoGroup,
+  lines: Array<{ item: EcoItem; debeCents: number; haberCents: number }>,
+): number {
+  const ids = new Set(group.itemIds);
+  let saldo = 0;
+  for (const line of lines) {
+    if (!ids.has(line.item.id)) continue;
+    saldo += line.debeCents - line.haberCents;
+  }
+  return saldo;
 }

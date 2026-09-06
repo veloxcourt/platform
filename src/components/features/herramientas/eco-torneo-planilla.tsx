@@ -1,22 +1,35 @@
 "use client";
 
-import { GripVertical, Plus, Trash2 } from "lucide-react";
+import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { saveSimulationItemsAction } from "@/app/(dashboard)/[clubSlug]/herramientas/eco-torneo/actions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { formatMoney, pesosToCents, centsToPesos } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import {
   ECO_CATEGORY_DEFS,
   categoriesForFlow,
+  computeGroupSaldoCents,
   computePlanilla,
+  createEcoGroup,
   createEcoItem,
+  nextGroupName,
   type EcoCategory,
   type EcoFlowType,
+  type EcoGroup,
   type EcoItem,
 } from "@/modules/herramientas/domain/eco-torneo";
 
@@ -46,20 +59,28 @@ export function EcoTorneoPlanilla({
   simulationId,
   currency = "ARS",
   initialItems,
+  initialGroups = [],
 }: {
   clubSlug: string;
   simulationId: string;
   currency?: string;
   initialItems: EcoItem[];
+  initialGroups?: EcoGroup[];
 }) {
   const [items, setItems] = useState<EcoItem[]>(initialItems);
+  const [groups, setGroups] = useState<EcoGroup[]>(initialGroups);
   const [addFlow, setAddFlow] = useState<EcoFlowType>("ENTRADA");
   const [addCategory, setAddCategory] = useState<EcoCategory>("INSCRIPCIONES");
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [groupNameDraft, setGroupNameDraft] = useState("");
+  const [groupItemIds, setGroupItemIds] = useState<string[]>([]);
 
   const itemsRef = useRef(items);
+  const groupsRef = useRef(groups);
   const dirtyRef = useRef(false);
   const skipNextSaveRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -69,7 +90,12 @@ export function EcoTorneoPlanilla({
   }, [items]);
 
   useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
+
+  useEffect(() => {
     setItems(initialItems);
+    setGroups(initialGroups);
     dirtyRef.current = false;
     skipNextSaveRef.current = true;
     setSaveStatus("idle");
@@ -86,8 +112,14 @@ export function EcoTorneoPlanilla({
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       const snapshot = itemsRef.current;
+      const groupsSnapshot = groupsRef.current;
       setSaveStatus("saving");
-      void saveSimulationItemsAction(clubSlug, simulationId, snapshot).then(
+      void saveSimulationItemsAction(
+        clubSlug,
+        simulationId,
+        snapshot,
+        groupsSnapshot,
+      ).then(
         (result) => {
           if (!result.ok) {
             setSaveStatus("error");
@@ -103,7 +135,7 @@ export function EcoTorneoPlanilla({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [items, clubSlug, simulationId]);
+  }, [items, groups, clubSlug, simulationId]);
 
   const planilla = computePlanilla(items);
 
@@ -132,6 +164,59 @@ export function EcoTorneoPlanilla({
 
   function removeItem(id: string) {
     setItems((prev) => prev.filter((item) => item.id !== id));
+    setGroups((prev) =>
+      prev.map((group) => ({
+        ...group,
+        itemIds: group.itemIds.filter((itemId) => itemId !== id),
+      })),
+    );
+  }
+
+  function openCreateGroup() {
+    setEditingGroupId(null);
+    setGroupNameDraft(nextGroupName(groups.map((group) => group.name)));
+    setGroupItemIds([]);
+    setGroupDialogOpen(true);
+  }
+
+  function openEditGroup(group: EcoGroup) {
+    setEditingGroupId(group.id);
+    setGroupNameDraft(group.name);
+    setGroupItemIds(group.itemIds.filter((id) => items.some((item) => item.id === id)));
+    setGroupDialogOpen(true);
+  }
+
+  function toggleGroupItem(id: string, checked: boolean) {
+    setGroupItemIds((prev) =>
+      checked ? [...new Set([...prev, id])] : prev.filter((itemId) => itemId !== id),
+    );
+  }
+
+  function confirmGroup() {
+    if (groupItemIds.length === 0) {
+      toast.error("Elegí al menos una fila para el grupo");
+      return;
+    }
+    const name = groupNameDraft.trim() || nextGroupName(groups.map((g) => g.name));
+    if (editingGroupId) {
+      setGroups((prev) =>
+        prev.map((group) =>
+          group.id === editingGroupId
+            ? { ...group, name, itemIds: groupItemIds }
+            : group,
+        ),
+      );
+    } else {
+      setGroups((prev) => [
+        ...prev,
+        createEcoGroup(groupItemIds, prev.map((group) => group.name), name),
+      ]);
+    }
+    setGroupDialogOpen(false);
+  }
+
+  function deleteGroup(id: string) {
+    setGroups((prev) => prev.filter((group) => group.id !== id));
   }
 
   function addItem() {
@@ -203,7 +288,9 @@ export function EcoTorneoPlanilla({
                   onDrop={(e) => onDropRow(item.id, e)}
                   className={cn(
                     "border-b last:border-b-0",
-                    item.enSaldo === false && "bg-muted/20",
+                    item.enSaldo === false
+                      ? "bg-red-50 dark:bg-red-950/40"
+                      : "bg-emerald-50 dark:bg-emerald-950/30",
                     isDragging && "opacity-50",
                     isOver && "border-t-2 border-t-primary",
                   )}
@@ -419,6 +506,54 @@ export function EcoTorneoPlanilla({
         </table>
       </div>
 
+      <div className="flex flex-wrap items-stretch gap-2">
+        <Button type="button" variant="outline" onClick={openCreateGroup}>
+          <Plus className="size-4" />
+          Crear Grupo
+        </Button>
+        {groups.map((group) => {
+          const saldo = computeGroupSaldoCents(group, planilla.lines);
+          return (
+            <div
+              key={group.id}
+              className="flex min-w-[11rem] items-center gap-2 rounded-lg border bg-background px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs text-muted-foreground">
+                  {group.name}
+                </p>
+                <p
+                  className={cn(
+                    "text-sm font-semibold tabular-nums",
+                    saldo < 0 && "text-destructive",
+                  )}
+                >
+                  {formatMoney(saldo, currency)}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Editar ${group.name}`}
+                onClick={() => openEditGroup(group)}
+              >
+                <Pencil className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Eliminar ${group.name}`}
+                onClick={() => deleteGroup(group.id)}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted-foreground">Tipo</label>
@@ -471,9 +606,100 @@ export function EcoTorneoPlanilla({
         Arrastrá el ícono ⋮⋮ para reordenar. La columna Saldo decide si el ítem
         entra en totales. Uso canchas es informativo (tilde off por defecto):{" "}
         {planilla.restoPct}% de{" "}
-        {formatMoney(planilla.inscripcionesTotalCents, currency)}. Doble clic en
-        la pestaña para renombrar. Los cambios se guardan solos.
+        {formatMoney(planilla.inscripcionesTotalCents, currency)}. Clic en la
+        pestaña activa para renombrar. Los cambios se guardan solos.
       </p>
+
+      <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {editingGroupId ? "Editar grupo" : "Crear grupo"}
+            </DialogTitle>
+            <DialogDescription>
+              Elegí las filas que suman y restan en el saldo del grupo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="eco-group-name">Nombre</Label>
+              <Input
+                id="eco-group-name"
+                value={groupNameDraft}
+                onChange={(event) => setGroupNameDraft(event.target.value)}
+                maxLength={80}
+              />
+            </div>
+            <div className="max-h-72 overflow-y-auto rounded-lg border">
+              {planilla.lines.length === 0 ? (
+                <p className="px-3 py-4 text-sm text-muted-foreground">
+                  No hay filas para agrupar.
+                </p>
+              ) : (
+                planilla.lines.map(({ item, debeCents, haberCents }) => {
+                  const def = ECO_CATEGORY_DEFS[item.category];
+                  const amount = debeCents - haberCents;
+                  return (
+                    <label
+                      key={item.id}
+                      className="flex cursor-pointer items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40"
+                    >
+                      <Checkbox
+                        checked={groupItemIds.includes(item.id)}
+                        onCheckedChange={(value) =>
+                          toggleGroupItem(item.id, value === true)
+                        }
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                          {def.label}
+                        </span>
+                        {item.observacion ? (
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {item.observacion}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span
+                        className={cn(
+                          "shrink-0 text-sm tabular-nums",
+                          amount < 0 && "text-destructive",
+                        )}
+                      >
+                        {formatMoney(amount, currency)}
+                      </span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            <p className="text-sm">
+              Saldo del grupo:{" "}
+              <span className="font-semibold tabular-nums">
+                {formatMoney(
+                  computeGroupSaldoCents(
+                    { id: "draft", name: "draft", itemIds: groupItemIds },
+                    planilla.lines,
+                  ),
+                  currency,
+                )}
+              </span>
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setGroupDialogOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button type="button" onClick={confirmGroup}>
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

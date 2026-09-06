@@ -17,7 +17,7 @@ import {
   DEFAULT_LIBRE_BORDER,
   DEFAULT_LIBRE_FILL,
 } from "../domain/calendario-torneos";
-import type { EcoItem } from "../domain/eco-torneo";
+import type { EcoGroup, EcoItem } from "../domain/eco-torneo";
 import { defaultEcoItems, nextSimulationName } from "../domain/eco-torneo";
 import type {
   EcoTorneoSimulationDetail,
@@ -63,6 +63,7 @@ function ensureClub(slug: string): ClubRecord {
                 sortOrder: 0,
                 updatedAt: new Date(),
                 items: defaultEcoItems(),
+                groups: [],
               },
             ]
           : [],
@@ -115,12 +116,18 @@ export class MockHerramientasRepository implements HerramientasRepository {
     const record = byClubId(clubId);
     if (!record) return null;
     const sim = record.simulations.find((s) => s.id === id);
-    return sim ? { ...sim, items: sim.items.map((i) => ({ ...i })) } : null;
+    return sim
+      ? {
+          ...sim,
+          items: sim.items.map((i) => ({ ...i })),
+          groups: sim.groups.map((g) => ({ ...g, itemIds: [...g.itemIds] })),
+        }
+      : null;
   }
 
   async createEcoTorneoSimulation(
     clubId: string,
-    input: { name: string; items: EcoItem[] },
+    input: { name: string; items: EcoItem[]; groups?: EcoGroup[] },
   ): Promise<EcoTorneoSimulationDetail> {
     const record = byClubId(clubId);
     if (!record) throw new Error("Club no encontrado");
@@ -133,9 +140,17 @@ export class MockHerramientasRepository implements HerramientasRepository {
       sortOrder,
       updatedAt: new Date(),
       items: input.items.map((i) => ({ ...i })),
+      groups: (input.groups ?? []).map((g) => ({
+        ...g,
+        itemIds: [...g.itemIds],
+      })),
     };
     record.simulations.push(created);
-    return { ...created, items: created.items.map((i) => ({ ...i })) };
+    return {
+      ...created,
+      items: created.items.map((i) => ({ ...i })),
+      groups: created.groups.map((g) => ({ ...g, itemIds: [...g.itemIds] })),
+    };
   }
 
   async updateEcoTorneoSimulationName(
@@ -149,21 +164,31 @@ export class MockHerramientasRepository implements HerramientasRepository {
     if (!sim) return null;
     sim.name = name;
     sim.updatedAt = new Date();
-    return { ...sim, items: sim.items.map((i) => ({ ...i })) };
+    return {
+      ...sim,
+      items: sim.items.map((i) => ({ ...i })),
+      groups: sim.groups.map((g) => ({ ...g, itemIds: [...g.itemIds] })),
+    };
   }
 
   async updateEcoTorneoSimulationItems(
     clubId: string,
     id: string,
     items: EcoItem[],
+    groups: EcoGroup[] = [],
   ): Promise<EcoTorneoSimulationDetail | null> {
     const record = byClubId(clubId);
     if (!record) return null;
     const sim = record.simulations.find((s) => s.id === id);
     if (!sim) return null;
     sim.items = items.map((i) => ({ ...i }));
+    sim.groups = groups.map((g) => ({ ...g, itemIds: [...g.itemIds] }));
     sim.updatedAt = new Date();
-    return { ...sim, items: sim.items.map((i) => ({ ...i })) };
+    return {
+      ...sim,
+      items: sim.items.map((i) => ({ ...i })),
+      groups: sim.groups.map((g) => ({ ...g, itemIds: [...g.itemIds] })),
+    };
   }
 
   async deleteEcoTorneoSimulation(

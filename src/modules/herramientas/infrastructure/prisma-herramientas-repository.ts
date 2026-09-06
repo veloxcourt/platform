@@ -20,8 +20,8 @@ import {
   DEFAULT_LIBRE_BORDER,
   DEFAULT_LIBRE_FILL,
 } from "../domain/calendario-torneos";
-import type { EcoItem } from "../domain/eco-torneo";
-import { ecoItemsSchema } from "../domain/eco-torneo-schema";
+import type { EcoGroup, EcoItem } from "../domain/eco-torneo";
+import { parseEcoPlanillaPayload } from "../domain/eco-torneo-schema";
 import type {
   EcoTorneoSimulationDetail,
   EcoTorneoSimulationListItem,
@@ -101,9 +101,8 @@ function toPlanned(row: {
   };
 }
 
-function parseItems(raw: unknown): EcoItem[] {
-  const parsed = ecoItemsSchema.safeParse(raw);
-  return parsed.success ? parsed.data : [];
+function planillaJson(items: EcoItem[], groups: EcoGroup[] = []) {
+  return { items, groups } as unknown as Prisma.InputJsonValue;
 }
 
 function toListItem(row: {
@@ -127,9 +126,11 @@ function toDetail(row: {
   updatedAt: Date;
   items: unknown;
 }): EcoTorneoSimulationDetail {
+  const planilla = parseEcoPlanillaPayload(row.items);
   return {
     ...toListItem(row),
-    items: parseItems(row.items),
+    items: planilla.items,
+    groups: planilla.groups,
   };
 }
 
@@ -165,7 +166,7 @@ export class PrismaHerramientasRepository implements HerramientasRepository {
 
   async createEcoTorneoSimulation(
     clubId: string,
-    input: { name: string; items: EcoItem[] },
+    input: { name: string; items: EcoItem[]; groups?: EcoGroup[] },
   ): Promise<EcoTorneoSimulationDetail> {
     const agg = await prisma.ecoTorneoSimulation.aggregate({
       where: { clubId },
@@ -176,7 +177,7 @@ export class PrismaHerramientasRepository implements HerramientasRepository {
       data: {
         clubId,
         name: input.name,
-        items: input.items as unknown as Prisma.InputJsonValue,
+        items: planillaJson(input.items, input.groups ?? []),
         sortOrder,
       },
     });
@@ -204,6 +205,7 @@ export class PrismaHerramientasRepository implements HerramientasRepository {
     clubId: string,
     id: string,
     items: EcoItem[],
+    groups: EcoGroup[] = [],
   ): Promise<EcoTorneoSimulationDetail | null> {
     const existing = await prisma.ecoTorneoSimulation.findFirst({
       where: { id, clubId },
@@ -212,7 +214,7 @@ export class PrismaHerramientasRepository implements HerramientasRepository {
     if (!existing) return null;
     const row = await prisma.ecoTorneoSimulation.update({
       where: { id },
-      data: { items: items as unknown as Prisma.InputJsonValue },
+      data: { items: planillaJson(items, groups) },
     });
     return toDetail(row);
   }

@@ -13,7 +13,7 @@ import type {
   CatalogCategory,
   PlannedTournament,
 } from "../domain/calendario-torneos";
-import type { EcoItem } from "../domain/eco-torneo";
+import type { EcoGroup, EcoItem } from "../domain/eco-torneo";
 import type {
   EcoTorneoSimulationDetail,
   EcoTorneoSimulationListItem,
@@ -40,7 +40,7 @@ export interface HerramientasRepository {
 
   createEcoTorneoSimulation(
     clubId: string,
-    input: { name: string; items: EcoItem[] },
+    input: { name: string; items: EcoItem[]; groups?: EcoGroup[] },
   ): Promise<EcoTorneoSimulationDetail>;
 
   updateEcoTorneoSimulationName(
@@ -53,6 +53,7 @@ export interface HerramientasRepository {
     clubId: string,
     id: string,
     items: EcoItem[],
+    groups?: EcoGroup[],
   ): Promise<EcoTorneoSimulationDetail | null>;
 
   deleteEcoTorneoSimulation(clubId: string, id: string): Promise<boolean>;

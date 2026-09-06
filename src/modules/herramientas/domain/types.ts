@@ -1,4 +1,4 @@
-import type { EcoItem } from "./eco-torneo";
+import type { EcoGroup, EcoItem } from "./eco-torneo";
 
 export type EcoTorneoSimulationListItem = {
   id: string;
@@ -9,4 +9,5 @@ export type EcoTorneoSimulationListItem = {
 
 export type EcoTorneoSimulationDetail = EcoTorneoSimulationListItem & {
   items: EcoItem[];
+  groups: EcoGroup[];
 };

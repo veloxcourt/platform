@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache";
 
 import { requireClubModuleAccess } from "@/lib/auth/access";
 import {
-  cloneEcoItems,
+  cloneEcoPlanilla,
   cloneSimulationName,
   defaultEcoItems,
   nextSimulationName,
 } from "@/modules/herramientas/domain/eco-torneo";
 import {
+  ecoGroupsSchema,
   ecoItemsSchema,
   ecoSimulationNameSchema,
 } from "@/modules/herramientas/domain/eco-torneo-schema";
@@ -57,9 +58,11 @@ export async function cloneSimulationAction(
   const source = await repo.getEcoTorneoSimulation(club.id, sourceId);
   if (!source) return { ok: false, error: "Simulación no encontrada" };
 
+  const cloned = cloneEcoPlanilla(source.items, source.groups ?? []);
   const created = await repo.createEcoTorneoSimulation(club.id, {
     name: cloneSimulationName(source.name),
-    items: cloneEcoItems(source.items),
+    items: cloned.items,
+    groups: cloned.groups,
   });
   revalidateEco(clubSlug);
   return { ok: true, data: { id: created.id } };
@@ -111,9 +114,11 @@ export async function saveSimulationItemsAction(
   clubSlug: string,
   id: string,
   items: unknown,
+  groups: unknown = [],
 ): Promise<Result> {
   const parsed = ecoItemsSchema.safeParse(items);
-  if (!parsed.success) {
+  const parsedGroups = ecoGroupsSchema.safeParse(groups);
+  if (!parsed.success || !parsedGroups.success) {
     return { ok: false, error: "Datos de planilla inválidos" };
   }
 
@@ -124,6 +129,7 @@ export async function saveSimulationItemsAction(
     club.id,
     id,
     parsed.data,
+    parsedGroups.data,
   );
   if (!updated) return { ok: false, error: "Simulación no encontrada" };
 

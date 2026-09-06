@@ -77,6 +77,7 @@ export function EcoTorneoView({
         simulationId={active.id}
         currency={currency}
         initialItems={active.items}
+        initialGroups={active.groups ?? []}
       />
     </div>
   );
@@ -189,13 +190,13 @@ function SimulationTab({
     <button
       type="button"
       onClick={() => {
-        if (!active) onSelect();
-      }}
-      onDoubleClick={(e) => {
-        e.preventDefault();
+        if (!active) {
+          onSelect();
+          return;
+        }
         setEditing(true);
       }}
-      title={href}
+      title={active ? "Clic para cambiar el nombre" : `Abrir ${simulation.name}`}
       className={cn(
         "mb-[-1px] inline-block max-w-[12rem] truncate border-b-2 px-3 py-2 text-sm font-medium transition-colors",
         active
