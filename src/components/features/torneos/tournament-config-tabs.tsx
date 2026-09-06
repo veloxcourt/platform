@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Layers, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,6 +18,11 @@ import type {
 } from "@/modules/tournaments/domain/types";
 import { StableTabButton } from "@/components/ui/stable-tab-button";
 import { copyCategoryPhaseConfigAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/configuracion/actions";
+import {
+  bindFieldMenuTrigger,
+  consumedHoldClick,
+  type MenuPoint,
+} from "./field-menu-trigger";
 import { TournamentCategoriesPanel } from "./tournament-categories-panel";
 import { TournamentConfigForm } from "./tournament-config-form";
 import { useTournamentReadOnly } from "./tournament-mode-context";
@@ -60,6 +65,7 @@ export function TournamentConfigTabs({
   const [menu, setMenu] = useState<CategoryContextMenuState | null>(null);
   const [isCopying, startCopy] = useTransition();
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuHoldRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (subTab === PARAMETERS_TAB || subTab === CATEGORIES_TAB) {
@@ -94,16 +100,11 @@ export function TournamentConfigTabs({
     };
   }, [menu]);
 
-  function openCategoryMenu(
-    event: ReactMouseEvent,
-    categoryId: string,
-  ) {
-    event.preventDefault();
-    event.stopPropagation();
+  function openCategoryMenu(point: MenuPoint, categoryId: string) {
     if (readOnly || categories.length < 2) return;
     setMenu({
-      x: event.clientX,
-      y: event.clientY,
+      x: point.x,
+      y: point.y,
       targetCategoryId: categoryId,
       submenu: "root",
     });
@@ -168,21 +169,32 @@ export function TournamentConfigTabs({
           <Layers />
           Categorías
         </StableTabButton>
-        {categories.map((category) => (
-          <StableTabButton
-            key={category.id}
-            active={subTab === category.id}
-            onSelect={() => setSubTab(category.id)}
-            onContextMenu={(event) => openCategoryMenu(event, category.id)}
-            title={
-              readOnly || categories.length < 2
-                ? undefined
-                : "Clic derecho: copiar configuración"
-            }
-          >
-            {category.name}
-          </StableTabButton>
-        ))}
+        {categories.map((category) => {
+          const canCopy = !readOnly && categories.length >= 2;
+          return (
+            <StableTabButton
+              key={category.id}
+              active={subTab === category.id}
+              onSelect={() => {
+                if (consumedHoldClick(menuHoldRef)) return;
+                setSubTab(category.id);
+              }}
+              {...bindFieldMenuTrigger(
+                canCopy,
+                (point) => openCategoryMenu(point, category.id),
+                menuHoldRef,
+              )}
+              title={
+                canCopy
+                  ? "Clic derecho o mantené 2 s (tablet/celular): copiar configuración"
+                  : undefined
+              }
+              className={canCopy ? "select-none" : undefined}
+            >
+              {category.name}
+            </StableTabButton>
+          );
+        })}
       </div>
         </div>
       </div>

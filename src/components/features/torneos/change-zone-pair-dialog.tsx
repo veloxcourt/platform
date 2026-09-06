@@ -58,8 +58,8 @@ export function ChangeZonePairDialog({
         <DialogHeader>
           <DialogTitle>Cambiar pareja</DialogTitle>
           <DialogDescription>
-            Reemplazá {currentPairLabel} en {zoneLabel}. Elegí cualquier pareja
-            de la categoría.
+            Reemplazá {currentPairLabel} en {zoneLabel}. Elegí una pareja
+            Parcial o Confirmado de la categoría.
           </DialogDescription>
         </DialogHeader>
 

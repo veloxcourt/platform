@@ -4,11 +4,12 @@ import { useMemo, useState } from "react";
 
 import {
   Card,
+  CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CALENDAR_PALETTE } from "@/modules/herramientas/domain/calendario-torneos";
 import { formatAbbreviatedPairLabel } from "@/lib/person-name";
@@ -306,16 +307,25 @@ export function IntermediateMatchRulePanel({
     <Card>
       <CardHeader>
         <CardTitle>Regla de partidos</CardTitle>
-        <CardDescription>
-          Días y canchas de la fase intermedia. Después de{" "}
-          <span className="font-medium text-foreground">Actualizar</span> se
-          pintan los partidos en el penúltimo día.{" "}
-          <span className="font-medium text-foreground">
-            Incluir partidos de Zona
-          </span>{" "}
-          agrega los que anteceden. Al pasar el mouse o hacer clic se ven los
-          cruces.
-        </CardDescription>
+        <CardAction>
+          <AyudaButton
+            title="Ayuda de regla de partidos"
+            description="Cómo leer la grilla de fase intermedia."
+          >
+            <p>
+              Días y canchas de la fase intermedia. Después de{" "}
+              <span className="font-medium text-foreground">Actualizar</span> se
+              pintan los partidos en el penúltimo día.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">
+                Incluir partidos de Zona
+              </span>{" "}
+              agrega los que anteceden. Al pasar el mouse o hacer clic se ven
+              los cruces.
+            </p>
+          </AyudaButton>
+        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

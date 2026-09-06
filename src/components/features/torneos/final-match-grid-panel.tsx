@@ -6,10 +6,10 @@ import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type {
   PairListItem,
@@ -65,14 +65,6 @@ export function FinalMatchGridPanel({
     <Card>
       <CardHeader>
         <CardTitle>Grilla</CardTitle>
-        <CardDescription>
-          Orden de los cruces de fase final. Día, horario y cancha salen de
-          Actualizar.{" "}
-          <span className="font-medium text-foreground">
-            Incluir fases anteriores
-          </span>{" "}
-          arma la grilla completa.
-        </CardDescription>
         <CardAction>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <label className="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
@@ -98,6 +90,21 @@ export function FinalMatchGridPanel({
               rows={pdfRows}
               groupColumnLabel={groupColumnLabel}
             />
+            <AyudaButton
+              title="Ayuda de grilla"
+              description="Cómo se ordenan los cruces de fase final."
+            >
+              <p>
+                Orden de los cruces de fase final. Día, horario y cancha salen
+                de Actualizar.
+              </p>
+              <p>
+                <span className="font-medium text-foreground">
+                  Incluir fases anteriores
+                </span>{" "}
+                arma la grilla completa.
+              </p>
+            </AyudaButton>
           </div>
         </CardAction>
       </CardHeader>

@@ -68,7 +68,9 @@ export default async function TorneoZonasCategoriaPage({
       <FixtureEditModePage
         clubSlug={clubSlug}
         tournamentId={tournamentId}
-        initialMode={data.tournament.fixtureEditMode}
+        categoryId={categoryId}
+        categoryName={category.name}
+        initialModes={data.tournament.fixtureEditModes}
       >
         <TournamentZonesPanel
           clubSlug={clubSlug}

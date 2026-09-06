@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -11,6 +12,7 @@ import {
   resultColumnsForFormat,
   type ZoneResultColumn,
 } from "@/modules/tournaments/domain/zone-bracket";
+import { ScoreTapPicker } from "./score-tap-picker";
 
 const SELECT_CLASS =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-background px-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -18,7 +20,7 @@ const SELECT_CLASS =
 const COURT_SELECT_CLASS = `${SELECT_CLASS} text-center [text-align-last:center]`;
 
 const SCORE_CLASS =
-  "h-8 w-10 rounded-lg border border-input bg-muted/40 px-1 text-center text-xs tabular-nums outline-none";
+  "h-8 w-10 select-none rounded-lg border border-input bg-muted/40 px-1 text-center text-xs tabular-nums outline-none disabled:opacity-60";
 
 function ResultHeader({ columns }: { columns: ZoneResultColumn[] }) {
   const groups: { group: string; cols: ZoneResultColumn[] }[] = [];
@@ -95,6 +97,14 @@ export function IntermediateRoundCard({
   resolveLabel?: (label: string) => string;
 }) {
   const columns = resultColumnsForFormat(matchFormat);
+  const [scorePicker, setScorePicker] = useState<{
+    officialId: number;
+    startKey: string;
+  } | null>(null);
+  const scoreLocked = scoresReadOnly || !onScoreChange;
+  const pickerCrossing = scorePicker
+    ? crossings.find((crossing) => crossing.id === scorePicker.officialId)
+    : null;
   const hasUnscheduled = crossings.some((crossing) => {
     const schedule = scheduleByOfficialId?.get(crossing.id);
     return !schedule?.playDate || !schedule.startTime;
@@ -274,23 +284,25 @@ export function IntermediateRoundCard({
                 <td className="py-1.5 align-middle">
                   <div className="flex justify-end gap-0.5">
                     {columns.map((col) => (
-                      <input
+                      <button
                         key={col.key}
-                        className={cn(SCORE_CLASS)}
-                        disabled={scoresReadOnly || !onScoreChange}
-                        readOnly={scoresReadOnly || !onScoreChange}
-                        value={
-                          scoresByOfficialId?.get(crossing.id)?.[col.key] ?? ""
-                        }
-                        onChange={(event) =>
-                          onScoreChange?.(
-                            crossing.id,
-                            col.key,
-                            event.target.value,
-                          )
+                        type="button"
+                        className={cn(
+                          SCORE_CLASS,
+                          !scoreLocked && "cursor-pointer bg-background",
+                        )}
+                        disabled={scoreLocked}
+                        onClick={() =>
+                          setScorePicker({
+                            officialId: crossing.id,
+                            startKey: col.key,
+                          })
                         }
                         aria-label={`${col.group ?? ""} ${col.label} partido ${index + 1}`}
-                      />
+                      >
+                        {scoresByOfficialId?.get(crossing.id)?.[col.key] ||
+                          "–"}
+                      </button>
                     ))}
                   </div>
                 </td>
@@ -300,6 +312,26 @@ export function IntermediateRoundCard({
           </tbody>
         </table>
       </div>
+
+      {scorePicker && pickerCrossing ? (
+        <ScoreTapPicker
+          open
+          format={matchFormat}
+          columns={columns}
+          scores={scoresByOfficialId?.get(pickerCrossing.id) ?? {}}
+          startKey={scorePicker.startKey}
+          pair1Label={
+            resolveLabel?.(pickerCrossing.left) ?? pickerCrossing.left
+          }
+          pair2Label={
+            resolveLabel?.(pickerCrossing.right) ?? pickerCrossing.right
+          }
+          onChange={(key, value) =>
+            onScoreChange?.(pickerCrossing.id, key, value)
+          }
+          onClose={() => setScorePicker(null)}
+        />
+      ) : null}
     </div>
   );
 }

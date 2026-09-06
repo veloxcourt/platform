@@ -5,7 +5,10 @@ import type {
 } from "../application/tournament-repository";
 import type { AddPairValues, UpdatePairValues } from "../domain/pair-schema";
 import { derivePairPaymentStatus } from "../domain/pair-payment";
-import { derivePairRegistrationStatus } from "../domain/pair-confirmation";
+import {
+  derivePairRegistrationStatus,
+  isPairEligibleForZones,
+} from "../domain/pair-confirmation";
 import {
   isPlayerEligibleForCategory,
   parseCategoryGenderFromName,
@@ -52,14 +55,17 @@ import {
   type ZonesDayPreference,
 } from "../domain/zones-day-preference";
 import {
-  parseFixtureEditMode,
+  fixtureEditModeForCategory,
+  parseFixtureEditModes,
   type FixtureEditMode,
+  type FixtureEditModes,
 } from "../domain/fixture-edit-mode";
 import {
   buildZonesFixture,
   reservedSlotsFromOtherFixtures,
   type FixturePairInput,
 } from "../domain/build-zones-fixture";
+import { reshapeZonesForManualUpdate } from "../domain/reshape-zones-manual";
 import {
   carryZoneScores,
   mergeZoneDraftScores,
@@ -114,6 +120,7 @@ function fromDbDate(date: Date): string {
 let intermediateFixtureColumnReady = false;
 let finalFixtureColumnReady = false;
 let fixtureEditModeColumnReady = false;
+let fixtureEditModesColumnReady = false;
 
 async function ensureFixtureEditModeColumn() {
   if (fixtureEditModeColumnReady) return;
@@ -123,13 +130,38 @@ async function ensureFixtureEditModeColumn() {
   fixtureEditModeColumnReady = true;
 }
 
-async function readFixtureEditMode(tournamentId: string): Promise<FixtureEditMode> {
+async function ensureFixtureEditModesColumn() {
+  if (fixtureEditModesColumnReady) return;
   await ensureFixtureEditModeColumn();
-  const rows = await prisma.$queryRawUnsafe<Array<{ fixtureEditMode: string }>>(
-    `SELECT "fixtureEditMode" FROM "tournaments" WHERE "id" = $1`,
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "tournaments" ADD COLUMN IF NOT EXISTS "fixtureEditModes" JSONB`,
+  );
+  fixtureEditModesColumnReady = true;
+}
+
+async function readFixtureEditModes(
+  tournamentId: string,
+): Promise<FixtureEditModes> {
+  await ensureFixtureEditModesColumn();
+  const rows = await prisma.$queryRawUnsafe<
+    Array<{ fixtureEditMode: string; fixtureEditModes: unknown }>
+  >(
+    `SELECT "fixtureEditMode", "fixtureEditModes" FROM "tournaments" WHERE "id" = $1`,
     tournamentId,
   );
-  return parseFixtureEditMode(rows[0]?.fixtureEditMode);
+  return parseFixtureEditModes(
+    rows[0]?.fixtureEditModes,
+    [],
+    rows[0]?.fixtureEditMode,
+  );
+}
+
+async function readFixtureEditMode(
+  tournamentId: string,
+  categoryId: string,
+): Promise<FixtureEditMode> {
+  const modes = await readFixtureEditModes(tournamentId);
+  return fixtureEditModeForCategory(modes, categoryId);
 }
 
 async function ensureIntermediateFixtureColumn() {
@@ -228,6 +260,8 @@ function mapCategory(
       status: string;
       player2Id?: string | null;
       zoneLabel?: string | null;
+      player1Confirmed?: boolean;
+      player2Confirmed?: boolean;
     }[];
   },
 ): TournamentCategoryItem {
@@ -242,7 +276,15 @@ function mapCategory(
     pairCount: activePairs.length,
     confirmedCount: activePairs.filter((p) => p.status === "CONFIRMED").length,
     withoutPartnerCount: activePairs.filter((p) => !p.player2Id).length,
-    withoutZoneCount: activePairs.filter((p) => !p.zoneLabel).length,
+    withoutZoneCount: activePairs.filter(
+      (p) =>
+        isPairEligibleForZones({
+          status: p.status as RegistrationStatus,
+          hasPartner: Boolean(p.player2Id),
+          player1Confirmed: Boolean(p.player1Confirmed),
+          player2Confirmed: Boolean(p.player2Confirmed),
+        }) && !p.zoneLabel,
+    ).length,
     simulationEnabled: row.simulationEnabled ?? false,
     simulationConfirmedCount: row.simulationConfirmedCount ?? null,
   };
@@ -254,7 +296,13 @@ const CATEGORY_INCLUDE = {
   },
   pairs: {
     where: { status: { not: "CANCELLED" as const } },
-    select: { status: true, player2Id: true, zoneLabel: true },
+    select: {
+      status: true,
+      player2Id: true,
+      zoneLabel: true,
+      player1Confirmed: true,
+      player2Confirmed: true,
+    },
   },
 } as const;
 
@@ -544,7 +592,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
       endDate: row.endDate ? fromDbDate(row.endDate) : null,
       fee: row.fee,
       publicSlug: row.publicSlug,
-      fixtureEditMode: await readFixtureEditMode(row.id),
+      fixtureEditModes: await readFixtureEditModes(row.id),
       categories: row.categories.map(mapCategory),
       pairs: row.pairs.map(mapPair),
       slotReservations: await this.listSlotReservations(clubId, tournamentId),
@@ -1311,6 +1359,64 @@ export class PrismaTournamentRepository implements TournamentRepository {
       : { ok: false, error: "Pareja no encontrada" };
   }
 
+  async setPairsConfirmation(
+    clubId: string,
+    tournamentId: string,
+    pairIds: string[],
+    confirmed: boolean,
+  ): Promise<MutationResult> {
+    const uniqueIds = [...new Set(pairIds.filter(Boolean))];
+    if (uniqueIds.length === 0) return { ok: true };
+
+    const pairs = await prisma.tournamentPair.findMany({
+      where: {
+        id: { in: uniqueIds },
+        tournamentId,
+        tournament: { clubId },
+        status: { not: "CANCELLED" },
+      },
+      select: { id: true, player2Id: true },
+    });
+    if (pairs.length === 0) {
+      return { ok: false, error: "Parejas no encontradas" };
+    }
+
+    const withPartnerIds = pairs
+      .filter((pair) => pair.player2Id)
+      .map((pair) => pair.id);
+    const withoutPartnerIds = pairs
+      .filter((pair) => !pair.player2Id)
+      .map((pair) => pair.id);
+
+    await prisma.$transaction([
+      ...(withPartnerIds.length
+        ? [
+            prisma.tournamentPair.updateMany({
+              where: { id: { in: withPartnerIds }, tournament: { clubId } },
+              data: {
+                player1Confirmed: confirmed,
+                player2Confirmed: confirmed,
+                status: confirmed ? "CONFIRMED" : "PENDING",
+              },
+            }),
+          ]
+        : []),
+      ...(withoutPartnerIds.length
+        ? [
+            prisma.tournamentPair.updateMany({
+              where: { id: { in: withoutPartnerIds }, tournament: { clubId } },
+              data: {
+                player1Confirmed: confirmed,
+                player2Confirmed: false,
+                status: "PENDING",
+              },
+            }),
+          ]
+        : []),
+    ]);
+    return { ok: true };
+  }
+
   async updatePairZonesDayPreference(
     clubId: string,
     tournamentId: string,
@@ -1670,7 +1776,11 @@ export class PrismaTournamentRepository implements TournamentRepository {
     if (!categoryConfig) {
       return { ok: false, error: "Configuración de categoría no encontrada" };
     }
-    if (categoryConfig.phases.zones.playDates.length === 0) {
+    const zoneMode = await readFixtureEditMode(tournamentId, categoryId);
+    if (
+      zoneMode === "AUTO" &&
+      categoryConfig.phases.zones.playDates.length === 0
+    ) {
       return {
         ok: false,
         error: "Asigná días a la fase de zonas en Configuración",
@@ -1683,6 +1793,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
         categoryId,
         status: { not: "CANCELLED" },
         player2Id: { not: null },
+        OR: [{ player1Confirmed: true }, { player2Confirmed: true }],
       },
       select: {
         id: true,
@@ -1694,7 +1805,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     if (pairs.length === 0) {
       return {
         ok: false,
-        error: "No hay parejas con compañero para armar zonas",
+        error: "No hay parejas Parcial o Confirmado para armar zonas",
       };
     }
 
@@ -1736,25 +1847,28 @@ export class PrismaTournamentRepository implements TournamentRepository {
       categoryConfig.phases.zones.matchDurationMin +
       categoryConfig.intervalMin;
 
-    if ((await readFixtureEditMode(tournamentId)) === "MANUAL") {
-      return {
-        ok: false,
-        error: "Pasá a Modo Automático para actualizar el armado",
-      };
-    }
-
-    const result = buildZonesFixture({
-      pairs: fixturePairs,
-      pairsPerZone: categoryConfig.pairsPerZone || 3,
-      playDays: config.playDays,
-      zonesPlayDates: categoryConfig.phases.zones.playDates,
-      courtCount: Math.max(1, config.courtCount || tournament.courtCount || 1),
-      slotMinutes: Math.max(1, slotMinutes),
-      reservedSlots: reservedSlotsFromOtherFixtures(
-        config.categories,
-        categoryId,
-      ),
-    });
+    const result =
+      zoneMode === "MANUAL"
+        ? reshapeZonesForManualUpdate({
+            previous: categoryConfig.zonesFixture,
+            pairIds: fixturePairs.map((pair) => pair.id),
+            pairsPerZone: categoryConfig.pairsPerZone || 3,
+          })
+        : buildZonesFixture({
+            pairs: fixturePairs,
+            pairsPerZone: categoryConfig.pairsPerZone || 3,
+            playDays: config.playDays,
+            zonesPlayDates: categoryConfig.phases.zones.playDates,
+            courtCount: Math.max(
+              1,
+              config.courtCount || tournament.courtCount || 1,
+            ),
+            slotMinutes: Math.max(1, slotMinutes),
+            reservedSlots: reservedSlotsFromOtherFixtures(
+              config.categories,
+              categoryId,
+            ),
+          });
 
     const persisted = carryZoneScores(
       categoryConfig.zonesFixture,
@@ -1820,10 +1934,15 @@ export class PrismaTournamentRepository implements TournamentRepository {
       select: { id: true, courtCount: true },
     });
     if (!tournament) return { ok: false, error: "Torneo no encontrado" };
-    if ((await readFixtureEditMode(tournamentId)) === "MANUAL") {
+    const intermediateModes = await readFixtureEditModes(tournamentId);
+    if (
+      categoryId &&
+      fixtureEditModeForCategory(intermediateModes, categoryId) === "MANUAL"
+    ) {
       return {
         ok: false,
-        error: "Pasá a Modo Automático para actualizar el armado",
+        error:
+          "Pasá a Modo Automático en esta categoría para actualizar el armado",
       };
     }
 
@@ -1881,27 +2000,38 @@ export class PrismaTournamentRepository implements TournamentRepository {
         }),
       );
 
-    const builderCategories = categoryId
-      ? allBuilderCategories.filter((item) => item.categoryId === categoryId)
-      : allBuilderCategories;
+    const builderCategories = allBuilderCategories.filter((item) => {
+      if (categoryId && item.categoryId !== categoryId) return false;
+      if (
+        !categoryId &&
+        fixtureEditModeForCategory(intermediateModes, item.categoryId) ===
+          "MANUAL"
+      ) {
+        return false;
+      }
+      return true;
+    });
 
     if (builderCategories.length === 0) {
       return {
         ok: false,
         error: categoryId
           ? "Esta categoría no tiene fase intermedia para armar"
-          : "Ninguna categoría tiene fase intermedia para armar",
+          : "Ninguna categoría en Modo Automático tiene fase intermedia para armar",
       };
     }
 
-    const reservedMatches = categoryId
-      ? config.categories
-          .filter((item) => item.categoryId !== categoryId)
-          .flatMap((item) => [
-            ...(item.zonesFixture?.zones.flatMap((zone) => zone.matches) ?? []),
-            ...knockoutFixtureStamps(item.intermediateFixture),
-          ])
-      : [];
+    const reservedMatches = config.categories
+      .filter((item) =>
+        categoryId
+          ? item.categoryId !== categoryId
+          : fixtureEditModeForCategory(intermediateModes, item.categoryId) ===
+            "MANUAL",
+      )
+      .flatMap((item) => [
+        ...(item.zonesFixture?.zones.flatMap((zone) => zone.matches) ?? []),
+        ...knockoutFixtureStamps(item.intermediateFixture),
+      ]);
 
     const slotMinutes = Math.max(
       60,
@@ -1995,10 +2125,15 @@ export class PrismaTournamentRepository implements TournamentRepository {
       select: { id: true, courtCount: true },
     });
     if (!tournament) return { ok: false, error: "Torneo no encontrado" };
-    if ((await readFixtureEditMode(tournamentId)) === "MANUAL") {
+    const finalModes = await readFixtureEditModes(tournamentId);
+    if (
+      categoryId &&
+      fixtureEditModeForCategory(finalModes, categoryId) === "MANUAL"
+    ) {
       return {
         ok: false,
-        error: "Pasá a Modo Automático para actualizar el armado",
+        error:
+          "Pasá a Modo Automático en esta categoría para actualizar el armado",
       };
     }
 
@@ -2056,28 +2191,38 @@ export class PrismaTournamentRepository implements TournamentRepository {
         }),
       );
 
-    const builderCategories = categoryId
-      ? allBuilderCategories.filter((item) => item.categoryId === categoryId)
-      : allBuilderCategories;
+    const builderCategories = allBuilderCategories.filter((item) => {
+      if (categoryId && item.categoryId !== categoryId) return false;
+      if (
+        !categoryId &&
+        fixtureEditModeForCategory(finalModes, item.categoryId) === "MANUAL"
+      ) {
+        return false;
+      }
+      return true;
+    });
 
     if (builderCategories.length === 0) {
       return {
         ok: false,
         error: categoryId
           ? "Esta categoría no tiene fase final para armar"
-          : "Ninguna categoría tiene fase final para armar",
+          : "Ninguna categoría en Modo Automático tiene fase final para armar",
       };
     }
 
-    const reservedMatches = categoryId
-      ? config.categories
-          .filter((item) => item.categoryId !== categoryId)
-          .flatMap((item) => [
-            ...(item.zonesFixture?.zones.flatMap((zone) => zone.matches) ?? []),
-            ...knockoutFixtureStamps(item.intermediateFixture),
-            ...knockoutFixtureStamps(item.finalFixture),
-          ])
-      : [];
+    const reservedMatches = config.categories
+      .filter((item) =>
+        categoryId
+          ? item.categoryId !== categoryId
+          : fixtureEditModeForCategory(finalModes, item.categoryId) ===
+            "MANUAL",
+      )
+      .flatMap((item) => [
+        ...(item.zonesFixture?.zones.flatMap((zone) => zone.matches) ?? []),
+        ...knockoutFixtureStamps(item.intermediateFixture),
+        ...knockoutFixtureStamps(item.finalFixture),
+      ]);
 
     const slotMinutes = Math.max(
       60,
@@ -2153,21 +2298,22 @@ export class PrismaTournamentRepository implements TournamentRepository {
     };
   }
 
-  async getFixtureEditMode(
+  async getFixtureEditModes(
     clubId: string,
     tournamentId: string,
-  ): Promise<FixtureEditMode | null> {
+  ): Promise<FixtureEditModes | null> {
     const tournament = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId, type: "ZONAS" },
       select: { id: true },
     });
     if (!tournament) return null;
-    return readFixtureEditMode(tournament.id);
+    return readFixtureEditModes(tournament.id);
   }
 
   async setFixtureEditMode(
     clubId: string,
     tournamentId: string,
+    categoryId: string,
     mode: FixtureEditMode,
   ): Promise<MutationResult> {
     const tournament = await prisma.tournament.findFirst({
@@ -2175,10 +2321,11 @@ export class PrismaTournamentRepository implements TournamentRepository {
       select: { id: true },
     });
     if (!tournament) return { ok: false, error: "Torneo no encontrado" };
-    await ensureFixtureEditModeColumn();
+    const current = await readFixtureEditModes(tournament.id);
+    const next = { ...current, [categoryId]: mode };
     await prisma.$executeRawUnsafe(
-      `UPDATE "tournaments" SET "fixtureEditMode" = $1 WHERE "id" = $2`,
-      mode,
+      `UPDATE "tournaments" SET "fixtureEditModes" = $1::jsonb WHERE "id" = $2`,
+      JSON.stringify(next),
       tournamentId,
     );
     return { ok: true };
@@ -2190,8 +2337,9 @@ export class PrismaTournamentRepository implements TournamentRepository {
     categoryId: string,
     draft: ZonesFixtureDraftInput,
   ): Promise<MutationResult> {
-    const mode = await this.getFixtureEditMode(clubId, tournamentId);
-    if (!mode) return { ok: false, error: "Torneo no encontrado" };
+    const modes = await this.getFixtureEditModes(clubId, tournamentId);
+    if (!modes) return { ok: false, error: "Torneo no encontrado" };
+    const mode = fixtureEditModeForCategory(modes, categoryId);
 
     const config = await this.getTournamentConfig(clubId, tournamentId);
     const category = config?.categories.find(
@@ -2251,8 +2399,9 @@ export class PrismaTournamentRepository implements TournamentRepository {
     phase: KnockoutFixturePhase,
     fixture: IntermediateFixturePersisted,
   ): Promise<MutationResult> {
-    const mode = await this.getFixtureEditMode(clubId, tournamentId);
-    if (!mode) return { ok: false, error: "Torneo no encontrado" };
+    const modes = await this.getFixtureEditModes(clubId, tournamentId);
+    if (!modes) return { ok: false, error: "Torneo no encontrado" };
+    const mode = fixtureEditModeForCategory(modes, categoryId);
     const config = await this.getTournamentConfig(clubId, tournamentId);
     const category = config?.categories.find(
       (item) => item.categoryId === categoryId,
@@ -2417,7 +2566,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
       endDate,
       courtCount: Math.max(1, tournament.courtCount),
       playDays,
-      fixtureEditMode: await readFixtureEditMode(tournament.id),
+      fixtureEditModes: await readFixtureEditModes(tournament.id),
       categories: tournament.categories.map((category) => {
         const settings = category.settings
           ? {

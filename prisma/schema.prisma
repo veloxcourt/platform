@@ -463,6 +463,8 @@ model Tournament {
   courtCount           Int              @default(1)
   /// AUTO: Actualizar genera el fixture. MANUAL: se edita a mano y Actualizar queda bloqueada.
   fixtureEditMode      String           @default("AUTO")
+  /// AUTO/MANUAL por categoría: { [categoryId]: "AUTO" | "MANUAL" }. Si es null, se usa fixtureEditMode.
+  fixtureEditModes     Json?
   /// Slug p?blico para el link de inscripci?n (?nico por club).
   publicSlug           String
   registrationOpensAt  DateTime?

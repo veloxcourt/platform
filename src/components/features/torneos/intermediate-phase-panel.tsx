@@ -2,18 +2,17 @@
 
 import { useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { GitBranch, RefreshCw } from "lucide-react";
+import { GitBranch } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { formatWeekday } from "@/lib/date";
 import { buildIntermediateFixtureAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 import {
@@ -27,8 +26,10 @@ import type {
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
 import { IntermediateRoundCard } from "./intermediate-round-card";
-import { ActualizarHoverHint } from "./actualizar-hover-hint";
+import { ActualizarConfirmButton } from "./actualizar-confirm-button";
+import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import { useFixtureEditMode } from "./fixture-edit-mode-context";
+import { buildActualizarConfirmCopy } from "@/modules/tournaments/domain/fixture-edit-mode";
 import { GrillaPdfMenu } from "./grilla-pdf-menu";
 import {
   buildIntermediateMatchGridRows,
@@ -57,7 +58,7 @@ export function IntermediatePhasePanel({
 }) {
   const router = useRouter();
   const readOnly = useTournamentReadOnly();
-  const { isManual } = useFixtureEditMode();
+  const { isManual, modes } = useFixtureEditMode(categoryId);
   const [isPending, startTransition] = useTransition();
   const category = categories.find((item) => item.id === categoryId) ?? null;
   const settings = intermediatePhaseSettings(config, categoryId);
@@ -187,64 +188,85 @@ export function IntermediatePhasePanel({
           <GitBranch className="size-4 text-muted-foreground" />
           Fase Intermedia{category ? ` · ${category.name}` : ""}
         </CardTitle>
-        <CardDescription>
-          Llave oficial {regulation}. Los cruces usan los puestos de zona (1° A,
-          2° B).{" "}
-          <span className="font-medium text-foreground">Actualizar</span>{" "}
-          asigna día, horario y cancha según las reglas de intermedia. En
-            Modo Manual podés cambiar el orden de los partidos. Los
-            resultados se guardan solos.
-            {!hasFixture ? " Todavía no hay un armado guardado." : null}
-        </CardDescription>
         <CardAction>
           <div className="flex flex-wrap items-center justify-end gap-2">
           {!readOnly && (
-            <ActualizarHoverHint
-              heading={
-                isManual
-                  ? "Actualizar está bloqueada en Modo Manual"
-                  : hasFixture
-                    ? "Vuelve a armar la intermedia de esta categoría"
-                    : "Arma la intermedia de esta categoría"
-              }
-              effects={
-                isManual
-                  ? [
-                      "En Manual no se regeneran los cruces",
-                      "Podés cambiar el orden de los partidos con las flechas",
-                    ]
-                  : [
-                      "Recalcula día, horario y cancha de esta categoría",
-                      "No toca las otras categorías",
-                      "También rearma la final de esta categoría",
-                    ]
-              }
-              note={
-                isManual
-                  ? "Pasá a Modo Automático si querés volver a generar."
-                  : hasFixture
-                    ? "Pisa los ajustes de esta categoría. El Actualizar de arriba rearma todas."
-                    : "Programa los cruces de esta categoría según las reglas de intermedia."
-              }
-            >
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleActualizar}
-                disabled={isPending || isManual}
-              >
-                <RefreshCw
-                  className={`size-4 ${isPending ? "animate-spin" : ""}`}
-                />
-                Actualizar
-              </Button>
-            </ActualizarHoverHint>
+            <>
+              <FixtureEditModeSelect
+                clubSlug={clubSlug}
+                tournamentId={tournamentId}
+                categoryId={categoryId}
+                categoryName={category?.name}
+              />
+              <ActualizarConfirmButton
+                pending={isPending}
+                disabled={isManual}
+                heading={
+                  isManual
+                    ? "Actualizar está bloqueada en Modo Manual"
+                    : hasFixture
+                      ? "Vuelve a armar la intermedia de esta categoría"
+                      : "Arma la intermedia de esta categoría"
+                }
+                effects={
+                  isManual
+                    ? [
+                        "En Manual no se regeneran los cruces",
+                        "Podés cambiar el orden de los partidos con las flechas",
+                      ]
+                    : buildActualizarConfirmCopy({
+                        phase: "intermediate",
+                        scope: "category",
+                        modes,
+                        categories: categories.map((item) => ({
+                          id: item.id,
+                          name: item.name,
+                        })),
+                        categoryId,
+                      }).affects
+                }
+                note={
+                  isManual
+                    ? "Pasá a Modo Automático en esta categoría si querés volver a generar."
+                    : hasFixture
+                      ? "Pisa los ajustes de esta categoría. No toca las zonas."
+                      : "Programa los cruces de esta categoría según las reglas de intermedia."
+                }
+                confirm={buildActualizarConfirmCopy({
+                  phase: "intermediate",
+                  scope: "category",
+                  modes,
+                  categories: categories.map((item) => ({
+                    id: item.id,
+                    name: item.name,
+                  })),
+                  categoryId,
+                })}
+                onConfirm={handleActualizar}
+              />
+            </>
           )}
           <GrillaPdfMenu
             tournamentName={config?.tournamentName ?? ""}
             rows={pdfRows}
             groupColumnLabel="Ronda"
           />
+          <AyudaButton
+            title="Ayuda de fase intermedia"
+            description="Cómo se arma y se edita la llave intermedia."
+          >
+            <p>
+              Llave oficial {regulation}. Los cruces usan los puestos de zona
+              (1° A, 2° B).
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Actualizar</span>{" "}
+              asigna día, horario y cancha según las reglas de intermedia. En
+              Modo Manual podés cambiar el orden de los partidos. Los
+              resultados se guardan solos.
+              {!hasFixture ? " Todavía no hay un armado guardado." : null}
+            </p>
+          </AyudaButton>
           </div>
         </CardAction>
       </CardHeader>

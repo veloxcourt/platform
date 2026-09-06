@@ -7,10 +7,10 @@ import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { cn } from "@/lib/utils";
 import type {
   PairListItem,
@@ -134,10 +134,6 @@ export function DailyMatchesPanel({
           <CalendarDays className="size-4 text-muted-foreground" />
           Partidos del día{dayLabel ? ` · ${dayLabel}` : ""}
         </CardTitle>
-        <CardDescription>
-          Enfrentamientos de zonas, intermedia y final programados para este
-          día, en orden de horario y cancha.
-        </CardDescription>
         <CardAction>
           <div className="flex shrink-0 items-center gap-2">
             <ExportFileMenu
@@ -168,6 +164,15 @@ export function DailyMatchesPanel({
                 })
               }
             />
+            <AyudaButton
+              title="Ayuda de partidos del día"
+              description="Qué se muestra en esta jornada."
+            >
+              <p>
+                Enfrentamientos de zonas, intermedia y final programados para
+                este día, en orden de horario y cancha.
+              </p>
+            </AyudaButton>
           </div>
         </CardAction>
       </CardHeader>

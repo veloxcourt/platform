@@ -7,10 +7,10 @@ import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { CALENDAR_PALETTE } from "@/modules/herramientas/domain/calendario-torneos";
 import {
   eligiblePairCount,
@@ -96,16 +96,23 @@ export function IntermediateLlavePanel({
           <Workflow className="size-4 text-muted-foreground" />
           Llave
         </CardTitle>
-        <CardDescription>
-          Diagrama oficial del cuadro. Tocá Calcular para traer los nombres
-          que clasificaron de zona.
-        </CardDescription>
         <CardAction>
-          <LlavePdfMenu
-            tournamentName={tournamentName}
-            draws={pdfDraws}
-            club={club}
-          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <LlavePdfMenu
+              tournamentName={tournamentName}
+              draws={pdfDraws}
+              club={club}
+            />
+            <AyudaButton
+              title="Ayuda de llave"
+              description="Cómo se lee el cuadro de fase intermedia."
+            >
+              <p>
+                Diagrama oficial del cuadro. Tocá Calcular para traer los
+                nombres que clasificaron de zona.
+              </p>
+            </AyudaButton>
+          </div>
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">

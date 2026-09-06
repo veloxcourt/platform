@@ -17,7 +17,10 @@ import type {
   TournamentListItem,
   ZonasTournamentDetail,
 } from "../domain/types";
-import type { FixtureEditMode } from "../domain/fixture-edit-mode";
+import type {
+  FixtureEditMode,
+  FixtureEditModes,
+} from "../domain/fixture-edit-mode";
 import type {
   IntermediateFixturePersisted,
   KnockoutFixturePhase,
@@ -115,6 +118,12 @@ export interface TournamentRepository {
     slot: 1 | 2,
     confirmed: boolean,
   ): Promise<MutationResult>;
+  setPairsConfirmation(
+    clubId: string,
+    tournamentId: string,
+    pairIds: string[],
+    confirmed: boolean,
+  ): Promise<MutationResult>;
   updatePairZonesDayPreference(
     clubId: string,
     tournamentId: string,
@@ -171,13 +180,14 @@ export interface TournamentRepository {
       }
     | { ok: false; error: string }
   >;
-  getFixtureEditMode(
+  getFixtureEditModes(
     clubId: string,
     tournamentId: string,
-  ): Promise<FixtureEditMode | null>;
+  ): Promise<FixtureEditModes | null>;
   setFixtureEditMode(
     clubId: string,
     tournamentId: string,
+    categoryId: string,
     mode: FixtureEditMode,
   ): Promise<MutationResult>;
   saveZonesFixtureDraft(

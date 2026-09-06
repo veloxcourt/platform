@@ -2,19 +2,18 @@
 
 import { useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, Trophy } from "lucide-react";
+import { Trophy } from "lucide-react";
 import { toast } from "sonner";
 
 import { buildFinalFixtureAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { formatWeekday } from "@/lib/date";
 import { FINAL_PHASE_START_ROUND_LABELS } from "@/modules/tournaments/domain/config-schema";
 import {
@@ -28,12 +27,14 @@ import type {
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
 import { IntermediateRoundCard } from "./intermediate-round-card";
-import { ActualizarHoverHint } from "./actualizar-hover-hint";
+import { ActualizarConfirmButton } from "./actualizar-confirm-button";
+import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import {
   buildFinalMatchGridRows,
   toGrillaPdfRows,
 } from "./final-match-grid-model";
 import { useFixtureEditMode } from "./fixture-edit-mode-context";
+import { buildActualizarConfirmCopy } from "@/modules/tournaments/domain/fixture-edit-mode";
 import { GrillaPdfMenu } from "./grilla-pdf-menu";
 import { categoryKnockoutNameResolver } from "./knockout-name-resolver";
 import { useKnockoutFixtureReorder } from "./use-knockout-fixture-reorder";
@@ -128,7 +129,7 @@ export function FinalPhasePanel({
   const regulation = settings.zone4Advancers === 2 ? "APA" : "FAP";
   const startsAtLabel = FINAL_PHASE_START_ROUND_LABELS[settings.startsAtRound];
   const readOnly = useTournamentReadOnly();
-  const { isManual } = useFixtureEditMode();
+  const { isManual, modes } = useFixtureEditMode(categoryId);
   const hasFixture = Boolean(fixture?.rounds.length);
   const resolveLabel = useMemo(
     () =>
@@ -189,63 +190,86 @@ export function FinalPhasePanel({
           <Trophy className="size-4 text-muted-foreground" />
           Fase Final{category ? ` · ${category.name}` : ""}
         </CardTitle>
-        <CardDescription>
-          Llave oficial {regulation}. Desde {startsAtLabel} hasta la Final. Los
-          cruces usan los puestos de zona y los ganadores de la fase intermedia.{" "}
-          <span className="font-medium text-foreground">Actualizar</span>{" "}
-          asigna día, horario y cancha en el último día del torneo. En Modo
-            Manual podés cambiar el orden de los partidos. Los resultados se
-            guardan solos.
-            {!hasFixture ? " Todavía no hay un armado guardado." : null}
-        </CardDescription>
         <CardAction>
           <div className="flex flex-wrap items-center justify-end gap-2">
           {!readOnly && (
-            <ActualizarHoverHint
-              heading={
-                isManual
-                  ? "Actualizar está bloqueada en Modo Manual"
-                  : hasFixture
-                    ? "Vuelve a armar la final de esta categoría"
-                    : "Arma la final de esta categoría"
-              }
-              effects={
-                isManual
-                  ? [
-                      "En Manual no se regeneran los cruces",
-                      "Podés cambiar el orden de los partidos con las flechas",
-                    ]
-                  : [
-                      "Recalcula día, horario y cancha de esta categoría",
-                      "No toca las otras categorías",
-                    ]
-              }
-              note={
-                isManual
-                  ? "Pasá a Modo Automático si querés volver a generar."
-                  : hasFixture
-                    ? "Pisa los ajustes de esta categoría. El Actualizar de arriba rearma todas."
-                    : "Programa los cruces de esta categoría en el último día."
-              }
-            >
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleActualizar}
-                disabled={isPending || isManual}
-              >
-                <RefreshCw
-                  className={`size-4 ${isPending ? "animate-spin" : ""}`}
-                />
-                Actualizar
-              </Button>
-            </ActualizarHoverHint>
+            <>
+              <FixtureEditModeSelect
+                clubSlug={clubSlug}
+                tournamentId={tournamentId}
+                categoryId={categoryId}
+                categoryName={category?.name}
+              />
+              <ActualizarConfirmButton
+                pending={isPending}
+                disabled={isManual}
+                heading={
+                  isManual
+                    ? "Actualizar está bloqueada en Modo Manual"
+                    : hasFixture
+                      ? "Vuelve a armar la final de esta categoría"
+                      : "Arma la final de esta categoría"
+                }
+                effects={
+                  isManual
+                    ? [
+                        "En Manual no se regeneran los cruces",
+                        "Podés cambiar el orden de los partidos con las flechas",
+                      ]
+                    : buildActualizarConfirmCopy({
+                        phase: "final",
+                        scope: "category",
+                        modes,
+                        categories: categories.map((item) => ({
+                          id: item.id,
+                          name: item.name,
+                        })),
+                        categoryId,
+                      }).affects
+                }
+                note={
+                  isManual
+                    ? "Pasá a Modo Automático en esta categoría si querés volver a generar."
+                    : hasFixture
+                      ? "Pisa los ajustes de esta categoría. No toca zonas ni intermedia."
+                      : "Programa los cruces de esta categoría en el último día."
+                }
+                confirm={buildActualizarConfirmCopy({
+                  phase: "final",
+                  scope: "category",
+                  modes,
+                  categories: categories.map((item) => ({
+                    id: item.id,
+                    name: item.name,
+                  })),
+                  categoryId,
+                })}
+                onConfirm={handleActualizar}
+              />
+            </>
           )}
           <GrillaPdfMenu
             tournamentName={config?.tournamentName ?? ""}
             rows={pdfRows}
             groupColumnLabel="Ronda"
           />
+          <AyudaButton
+            title="Ayuda de fase final"
+            description="Cómo se arma y se edita la llave final."
+          >
+            <p>
+              Llave oficial {regulation}. Desde {startsAtLabel} hasta la Final.
+              Los cruces usan los puestos de zona y los ganadores de la fase
+              intermedia.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Actualizar</span>{" "}
+              asigna día, horario y cancha en el último día del torneo. En Modo
+              Manual podés cambiar el orden de los partidos. Los resultados se
+              guardan solos.
+              {!hasFixture ? " Todavía no hay un armado guardado." : null}
+            </p>
+          </AyudaButton>
           </div>
         </CardAction>
       </CardHeader>

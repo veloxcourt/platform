@@ -7,10 +7,10 @@ import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { StableTabButton } from "@/components/ui/stable-tab-button";
 import { FINAL_PHASE_START_ROUND_LABELS } from "@/modules/tournaments/domain/config-schema";
 import {
@@ -121,17 +121,24 @@ export function FinalLlavePanel({
           <Workflow className="size-4 text-muted-foreground" />
           Llaves{selected ? ` · ${selected.name}` : ""}
         </CardTitle>
-        <CardDescription>
-          Elegí la categoría para ver el cuadro oficial. Ámbar es fase
-          intermedia; violeta es fase final (desde {startsAtLabel}). Cada
-          cruce muestra día, hora y cancha cuando ya hay armado.
-        </CardDescription>
         <CardAction>
-          <LlavePdfMenu
-            tournamentName={tournamentName}
-            draws={pdfDraws}
-            club={club}
-          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <LlavePdfMenu
+              tournamentName={tournamentName}
+              draws={pdfDraws}
+              club={club}
+            />
+            <AyudaButton
+              title="Ayuda de llave"
+              description="Cómo se lee el cuadro de fase final."
+            >
+              <p>
+                Elegí la categoría para ver el cuadro oficial. Ámbar es fase
+                intermedia; violeta es fase final (desde {startsAtLabel}). Cada
+                cruce muestra día, hora y cancha cuando ya hay armado.
+              </p>
+            </AyudaButton>
+          </div>
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

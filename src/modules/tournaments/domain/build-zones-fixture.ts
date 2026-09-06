@@ -845,7 +845,7 @@ export function buildZonesFixture(
   if (input.pairs.length === 0) {
     return {
       zones: [],
-      warnings: ["No hay parejas con compañero para armar zonas."],
+      warnings: ["No hay parejas Parcial o Confirmado para armar zonas."],
       unassignedPairIds: [],
       builtAt: new Date().toISOString(),
     };

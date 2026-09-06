@@ -14,7 +14,6 @@ import {
   Grid3x3,
   Info,
   LayoutList,
-  RefreshCw,
   Scale,
   Settings2,
   Trophy,
@@ -32,11 +31,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { formatMoney } from "@/lib/money";
 import { formatShortDate } from "@/lib/date";
 import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
@@ -69,14 +70,18 @@ import { tournamentPlayDayOptions } from "./daily-matches-model";
 import { TournamentZonesPanel } from "./tournament-zones-panel";
 import { ZonesMatchGridPanel } from "./zones-match-grid-panel";
 import { ZonesMatchRulePanel } from "./zones-match-rule-panel";
+import { ActualizarConfirmButton } from "./actualizar-confirm-button";
 import { ActualizarHoverHint } from "./actualizar-hover-hint";
 import {
   FixtureEditModeProvider,
   FixturePersistFlushBinder,
 } from "./fixture-edit-mode-context";
-import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import { useTournamentReadOnly } from "./tournament-mode-context";
-import { parseFixtureEditMode } from "@/modules/tournaments/domain/fixture-edit-mode";
+import {
+  buildActualizarConfirmCopy,
+  isCategoryManual,
+  parseFixtureEditModes,
+} from "@/modules/tournaments/domain/fixture-edit-mode";
 
 const STATUS_VARIANT: Record<
   CreateTournamentValues["status"],
@@ -153,8 +158,11 @@ export function ZonasTournamentDetail({
   const [isUpdatingIntermediate, startUpdateIntermediate] = useTransition();
   const [isUpdatingFinal, startUpdateFinal] = useTransition();
   const [isCalculating, startCalculate] = useTransition();
-  const [fixtureEditMode, setFixtureEditMode] = useState(() =>
-    parseFixtureEditMode(tournament.fixtureEditMode),
+  const [fixtureEditModes, setFixtureEditModes] = useState(() =>
+    parseFixtureEditModes(
+      tournament.fixtureEditModes,
+      tournament.categories.map((category) => category.id),
+    ),
   );
   const [zonesPanelKey, setZonesPanelKey] = useState(0);
   const flushPendingPersistsRef = useRef<() => Promise<void>>(async () => {});
@@ -243,8 +251,13 @@ export function ZonasTournamentDetail({
   }, [finalLlaveCategoryId, tournament.categories]);
 
   useEffect(() => {
-    setFixtureEditMode(parseFixtureEditMode(tournament.fixtureEditMode));
-  }, [tournament.fixtureEditMode]);
+    setFixtureEditModes(
+      parseFixtureEditModes(
+        tournament.fixtureEditModes,
+        tournament.categories.map((category) => category.id),
+      ),
+    );
+  }, [tournament.categories, tournament.fixtureEditModes]);
 
   useEffect(() => {
     if (playDayOptions.length === 0) {
@@ -473,13 +486,47 @@ export function ZonasTournamentDetail({
     </>
   );
 
-  const isManual = fixtureEditMode === "MANUAL";
+  const categoryRefs = tournament.categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+  }));
+  const intermediateRefs = intermediateCategories.map((category) => ({
+    id: category.id,
+    name: category.name,
+  }));
+  const hasAutoZones = tournament.categories.some(
+    (category) => !isCategoryManual(fixtureEditModes, category.id),
+  );
+  const hasAutoIntermediate = intermediateCategories.some(
+    (category) => !isCategoryManual(fixtureEditModes, category.id),
+  );
+  const hasAutoFinal = tournament.categories.some(
+    (category) => !isCategoryManual(fixtureEditModes, category.id),
+  );
+  const zonesConfirm = buildActualizarConfirmCopy({
+    phase: "zones",
+    scope: "all",
+    modes: fixtureEditModes,
+    categories: categoryRefs,
+  });
+  const intermediateConfirm = buildActualizarConfirmCopy({
+    phase: "intermediate",
+    scope: "all",
+    modes: fixtureEditModes,
+    categories: intermediateRefs,
+  });
+  const finalConfirm = buildActualizarConfirmCopy({
+    phase: "final",
+    scope: "all",
+    modes: fixtureEditModes,
+    categories: categoryRefs,
+  });
 
   return (
     <FixtureEditModeProvider
-      mode={fixtureEditMode}
+      modes={fixtureEditModes}
       readOnly={readOnly}
-      setMode={setFixtureEditMode}
+      setModes={setFixtureEditModes}
     >
     <FixturePersistFlushBinder flushRef={flushPendingPersistsRef} />
     <div className="flex w-full min-w-0 flex-col">
@@ -533,51 +580,33 @@ export function ZonasTournamentDetail({
                 </div>
                 {!readOnly && tournament.categories.length > 0 ? (
                   <>
-                    <FixtureEditModeSelect
-                      clubSlug={clubSlug}
-                      tournamentId={tournament.id}
-                    />
-                    <ActualizarHoverHint
+                    <ActualizarConfirmButton
+                      className="shrink-0"
+                      pending={isUpdatingAllZones}
+                      disabled={!hasAutoZones}
                       heading={
-                        isManual
-                          ? "Actualizar está bloqueada en Modo Manual"
+                        !hasAutoZones
+                          ? "Actualizar está bloqueada: todas las categorías están en Manual"
                           : hasAnyZonesFixture
-                            ? "Vuelve a armar las zonas de todas las categorías"
-                            : "Arma las zonas de todas las categorías"
+                            ? "Vuelve a armar las zonas en Modo Automático"
+                            : "Arma las zonas en Modo Automático"
                       }
                       effects={
-                        isManual
+                        !hasAutoZones
                           ? [
-                              "En Manual no se regeneran zonas ni horarios",
-                              "Podés ajustar día, horario, cancha y parejas a mano",
+                              "El modo se elige en cada categoría",
+                              "Pasá una categoría a Automático para poder rearmarla",
                             ]
-                          : [
-                              "Reasigna las parejas de cada zona",
-                              "Recalcula día, horario y cancha de todos los partidos",
-                              "También rearma fase intermedia y fase final",
-                            ]
+                          : zonesConfirm.affects
                       }
                       note={
-                        isManual
-                          ? "Pasá a Modo Automático si querés volver a generar."
-                          : hasAnyZonesFixture
-                            ? "Pisa los ajustes que hayas hecho a mano. Usalo si cambiaste inscripciones o preferencias; no lo uses si ya acomodaste horarios y querés conservarlos."
-                            : "Usalo para completar día, horario y cancha según preferencias."
+                        !hasAutoZones
+                          ? "El modo de cada categoría está al lado de su propio Actualizar."
+                          : "Solo toca las categorías en Automático. El modo de cada una está al lado de su Actualizar."
                       }
-                    >
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="shrink-0"
-                        onClick={handleActualizarTodasLasZonas}
-                        disabled={isUpdatingAllZones || isManual}
-                      >
-                        <RefreshCw
-                          className={`size-4 ${isUpdatingAllZones ? "animate-spin" : ""}`}
-                        />
-                        Actualizar
-                      </Button>
-                    </ActualizarHoverHint>
+                      confirm={zonesConfirm}
+                      onConfirm={handleActualizarTodasLasZonas}
+                    />
                   </>
                 ) : null}
               </div>
@@ -645,48 +674,33 @@ export function ZonasTournamentDetail({
                         Calcular
                       </Button>
                     </ActualizarHoverHint>
-                    <FixtureEditModeSelect
-                      clubSlug={clubSlug}
-                      tournamentId={tournament.id}
-                    />
-                    <ActualizarHoverHint
+                    <ActualizarConfirmButton
+                      className="shrink-0"
+                      pending={isUpdatingIntermediate}
+                      disabled={!hasAutoIntermediate}
                       heading={
-                        isManual
-                          ? "Actualizar está bloqueada en Modo Manual"
+                        !hasAutoIntermediate
+                          ? "Actualizar está bloqueada: todas las categorías están en Manual"
                           : hasAnyIntermediateFixture
-                            ? "Vuelve a armar la intermedia de todas las categorías"
-                            : "Arma la intermedia de todas las categorías"
+                            ? "Vuelve a armar la intermedia en Modo Automático"
+                            : "Arma la intermedia en Modo Automático"
                       }
                       effects={
-                        isManual
+                        !hasAutoIntermediate
                           ? [
-                              "En Manual no se regeneran los cruces",
-                              "Podés cambiar el orden de los partidos con las flechas",
+                              "El modo se elige en cada categoría",
+                              "Pasá una categoría a Automático para poder rearmarla",
                             ]
-                          : [
-                              "Recalcula día, horario y cancha de todos los cruces intermedios",
-                              "También rearma la fase final de todas las categorías",
-                            ]
+                          : intermediateConfirm.affects
                       }
                       note={
-                        isManual
-                          ? "Pasá a Modo Automático si querés volver a generar."
-                          : "Pisa los ajustes de todas las categorías. El Actualizar de cada categoría solo toca esa."
+                        !hasAutoIntermediate
+                          ? "El modo de cada categoría está al lado de su propio Actualizar."
+                          : "Solo toca las categorías en Automático. No toca las zonas."
                       }
-                    >
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="shrink-0"
-                        onClick={handleActualizarTodaIntermedia}
-                        disabled={isUpdatingIntermediate || isManual}
-                      >
-                        <RefreshCw
-                          className={`size-4 ${isUpdatingIntermediate ? "animate-spin" : ""}`}
-                        />
-                        Actualizar
-                      </Button>
-                    </ActualizarHoverHint>
+                      confirm={intermediateConfirm}
+                      onConfirm={handleActualizarTodaIntermedia}
+                    />
                   </>
                 ) : null}
               </div>
@@ -748,48 +762,33 @@ export function ZonasTournamentDetail({
                 </div>
                 {!readOnly && tournament.categories.length > 0 ? (
                   <>
-                    <FixtureEditModeSelect
-                      clubSlug={clubSlug}
-                      tournamentId={tournament.id}
-                    />
-                    <ActualizarHoverHint
+                    <ActualizarConfirmButton
+                      className="shrink-0"
+                      pending={isUpdatingFinal}
+                      disabled={!hasAutoFinal}
                       heading={
-                        isManual
-                          ? "Actualizar está bloqueada en Modo Manual"
+                        !hasAutoFinal
+                          ? "Actualizar está bloqueada: todas las categorías están en Manual"
                           : hasAnyFinalFixture
-                            ? "Vuelve a armar la fase final"
-                            : "Arma la fase final"
+                            ? "Vuelve a armar la fase final en Modo Automático"
+                            : "Arma la fase final en Modo Automático"
                       }
                       effects={
-                        isManual
+                        !hasAutoFinal
                           ? [
-                              "En Manual no se regeneran los cruces",
-                              "Pasá a Automático para volver a generar",
+                              "El modo se elige en cada categoría",
+                              "Pasá una categoría a Automático para poder rearmarla",
                             ]
-                          : [
-                              "Recalcula día, horario y cancha de todos los cruces finales",
-                              "Aplica a todas las categorías",
-                            ]
+                          : finalConfirm.affects
                       }
                       note={
-                        isManual
-                          ? "Pasá a Modo Automático si querés volver a generar."
-                          : "Pisa los ajustes de todas las categorías. El Actualizar de cada categoría solo toca esa."
+                        !hasAutoFinal
+                          ? "El modo de cada categoría está al lado de su propio Actualizar."
+                          : "Solo toca las categorías en Automático. No toca zonas ni intermedia."
                       }
-                    >
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="shrink-0"
-                        onClick={handleActualizarFaseFinal}
-                        disabled={isUpdatingFinal || isManual}
-                      >
-                        <RefreshCw
-                          className={`size-4 ${isUpdatingFinal ? "animate-spin" : ""}`}
-                        />
-                        Actualizar
-                      </Button>
-                    </ActualizarHoverHint>
+                      confirm={finalConfirm}
+                      onConfirm={handleActualizarFaseFinal}
+                    />
                   </>
                 ) : null}
               </div>
@@ -825,10 +824,17 @@ export function ZonasTournamentDetail({
         <Card>
           <CardHeader>
             <CardTitle>Info del torneo</CardTitle>
-            <CardDescription>
-              Datos generales del torneo. Las categorías se gestionan en
-              Configuración.
-            </CardDescription>
+            <CardAction>
+              <AyudaButton
+                title="Ayuda de info"
+                description="Qué se carga en esta pestaña."
+              >
+                <p>
+                  Datos generales del torneo. Las categorías se gestionan en
+                  Configuración.
+                </p>
+              </AyudaButton>
+            </CardAction>
           </CardHeader>
           <CardContent>
             <TournamentEditForm
@@ -852,15 +858,25 @@ export function ZonasTournamentDetail({
                   ? `Inscripciones · ${selectedCategory.name}`
                   : "Inscripciones"}
               </CardTitle>
-              <CardDescription>
-                Solo esta categoría. Cambiá con los chips. Para dar de alta usá
-                + Inscribir. La pareja queda confirmada cuando ambos jugadores
-                confirman.
-              </CardDescription>
             </div>
-            {selectedCategory ? (
-              <CategoryInscriptionStats category={selectedCategory} />
-            ) : null}
+            <div className="flex flex-wrap items-start justify-end gap-2">
+              {selectedCategory ? (
+                <CategoryInscriptionStats category={selectedCategory} />
+              ) : null}
+              <AyudaButton
+                title="Ayuda de inscripciones"
+                description="Cómo se inscriben y confirman las parejas."
+              >
+                <p>
+                  Solo esta categoría. Cambiá con los chips. Para dar de alta
+                  usá + Inscribir.
+                </p>
+                <p>
+                  La pareja queda confirmada cuando ambos jugadores confirman.
+                  Pendiente no entra a zonas; Parcial o Confirmado sí.
+                </p>
+              </AyudaButton>
+            </div>
           </CardHeader>
           <CardContent>
             {tournament.categories.length === 0 ? (

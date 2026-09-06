@@ -11,11 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Card,
+  CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { formatShortDate } from "@/lib/date";
 import type { TournamentConfig } from "@/modules/tournaments/domain/types";
 import {
@@ -281,10 +282,17 @@ function CategoryPhaseCard({
     <Card>
       <CardHeader>
         <CardTitle>{categoryName}</CardTitle>
-        <CardDescription>
-          Formato por fase para esta categoría del torneo. Asigná los días en
-          los que se juega cada fase.
-        </CardDescription>
+        <CardAction>
+          <AyudaButton
+            title={`Ayuda de ${categoryName}`}
+            description="Formato y días por fase de esta categoría."
+          >
+            <p>
+              Formato por fase para esta categoría del torneo. Asigná los días
+              en los que se juega cada fase.
+            </p>
+          </AyudaButton>
+        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <input
@@ -329,9 +337,14 @@ function SharedParametersCard({
     <Card>
       <CardHeader>
         <CardTitle>Parámetros comunes</CardTitle>
-        <CardDescription>
-          Aplican a todas las categorías del torneo.
-        </CardDescription>
+        <CardAction>
+          <AyudaButton
+            title="Ayuda de parámetros"
+            description="Valores que aplican a todas las categorías."
+          >
+            <p>Aplican a todas las categorías del torneo.</p>
+          </AyudaButton>
+        </CardAction>
       </CardHeader>
       <CardContent>
         <div className="grid gap-3 rounded-lg border border-muted-foreground/15 bg-muted/40 p-3 sm:grid-cols-2">
@@ -643,14 +656,32 @@ export function TournamentConfigForm({
       {showParameters ? (
         <>
           <Card>
-            <CardHeader className="space-y-1.5">
+            <CardHeader>
               <CardTitle>Días y horarios de juego</CardTitle>
-              <CardDescription>
-                Los días salen de Info (inicio y fin del torneo). Usá +/− a
-                izquierda y derecha para sumar o quitar slots (el nuevo queda
-                en juego). Podés desmarcar celdas sueltas. El tamaño de cada
-                slot es la duración de zonas más el intervalo.
-              </CardDescription>
+              <CardAction>
+                <AyudaButton
+                  title="Ayuda de días y horarios"
+                  description="Cómo se marcan las franjas de juego."
+                >
+                  <p>
+                    Los días salen de Info (inicio y fin del torneo). Usá +/− a
+                    izquierda y derecha para sumar o quitar slots (el nuevo
+                    queda en juego). Podés desmarcar celdas sueltas. El tamaño
+                    de cada slot es la duración de zonas más el intervalo.
+                  </p>
+                  <p>
+                    A la izquierda +/− mueve el inicio; a la derecha +/− alarga
+                    o acorta el final (incluso después de las 0 hs). La
+                    capacidad se expresa en slots (horas reloj entre
+                    paréntesis).
+                  </p>
+                  <p>
+                    Para cambiar las fechas, usá la pestaña Info. Los horarios
+                    valen para todo el torneo; al armar el fixture se reparten
+                    los partidos de cada categoría dentro de esas franjas.
+                  </p>
+                </AyudaButton>
+              </CardAction>
             </CardHeader>
             <CardContent className="flex min-w-0 flex-col gap-3 overflow-x-auto">
               {fields.length === 0 ? (
@@ -773,23 +804,8 @@ export function TournamentConfigForm({
                   </span>
                 </div>
               )}
-              <p className="text-xs text-muted-foreground">
-                A la izquierda +/− mueve el inicio; a la derecha +/− alarga o
-                acorta el final (incluso después de las 0 hs). La capacidad se
-                expresa en slots (horas reloj entre paréntesis).
-              </p>
             </CardContent>
           </Card>
-
-          <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-            Periodo del torneo: {formatShortDate(initial.startDate)}
-            {initial.endDate && initial.endDate !== initial.startDate
-              ? ` – ${formatShortDate(initial.endDate)}`
-              : ""}
-            . Para cambiar las fechas, usá la pestaña Info. Los horarios valen
-            para todo el torneo; al armar el fixture se reparten los partidos
-            de cada categoría dentro de esas franjas.
-          </div>
         </>
       ) : null}
 

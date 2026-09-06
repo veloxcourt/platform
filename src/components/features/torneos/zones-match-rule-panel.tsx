@@ -4,57 +4,23 @@ import { useMemo, useState } from "react";
 
 import {
   Card,
+  CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CALENDAR_PALETTE } from "@/modules/herramientas/domain/calendario-torneos";
-import { buildMatchesRuleGrid } from "@/modules/tournaments/domain/court-day-slots";
-import { formatAbbreviatedPairLabel } from "@/lib/person-name";
 import type {
   PairListItem,
   TournamentCategoryItem,
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
+import { SlotRuleGrid } from "./slot-rule-grid";
 import {
-  ZONE_MATCH_KIND_LABELS,
-  formatZoneMatchCode,
-  formatZoneMatchSlotCode,
-  type ZoneMatchKind,
-} from "@/modules/tournaments/domain/zone-bracket";
-import {
-  SlotRuleGrid,
-  type SlotRuleGridCategory,
-} from "./slot-rule-grid";
-
-function categoryColor(
-  category: TournamentCategoryItem,
-  index: number,
-): string {
-  return category.color ?? CALENDAR_PALETTE[index % CALENDAR_PALETTE.length]!;
-}
-
-function pairSideLabel(
-  pairId: string | null,
-  pairById: Map<string, PairListItem>,
-  kind: ZoneMatchKind,
-  side: 1 | 2,
-): string {
-  if (pairId) {
-    const pair = pairById.get(pairId);
-    if (pair) {
-      return formatAbbreviatedPairLabel(
-        pair.player1.name,
-        pair.player2?.name ?? null,
-      );
-    }
-  }
-  if (kind === "winners") return "Ganador";
-  if (kind === "losers") return "Perdedor";
-  return side === 1 ? "Pareja 1" : "Pareja 2";
-}
+  buildZonesSlotRules,
+  zoneRuleGridCategories,
+} from "./zones-match-rule-model";
 
 export function ZonesMatchRulePanel({
   categories,
@@ -71,90 +37,19 @@ export function ZonesMatchRulePanel({
     categories.map((category) => category.id),
   );
 
-  const gridCategories: SlotRuleGridCategory[] = useMemo(
-    () =>
-      categories.map((category, index) => ({
-        id: category.id,
-        name: category.name,
-        abbreviation: category.abbreviation,
-        color: categoryColor(category, index),
-      })),
+  const gridCategories = useMemo(
+    () => zoneRuleGridCategories(categories),
     [categories],
   );
 
   const rules = useMemo(() => {
     if (!config) return [];
-
-    const slotMinutesByDate: Record<string, number> = {};
-    let defaultSlotMinutes = 60;
-
-    for (const categoryConfig of config.categories) {
-      const minutes =
-        categoryConfig.phases.zones.matchDurationMin +
-        categoryConfig.intervalMin;
-      defaultSlotMinutes = Math.max(defaultSlotMinutes, minutes);
-      for (const date of categoryConfig.phases.zones.playDates) {
-        if (!date) continue;
-        slotMinutesByDate[date] = Math.max(
-          slotMinutesByDate[date] ?? 0,
-          minutes,
-        );
-      }
-    }
-
-    const selected = new Set(selectedIds);
-    const zonesPlayDates = [
-      ...new Set(
-        config.categories
-          .filter((categoryConfig) => selected.has(categoryConfig.categoryId))
-          .flatMap((categoryConfig) =>
-            categoryConfig.phases.zones.playDates.filter(Boolean),
-          ),
-      ),
-    ];
-    const abbreviationById = new Map(
-      categories.map((category) => [category.id, category.abbreviation]),
-    );
-    const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
-    const matches = config.categories.flatMap((categoryConfig) =>
-      (categoryConfig.zonesFixture?.zones ?? []).flatMap((zone) =>
-        zone.matches
-          .filter((match) => selected.has(categoryConfig.categoryId))
-          .map((match) => ({
-            categoryId: categoryConfig.categoryId,
-            playDate: match.playDate ?? "",
-            startTime: match.startTime ?? "",
-            courtIndex: match.courtIndex,
-            slotIndex: match.slotIndex,
-            matchCode: formatZoneMatchSlotCode(zone.label, match.matchIndex + 1),
-            pairLabel: formatZoneMatchCode(
-              abbreviationById.get(categoryConfig.categoryId),
-              zone.label,
-              match.matchIndex + 1,
-            ),
-            pair1Label: pairSideLabel(
-              match.pair1Id,
-              pairById,
-              match.kind,
-              1,
-            ),
-            pair2Label: pairSideLabel(
-              match.pair2Id,
-              pairById,
-              match.kind,
-              2,
-            ),
-          })),
-      ),
-    );
-
-    return buildMatchesRuleGrid({
-      playDays: config.playDays,
-      courtCount: config.courtCount || courtCount || 1,
-      defaultSlotMinutes,
-      slotMinutesByDate,
-      matches,
-      zonesPlayDates,
+    return buildZonesSlotRules({
+      categories,
+      pairs,
+      config,
+      courtCount,
+      selectedCategoryIds: selectedIds,
     });
   }, [categories, config, courtCount, pairs, selectedIds]);
 
@@ -204,11 +99,18 @@ export function ZonesMatchRulePanel({
     <Card>
       <CardHeader>
         <CardTitle>Regla de partidos</CardTitle>
-        <CardDescription>
-          Cada slot muestra horario, zona y número de partido (ej. A1). La bolita
-          indica la categoría. Al pasar el mouse o hacer clic se ven las
-          parejas.
-        </CardDescription>
+        <CardAction>
+          <AyudaButton
+            title="Ayuda de regla de partidos"
+            description="Cómo leer la grilla de zonas."
+          >
+            <p>
+              Cada slot muestra horario, zona y número de partido (ej. A1). La
+              bolita indica la categoría. Al pasar el mouse o hacer clic se ven
+              las parejas.
+            </p>
+          </AyudaButton>
+        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <div

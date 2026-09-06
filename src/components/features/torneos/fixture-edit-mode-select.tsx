@@ -13,14 +13,19 @@ import { useFixtureEditMode } from "./fixture-edit-mode-context";
 export function FixtureEditModeSelect({
   clubSlug,
   tournamentId,
+  categoryId,
+  categoryName,
   disabled = false,
 }: {
   clubSlug: string;
   tournamentId: string;
+  categoryId: string;
+  categoryName?: string;
   disabled?: boolean;
 }) {
-  const { mode, setMode } = useFixtureEditMode();
+  const { mode, setMode } = useFixtureEditMode(categoryId);
   const [isPending, startTransition] = useTransition();
+  const label = categoryName ?? "esta categoría";
 
   function handleChange(next: FixtureEditMode) {
     if (next === mode) return;
@@ -30,6 +35,7 @@ export function FixtureEditModeSelect({
       const result = await setFixtureEditModeAction(
         clubSlug,
         tournamentId,
+        categoryId,
         next,
       );
       if (!result.ok) {
@@ -41,8 +47,8 @@ export function FixtureEditModeSelect({
       }
       toast.success(
         next === "MANUAL"
-          ? "Modo Manual: ahora podés ajustar día, horario y cancha"
-          : "Modo Automático: Actualizar vuelve a generar el armado",
+          ? `Modo Manual en ${label}: ahora podés ajustar a mano`
+          : `Modo Automático en ${label}: Actualizar vuelve a generar el armado`,
       );
     });
   }
@@ -55,11 +61,11 @@ export function FixtureEditModeSelect({
       onChange={(event) =>
         handleChange(event.target.value as FixtureEditMode)
       }
-      aria-label="Modo de armado"
+      aria-label={`Modo de armado de ${label}`}
       title={
         mode === "MANUAL"
-          ? "Modo Manual: Actualizar está bloqueada. Cambiá día, horario y cancha a mano."
-          : "Modo Automático: Actualizar genera el armado. Para retocar a mano, pasá a Manual."
+          ? `Modo Manual solo en ${label}. Vale en Zonas, Intermedia y Final. Las otras categorías no cambian.`
+          : `Modo Automático solo en ${label}. Vale en Zonas, Intermedia y Final. Las otras categorías no cambian.`
       }
     >
       <option value="AUTO">{FIXTURE_EDIT_MODE_LABELS.AUTO}</option>

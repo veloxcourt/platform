@@ -5,7 +5,7 @@ import type {
   PlayDayValues,
 } from "./config-schema";
 import type { IntermediateFixturePersisted } from "./intermediate-fixture-schema";
-import type { FixtureEditMode } from "./fixture-edit-mode";
+import type { FixtureEditModes } from "./fixture-edit-mode";
 import type { ZoneQualificationPersisted } from "./zone-qualification";
 import type { ZonesFixturePersisted } from "./zones-fixture-schema";
 import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
@@ -89,8 +89,8 @@ export interface ZonasTournamentDetail {
   endDate: string | null;
   fee: number;
   publicSlug: string;
-  /// AUTO = Actualizar genera; MANUAL = se edita a mano.
-  fixtureEditMode: FixtureEditMode;
+  /// AUTO/MANUAL por categoría. Vale en Zonas, Intermedia y Final de esa categoría.
+  fixtureEditModes: FixtureEditModes;
   categories: TournamentCategoryItem[];
   pairs: PairListItem[];
   slotReservations: SlotReservationItem[];
@@ -156,7 +156,8 @@ export interface TournamentConfig {
   endDate: string | null;
   courtCount: number;
   playDays: PlayDayValues[];
-  fixtureEditMode: FixtureEditMode;
+  /// AUTO/MANUAL por categoría. La misma variable vale en todas las fases.
+  fixtureEditModes: FixtureEditModes;
   categories: CategoryPhaseConfig[];
 }
 

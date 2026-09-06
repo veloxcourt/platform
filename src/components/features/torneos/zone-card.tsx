@@ -5,7 +5,6 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { Calculator, ChevronDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { MatchFormat } from "@/modules/tournaments/domain/config-schema";
 import { MATCH_FORMAT_LABELS } from "@/modules/tournaments/domain/config-schema";
@@ -27,6 +26,7 @@ import {
   bindFieldMenuTrigger,
   type MenuPoint,
 } from "./field-menu-trigger";
+import { ScoreTapPicker } from "./score-tap-picker";
 
 export type ZonePairOption = {
   id: string;
@@ -54,26 +54,10 @@ export type ZoneDraft = {
   matches: ZoneMatchDraft[];
 };
 
-const SELECT_CLASS =
-  "h-8 w-full min-w-0 rounded-lg border border-input bg-background px-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
-
-const COURT_SELECT_CLASS = `${SELECT_CLASS} text-center [text-align-last:center]`;
-
 const FIELD_CONFLICT_CLASS =
   "border-red-500 dark:border-red-600 text-red-900 dark:text-red-100";
 
-export type ScheduleField = "day" | "time" | "court";
-
-type FieldMenu =
-  | { type: "pair"; x: number; y: number; pairId: string }
-  | { type: ScheduleField; x: number; y: number; matchId: string };
-
-const FIELD_MENU_LABEL: Record<FieldMenu["type"], string> = {
-  pair: "Cambiar pareja",
-  day: "Cambiar día",
-  time: "Cambiar horario",
-  court: "Cambiar cancha",
-};
+type FieldMenu = { type: "pair"; x: number; y: number; pairId: string };
 
 const KIND_ROW_ORDER: Record<ZoneMatchKind, number> = {
   opening: 0,
@@ -83,7 +67,7 @@ const KIND_ROW_ORDER: Record<ZoneMatchKind, number> = {
 };
 
 const SCORE_CLASS =
-  "h-8 w-10 rounded-lg border border-input bg-background px-1 text-center text-xs tabular-nums outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+  "h-8 w-10 select-none rounded-lg border border-input bg-background px-1 text-center text-xs tabular-nums outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60";
 
 function pairLabel(
   pairId: string | null,
@@ -102,6 +86,7 @@ function PairSelect({
   onChange,
   onContextMenu,
   onPointerDown,
+  onPointerMove,
   onPointerUp,
   onPointerCancel,
   onPointerLeave,
@@ -114,6 +99,7 @@ function PairSelect({
   onChange: (id: string | null) => void;
   onContextMenu?: (event: ReactMouseEvent) => void;
   onPointerDown?: (event: React.PointerEvent) => void;
+  onPointerMove?: (event: React.PointerEvent) => void;
   onPointerUp?: () => void;
   onPointerCancel?: () => void;
   onPointerLeave?: () => void;
@@ -130,6 +116,7 @@ function PairSelect({
       )}
       onContextMenu={onContextMenu}
       onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
       onPointerLeave={onPointerLeave}
@@ -205,11 +192,50 @@ function ResultHeader({ columns }: { columns: ZoneResultColumn[] }) {
   );
 }
 
+function ScheduleSlotCell({
+  value,
+  align = "left",
+  conflict,
+  disabled,
+  title,
+  ariaLabel,
+  onPick,
+}: {
+  value: string;
+  align?: "left" | "center";
+  conflict?: boolean;
+  disabled?: boolean;
+  title?: string;
+  ariaLabel: string;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "h-8 w-full min-w-0 rounded-lg border bg-background px-1.5 text-xs",
+        align === "center" && "text-center tabular-nums",
+        !disabled && "cursor-pointer hover:bg-muted",
+        disabled && "cursor-default opacity-80",
+        conflict && FIELD_CONFLICT_CLASS,
+      )}
+      disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
+      onClick={() => {
+        if (disabled) return;
+        onPick();
+      }}
+    >
+      {value}
+    </button>
+  );
+}
+
 export function ZoneCard({
   zone,
   pairOptions,
   matchFormat,
-  courtCount,
   dayOptions,
   dayOpenByDate,
   slotMinutes,
@@ -240,7 +266,7 @@ export function ZoneCard({
   readOnly?: boolean;
   /// Bloquea día, horario, cancha y parejas (Modo Automático).
   scheduleLocked?: boolean;
-  /// Tocá la pareja, o clic derecho / pulsación larga para cambiar día, horario o cancha.
+  /// Tocá la pareja, o clic derecho / pulsación larga para cambiarla.
   canManualEdit?: boolean;
   hasPairInconsistency?: boolean;
   hasScheduleConflict?: boolean;
@@ -249,12 +275,16 @@ export function ZoneCard({
   pairTimeConflictMatchIds?: Set<string>;
   onChange: (next: ZoneDraft, meta?: { matchId?: string }) => void;
   onChangePairRequest?: (fromPairId: string) => void;
-  onChangeScheduleRequest?: (matchId: string, field: ScheduleField) => void;
+  onChangeScheduleRequest?: (matchId: string) => void;
   zone4Advancers?: 2 | 3;
   className?: string;
 }) {
   const fieldsLocked = readOnly || scheduleLocked;
   const [fieldMenu, setFieldMenu] = useState<FieldMenu | null>(null);
+  const [scorePicker, setScorePicker] = useState<{
+    matchId: string;
+    startKey: string;
+  } | null>(null);
   const [standingsOpen, setStandingsOpen] = useState(false);
   const fieldMenuRef = useRef<HTMLDivElement>(null);
   const menuHoldRef = useRef<number | null>(null);
@@ -300,17 +330,8 @@ export function ZoneCard({
     });
   }
 
-  function openScheduleMenuAt(
-    point: MenuPoint,
-    matchId: string,
-    field: ScheduleField,
-  ) {
-    if (!canManualEdit || !onChangeScheduleRequest) return;
-    setFieldMenu({ type: field, x: point.x, y: point.y, matchId });
-  }
-
   const pairMenuEnabled = canManualEdit && Boolean(onChangePairRequest);
-  const scheduleMenuEnabled = canManualEdit && Boolean(onChangeScheduleRequest);
+  const canPickSlot = canManualEdit && Boolean(onChangeScheduleRequest);
   const columns = resultColumnsForFormat(matchFormat);
   const zonePairOptions = pairOptions.filter((p) =>
     zone.pairIds.includes(p.id),
@@ -392,6 +413,10 @@ export function ZoneCard({
       scores: { ...match.scores, [key]: value.replace(/\D/g, "").slice(0, 2) },
     });
   }
+
+  const scorePickMatch = scorePicker
+    ? zone.matches.find((m) => m.id === scorePicker.matchId)
+    : null;
 
   return (
     <div
@@ -608,100 +633,55 @@ export function ZoneCard({
                   </div>
                 </td>
                 <td className="py-1.5 pr-1.5 align-middle">
-                  <select
-                    className={cn(
-                      SELECT_CLASS,
-                      canManualEdit && "cursor-context-menu",
-                      hasScheduleRowConflict && FIELD_CONFLICT_CLASS,
-                    )}
-                    value={match.playDate}
-                    disabled={fieldsLocked}
+                  <ScheduleSlotCell
+                    value={
+                      dayOptions.find((d) => d.value === match.playDate)
+                        ?.label ?? (match.playDate || "—")
+                    }
+                    conflict={hasScheduleRowConflict}
+                    disabled={!canPickSlot || fieldsLocked}
                     title={
-                      canManualEdit
-                        ? "Clic derecho o mantené pulsado: cambiar día"
+                      canPickSlot
+                        ? "Elegir día, horario y cancha en la regla de slots"
                         : undefined
                     }
-                    {...bindFieldMenuTrigger(
-                      scheduleMenuEnabled,
-                      (point) => openScheduleMenuAt(point, match.id, "day"),
-                      menuHoldRef,
-                    )}
-                    onChange={(e) =>
-                      updateMatch(match.id, { playDate: e.target.value })
-                    }
-                    aria-label={`Día partido ${index + 1}`}
-                  >
-                    <option value="">—</option>
-                    {dayOptions.map((d) => (
-                      <option key={d.value} value={d.value}>
-                        {d.label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="py-1.5 pr-1.5 align-middle">
-                  <Input
-                    value={match.startTime}
-                    placeholder="17:00"
-                    className={cn(
-                      "h-8 w-full min-w-0 px-1.5 text-center text-xs tabular-nums",
-                      canManualEdit && "cursor-context-menu",
-                      hasScheduleRowConflict && FIELD_CONFLICT_CLASS,
-                    )}
-                    disabled={fieldsLocked}
-                    readOnly={fieldsLocked}
-                    title={
-                      canManualEdit
-                        ? "Clic derecho o mantené pulsado: cambiar horario"
-                        : undefined
-                    }
-                    {...bindFieldMenuTrigger(
-                      scheduleMenuEnabled,
-                      (point) => openScheduleMenuAt(point, match.id, "time"),
-                      menuHoldRef,
-                    )}
-                    onChange={(e) =>
-                      updateMatch(match.id, { startTime: e.target.value })
-                    }
-                    aria-label={`Horario partido ${index + 1}`}
+                    ariaLabel={`Día partido ${index + 1}`}
+                    onPick={() => onChangeScheduleRequest?.(match.id)}
                   />
                 </td>
                 <td className="py-1.5 pr-1.5 align-middle">
-                  <select
-                    className={cn(
-                      COURT_SELECT_CLASS,
-                      canManualEdit && "cursor-context-menu",
-                      hasCourtConflict && FIELD_CONFLICT_CLASS,
-                    )}
-                    value={match.courtIndex ?? ""}
-                    disabled={fieldsLocked}
+                  <ScheduleSlotCell
+                    value={match.startTime || "—"}
+                    align="center"
+                    conflict={hasScheduleRowConflict}
+                    disabled={!canPickSlot || fieldsLocked}
                     title={
-                      canManualEdit
-                        ? "Clic derecho o mantené pulsado: cambiar cancha"
+                      canPickSlot
+                        ? "Elegir día, horario y cancha en la regla de slots"
                         : undefined
                     }
-                    {...bindFieldMenuTrigger(
-                      scheduleMenuEnabled,
-                      (point) => openScheduleMenuAt(point, match.id, "court"),
-                      menuHoldRef,
-                    )}
-                    onChange={(e) =>
-                      updateMatch(match.id, {
-                        courtIndex:
-                          e.target.value === ""
-                            ? null
-                            : Number(e.target.value),
-                      })
+                    ariaLabel={`Horario partido ${index + 1}`}
+                    onPick={() => onChangeScheduleRequest?.(match.id)}
+                  />
+                </td>
+                <td className="py-1.5 pr-1.5 align-middle">
+                  <ScheduleSlotCell
+                    value={
+                      match.courtIndex == null
+                        ? "—"
+                        : String(match.courtIndex + 1)
                     }
-                    aria-label={`Cancha partido ${index + 1}`}
-                  >
-                    <option value="">—</option>
-                    {Array.from({ length: Math.max(1, courtCount) }, (_, i) => (
-                      <option key={i} value={i}>
-                        {i + 1}
-                      </option>
-                    ))}
-                  </select>
+                    align="center"
+                    conflict={hasCourtConflict}
+                    disabled={!canPickSlot || fieldsLocked}
+                    title={
+                      canPickSlot
+                        ? "Elegir día, horario y cancha en la regla de slots"
+                        : undefined
+                    }
+                    ariaLabel={`Cancha partido ${index + 1}`}
+                    onPick={() => onChangeScheduleRequest?.(match.id)}
+                  />
                 </td>
                 <td className="min-w-0 py-1.5 pr-1.5 align-middle">
                   <PairSelect
@@ -744,18 +724,24 @@ export function ZoneCard({
                 <td className="py-1.5 align-middle">
                   <div className="flex justify-end gap-0.5">
                     {columns.map((col) => (
-                      <input
+                      <button
                         key={col.key}
-                        className={SCORE_CLASS}
-                        inputMode="numeric"
-                        value={match.scores[col.key] ?? ""}
+                        type="button"
+                        className={cn(
+                          SCORE_CLASS,
+                          !readOnly && "cursor-pointer",
+                        )}
                         disabled={readOnly}
-                        readOnly={readOnly}
-                        onChange={(e) =>
-                          updateScore(match.id, col.key, e.target.value)
+                        onClick={() =>
+                          setScorePicker({
+                            matchId: match.id,
+                            startKey: col.key,
+                          })
                         }
                         aria-label={`${col.group ?? ""} ${col.label} partido ${index + 1}`}
-                      />
+                      >
+                        {match.scores[col.key] || "–"}
+                      </button>
                     ))}
                   </div>
                 </td>
@@ -788,16 +774,28 @@ export function ZoneCard({
             onClick={() => {
               const menu = fieldMenu;
               setFieldMenu(null);
-              if (menu.type === "pair") {
-                onChangePairRequest?.(menu.pairId);
-                return;
-              }
-              onChangeScheduleRequest?.(menu.matchId, menu.type);
+              onChangePairRequest?.(menu.pairId);
             }}
           >
-            {FIELD_MENU_LABEL[fieldMenu.type]}
+            Cambiar pareja
           </button>
         </div>
+      ) : null}
+
+      {scorePicker && scorePickMatch ? (
+        <ScoreTapPicker
+          open
+          format={matchFormat}
+          columns={columns}
+          scores={scorePickMatch.scores}
+          startKey={scorePicker.startKey}
+          pair1Label={pairLabel(scorePickMatch.pair1Id, pairOptions)}
+          pair2Label={pairLabel(scorePickMatch.pair2Id, pairOptions)}
+          onChange={(key, value) =>
+            updateScore(scorePicker.matchId, key, value)
+          }
+          onClose={() => setScorePicker(null)}
+        />
       ) : null}
 
       <ZoneStandingsDialog

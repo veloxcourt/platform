@@ -22,7 +22,12 @@ import type {
 } from "@/modules/tournaments/domain/types";
 import { intermediateFixtureSchema } from "@/modules/tournaments/domain/intermediate-fixture-schema";
 import { zonesFixtureDraftSchema } from "@/modules/tournaments/domain/zones-fixture-schema";
+import {
+  isCategoryManual,
+  type FixtureEditMode,
+} from "@/modules/tournaments/domain/fixture-edit-mode";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
+import type { TournamentRepository } from "@/modules/tournaments/application/tournament-repository";
 
 type Result = { ok: true } | { ok: false; error: string };
 type AddPairResult =
@@ -39,6 +44,57 @@ async function resolveClubId(clubSlug: string) {
 function revalidate(clubSlug: string, tournamentId: string) {
   revalidatePath(`/${clubSlug}/torneos`);
   revalidatePath(`/${clubSlug}/torneos/${tournamentId}`);
+}
+
+async function rebuildDownstreamFixtures(
+  repo: TournamentRepository,
+  clubId: string,
+  tournamentId: string,
+  warnings: string[],
+  options: {
+    includeIntermediate?: boolean;
+    categoryId?: string;
+  } = {},
+) {
+  if (options.includeIntermediate) {
+    const intermediate = await repo.buildAndSaveIntermediateFixture(
+      clubId,
+      tournamentId,
+      options.categoryId,
+    );
+    if (!intermediate.ok) {
+      const skip =
+        intermediate.error ===
+          "Ninguna categoría tiene fase intermedia para armar" ||
+        intermediate.error ===
+          "Esta categoría no tiene fase intermedia para armar" ||
+        intermediate.error ===
+          "Ninguna categoría en Modo Automático tiene fase intermedia para armar";
+      if (!skip && intermediate.error) {
+        warnings.push(`Intermedia: ${intermediate.error}`);
+      }
+    } else {
+      warnings.push(...intermediate.warnings);
+    }
+  }
+
+  const finalPhase = await repo.buildAndSaveFinalFixture(
+    clubId,
+    tournamentId,
+    options.categoryId,
+  );
+  if (!finalPhase.ok) {
+    const skip =
+      finalPhase.error === "Ninguna categoría tiene fase final para armar" ||
+      finalPhase.error === "Esta categoría no tiene fase final para armar" ||
+      finalPhase.error ===
+        "Ninguna categoría en Modo Automático tiene fase final para armar";
+    if (!skip && finalPhase.error) {
+      warnings.push(`Final: ${finalPhase.error}`);
+    }
+  } else {
+    warnings.push(...finalPhase.warnings);
+  }
 }
 
 export async function addPairAction(
@@ -141,6 +197,25 @@ export async function updatePairPlayerConfirmationAction(
   return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };
 }
 
+export async function setPairsConfirmationAction(
+  clubSlug: string,
+  tournamentId: string,
+  pairIds: string[],
+  confirmed: boolean,
+): Promise<Result> {
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+
+  const result = await repo.setPairsConfirmation(
+    clubId,
+    tournamentId,
+    pairIds,
+    confirmed,
+  );
+  if (result.ok) revalidate(clubSlug, tournamentId);
+  return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };
+}
+
 export async function updatePairZonesDayPreferenceAction(
   clubSlug: string,
   tournamentId: string,
@@ -237,31 +312,12 @@ export async function buildZonesFixtureAction(
   }
 
   const warnings = [...result.fixture.warnings];
-  const intermediate = await repo.buildAndSaveIntermediateFixture(
-    clubId,
-    tournamentId,
-  );
-  if (!intermediate.ok) {
-    const skip =
-      intermediate.error ===
-      "Ninguna categoría tiene fase intermedia para armar";
-    if (!skip && intermediate.error) {
-      warnings.push(`Intermedia: ${intermediate.error}`);
-    }
-  } else {
-    warnings.push(...intermediate.warnings);
-  }
-
-  const finalPhase = await repo.buildAndSaveFinalFixture(clubId, tournamentId);
-  if (!finalPhase.ok) {
-    const skip =
-      finalPhase.error === "Ninguna categoría tiene fase final para armar" ||
-      finalPhase.error === "Esta categoría no tiene fase final para armar";
-    if (!skip && finalPhase.error) {
-      warnings.push(`Final: ${finalPhase.error}`);
-    }
-  } else {
-    warnings.push(...finalPhase.warnings);
+  const modes = await repo.getFixtureEditModes(clubId, tournamentId);
+  if (!isCategoryManual(modes, categoryId)) {
+    await rebuildDownstreamFixtures(repo, clubId, tournamentId, warnings, {
+      includeIntermediate: true,
+      categoryId,
+    });
   }
 
   revalidate(clubSlug, tournamentId);
@@ -299,12 +355,17 @@ export async function buildAllZonesFixturesAction(
     return { ok: false, error: "No hay categorías para armar" };
   }
 
+  const modes = await repo.getFixtureEditModes(clubId, tournamentId);
   const warnings: string[] = [];
   let zoneCount = 0;
   let matchCount = 0;
   let okCategories = 0;
 
   for (const category of config.categories) {
+    if (isCategoryManual(modes, category.categoryId)) {
+      warnings.push(`${category.categoryName}: no se rearmó (Modo Manual)`);
+      continue;
+    }
     const result = await repo.buildAndSaveZonesFixture(
       clubId,
       tournamentId,
@@ -334,32 +395,9 @@ export async function buildAllZonesFixturesAction(
     };
   }
 
-  const intermediate = await repo.buildAndSaveIntermediateFixture(
-    clubId,
-    tournamentId,
-  );
-  if (!intermediate.ok) {
-    const skip =
-      intermediate.error ===
-      "Ninguna categoría tiene fase intermedia para armar";
-    if (!skip && intermediate.error) {
-      warnings.push(`Intermedia: ${intermediate.error}`);
-    }
-  } else {
-    warnings.push(...intermediate.warnings);
-  }
-
-  const finalPhase = await repo.buildAndSaveFinalFixture(clubId, tournamentId);
-  if (!finalPhase.ok) {
-    const skip =
-      finalPhase.error === "Ninguna categoría tiene fase final para armar" ||
-      finalPhase.error === "Esta categoría no tiene fase final para armar";
-    if (!skip && finalPhase.error) {
-      warnings.push(`Final: ${finalPhase.error}`);
-    }
-  } else {
-    warnings.push(...finalPhase.warnings);
-  }
+  await rebuildDownstreamFixtures(repo, clubId, tournamentId, warnings, {
+    includeIntermediate: true,
+  });
 
   revalidate(clubSlug, tournamentId);
   return {
@@ -397,21 +435,9 @@ export async function buildIntermediateFixtureAction(
   }
 
   const warnings = [...result.warnings];
-  const finalPhase = await repo.buildAndSaveFinalFixture(
-    clubId,
-    tournamentId,
+  await rebuildDownstreamFixtures(repo, clubId, tournamentId, warnings, {
     categoryId,
-  );
-  if (!finalPhase.ok) {
-    const skip =
-      finalPhase.error === "Ninguna categoría tiene fase final para armar" ||
-      finalPhase.error === "Esta categoría no tiene fase final para armar";
-    if (!skip && finalPhase.error) {
-      warnings.push(`Final: ${finalPhase.error}`);
-    }
-  } else {
-    warnings.push(...finalPhase.warnings);
-  }
+  });
 
   revalidate(clubSlug, tournamentId);
   return { ...result, warnings };
@@ -449,14 +475,23 @@ export async function buildFinalFixtureAction(
 export async function setFixtureEditModeAction(
   clubSlug: string,
   tournamentId: string,
-  mode: "AUTO" | "MANUAL",
+  categoryId: string,
+  mode: FixtureEditMode,
 ): Promise<Result> {
+  if (!categoryId) {
+    return { ok: false, error: "Categoría inválida" };
+  }
   if (mode !== "AUTO" && mode !== "MANUAL") {
     return { ok: false, error: "Modo inválido" };
   }
   const { repo, clubId } = await resolveClubId(clubSlug);
   if (!clubId) return { ok: false, error: "Club no encontrado" };
-  const result = await repo.setFixtureEditMode(clubId, tournamentId, mode);
+  const result = await repo.setFixtureEditMode(
+    clubId,
+    tournamentId,
+    categoryId,
+    mode,
+  );
   if (result.ok) revalidate(clubSlug, tournamentId);
   return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };
 }

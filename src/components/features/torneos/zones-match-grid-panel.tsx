@@ -6,10 +6,10 @@ import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import type {
   PairListItem,
   TournamentCategoryItem,
@@ -42,12 +42,19 @@ export function ZonesMatchGridPanel({
     <Card>
       <CardHeader>
         <CardTitle>Grilla</CardTitle>
-        <CardDescription>
-          Orden de largada de los partidos. A igual horario, primero Cancha 1 y
-          después Cancha 2.
-        </CardDescription>
         <CardAction>
-          <GrillaPdfMenu tournamentName={tournamentName} rows={rows} />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <GrillaPdfMenu tournamentName={tournamentName} rows={rows} />
+            <AyudaButton
+              title="Ayuda de grilla"
+              description="Cómo se ordenan los partidos de zonas."
+            >
+              <p>
+                Orden de largada de los partidos. A igual horario, primero
+                Cancha 1 y después Cancha 2.
+              </p>
+            </AyudaButton>
+          </div>
         </CardAction>
       </CardHeader>
       <CardContent>

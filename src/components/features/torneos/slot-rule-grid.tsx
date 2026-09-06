@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  bindFieldMenuTrigger,
+  consumedHoldClick,
+  type MenuPoint,
+} from "./field-menu-trigger";
 import { formatWeekdayName } from "@/lib/date";
 import type {
   CourtDayRule,
@@ -125,6 +129,8 @@ export function SlotRuleGrid({
   adjustDisabled = false,
   onSetPlayDayStartMinutes,
   phaseLegend = true,
+  onSelectSlot,
+  selectedSlot,
 }: {
   mode: SlotRuleGridMode;
   rules: CourtDayRule[];
@@ -156,6 +162,13 @@ export function SlotRuleGrid({
   ) => void;
   /// Si false, oculta Zonas / Intermedia / Final (p. ej. vista de partidos reales).
   phaseLegend?: boolean;
+  /// Si está, cualquier slot (libre u ocupado) se puede elegir.
+  onSelectSlot?: (slot: CourtDaySlot) => void;
+  selectedSlot?: {
+    playDate: string;
+    startTime: string;
+    courtIndex: number | null;
+  } | null;
 }) {
   const integral = mode === "simulation" && (categories?.length ?? 0) > 0;
   const categoryById = new Map(
@@ -183,6 +196,7 @@ export function SlotRuleGrid({
   } | null>(null);
   const startMenuRef = useRef<HTMLDivElement>(null);
   const slotDetailRef = useRef<HTMLDivElement>(null);
+  const menuHoldRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!startMenu && !slotDetail) return;
@@ -216,17 +230,15 @@ export function SlotRuleGrid({
   }, [startMenu, slotDetail]);
 
   function openStartMinutesMenu(
-    event: ReactMouseEvent,
+    point: MenuPoint,
     playDate: string,
     startTime: string,
   ) {
-    event.preventDefault();
-    event.stopPropagation();
     if (adjustDisabled || !onSetPlayDayStartMinutes) return;
     const [, minutes = "0"] = startTime.split(":");
     setStartMenu({
-      x: event.clientX,
-      y: event.clientY,
+      x: point.x,
+      y: point.y,
       playDate,
       currentMinutes: Number.parseInt(minutes, 10) || 0,
     });
@@ -526,18 +538,27 @@ export function SlotRuleGrid({
                         ? `Fase: ${slot.projectedPhase}`
                         : null,
                       canSetStartMinutes
-                        ? "Clic derecho: minutos de arranque"
+                        ? "Clic derecho o mantené 2 s (tablet/celular): minutos de arranque"
                         : null,
                     ].filter(Boolean);
                     const canInspect =
                       mode === "simulation" && occupants.length > 0;
+                    const canPick = Boolean(onSelectSlot);
+                    const isSelected =
+                      selectedSlot != null &&
+                      selectedSlot.playDate === slot.playDate &&
+                      selectedSlot.startTime === slot.startTime &&
+                      selectedSlot.courtIndex === slot.courtIndex;
 
                     return (
                       <button
                         key={slot.id}
                         type="button"
                         disabled={
-                          !clickable && !canSetStartMinutes && !canInspect
+                          !clickable &&
+                          !canSetStartMinutes &&
+                          !canInspect &&
+                          !canPick
                         }
                         title={titleParts.join(" · ")}
                         aria-label={`${court.courtLabel} ${slot.startTime} ${
@@ -556,6 +577,11 @@ export function SlotRuleGrid({
                               : STATUS_LABEL[slot.status])
                         }`}
                         onClick={(event) => {
+                          if (consumedHoldClick(menuHoldRef)) return;
+                          if (onSelectSlot) {
+                            onSelectSlot(slot);
+                            return;
+                          }
                           if (clickable) {
                             onToggleSlot?.(slot);
                             return;
@@ -575,17 +601,19 @@ export function SlotRuleGrid({
                             occupants: occupantLines,
                           });
                         }}
-                        onContextMenu={(event) =>
-                          canSetStartMinutes
-                            ? openStartMinutesMenu(
-                                event,
-                                day.playDate,
-                                slot.startTime,
-                              )
-                            : undefined
-                        }
+                        {...bindFieldMenuTrigger(
+                          canSetStartMinutes,
+                          (point) =>
+                            openStartMinutesMenu(
+                              point,
+                              day.playDate,
+                              slot.startTime,
+                            ),
+                          menuHoldRef,
+                        )}
                         className={cn(
                           SLOT_BOX_CLASS,
+                          canSetStartMinutes && "select-none",
                           conflict
                             ? cellClass("reserved")
                             : cellClass(
@@ -593,11 +621,16 @@ export function SlotRuleGrid({
                                 slot.projectedPhase,
                                 slot.projectedSource,
                               ),
-                          (clickable || canSetStartMinutes || canInspect) &&
+                          (clickable ||
+                            canSetStartMinutes ||
+                            canInspect ||
+                            canPick) &&
                             "cursor-pointer",
+                          isSelected && "ring-2 ring-primary ring-offset-1",
                           !clickable &&
                             !canSetStartMinutes &&
                             !canInspect &&
+                            !canPick &&
                             "cursor-default opacity-95",
                         )}
                       >

@@ -2,18 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Grid3x3, RefreshCw } from "lucide-react";
+import { Grid3x3 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { formatShortDate, formatWeekday } from "@/lib/date";
 import { formatAbbreviatedPairLabel } from "@/lib/person-name";
 import {
@@ -43,6 +42,7 @@ import {
   zoneMatchCount,
   zonePairings,
   zoneLabelFromIndex,
+  zonesStructureIsStale,
   ZONE_MATCH_KIND_LABELS,
   type ZoneMatchKind,
 } from "@/modules/tournaments/domain/zone-bracket";
@@ -57,22 +57,26 @@ import {
   labelsForCourtSlot,
   scheduleConflictMatchIds,
   scheduleConflictZoneIds,
-  slotOccupants,
-  startTimesForPlayDay,
 } from "@/modules/tournaments/domain/zone-schedule-conflicts";
-import { ChangeZoneListDialog } from "./change-zone-list-dialog";
 import { ChangeZonePairDialog } from "./change-zone-pair-dialog";
+import { ChangeZoneTimeDialog } from "./change-zone-time-dialog";
+import {
+  buildZonesSlotRules,
+  zoneRuleGridCategories,
+} from "./zones-match-rule-model";
 import {
   ZoneCard,
-  type ScheduleField,
   type ZoneDraft,
   type ZonePairOption,
 } from "./zone-card";
-import { ActualizarHoverHint } from "./actualizar-hover-hint";
+import { ActualizarConfirmButton } from "./actualizar-confirm-button";
+import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import {
   useFixtureEditMode,
   useRegisterFixturePersistFlush,
 } from "./fixture-edit-mode-context";
+import { buildActualizarConfirmCopy } from "@/modules/tournaments/domain/fixture-edit-mode";
+import { isPairEligibleForZones } from "@/modules/tournaments/domain/pair-confirmation";
 import { ZonesCardsPdfMenu } from "./zones-cards-pdf-menu";
 import type { ZonesCardsPdfInput } from "./zones-cards-pdf";
 import { useTournamentReadOnly } from "./tournament-mode-context";
@@ -82,6 +86,15 @@ function pairOptionLabel(pair: PairListItem): string {
     pair.player1.name,
     pair.player2?.name ?? null,
   );
+}
+
+function pairEligibleForZones(pair: PairListItem) {
+  return isPairEligibleForZones({
+    status: pair.status,
+    hasPartner: Boolean(pair.player2),
+    player1Confirmed: pair.player1Confirmed,
+    player2Confirmed: pair.player2Confirmed,
+  });
 }
 
 function buildEmptyMatches(
@@ -143,7 +156,7 @@ function zonesFromAssignedPairs(
 ): ZoneDraft[] {
   const byLabel = new Map<string, PairListItem[]>();
   for (const pair of pairs) {
-    if (!pair.zoneLabel) continue;
+    if (!pair.zoneLabel || !pairEligibleForZones(pair)) continue;
     const list = byLabel.get(pair.zoneLabel) ?? [];
     list.push(pair);
     byLabel.set(pair.zoneLabel, list);
@@ -252,7 +265,7 @@ function buildZonesSnapshot(
   const assigned = zonesFromAssignedPairs(categoryPairs, format);
   if (assigned.length > 0) return assigned;
 
-  const eligible = categoryPairs.filter((p) => Boolean(p.player2)).length;
+  const eligible = categoryPairs.filter(pairEligibleForZones).length;
   return draftZonesForCategory(
     Math.max(eligible, pairsPerZone),
     pairsPerZone,
@@ -282,7 +295,6 @@ export function TournamentZonesPanel({
 }) {
   const router = useRouter();
   const readOnly = useTournamentReadOnly();
-  const { isManual, scheduleLocked } = useFixtureEditMode();
   const [isPending, startTransition] = useTransition();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSaveRef = useRef<{
@@ -310,13 +322,13 @@ export function TournamentZonesPanel({
   const [changeScheduleRequest, setChangeScheduleRequest] = useState<{
     zoneId: string;
     matchId: string;
-    field: ScheduleField;
   } | null>(null);
 
   const activeCategoryId =
     initialCategoryId && categories.some((c) => c.id === initialCategoryId)
       ? initialCategoryId
       : (categories[0]?.id ?? "");
+  const { isManual, scheduleLocked, modes } = useFixtureEditMode(activeCategoryId);
 
   const categoryConfig = config?.categories.find(
     (c) => c.categoryId === activeCategoryId,
@@ -588,104 +600,33 @@ export function TournamentZonesPanel({
   const changeScheduleMatch = changeScheduleZone?.matches.find(
     (match) => match.id === changeScheduleRequest?.matchId,
   );
-  const changeScheduleOptions = useMemo(() => {
-    if (!changeScheduleRequest || !changeScheduleMatch) return [];
-    const excludeId = changeScheduleMatch.id;
-    const busyPairIds =
-      changeScheduleMatch.kind === "winners" ||
-      changeScheduleMatch.kind === "losers"
-        ? (changeScheduleZone?.pairIds ?? [])
-        : [changeScheduleMatch.pair1Id, changeScheduleMatch.pair2Id].filter(
-            (id): id is string => Boolean(id),
-          );
-    const occupantHint = (
-      playDate: string,
-      startTime: string,
-      courtIndex: number | null,
-    ) => {
-      const occupants = slotOccupants(
-        zones,
-        playDate,
-        startTime,
-        courtIndex,
-        excludeId,
-        busyPairIds,
-        externalCourtSlots,
-      );
-      if (occupants.length === 0) return "Libre";
-      const labels = [...new Set(occupants.map((item) => item.zoneLabel))];
-      const reason = occupants.some((item) => item.reason === "court")
-        ? "Cancha ocupada"
-        : "Pareja ocupada";
-      return `${reason} · ${labels.join(", ")}`;
-    };
-
-    if (changeScheduleRequest.field === "day") {
-      return dayOptions.map((option) => ({
-        value: option.value,
-        label: option.label,
-        hint: occupantHint(
-          option.value,
-          changeScheduleMatch.startTime,
-          changeScheduleMatch.courtIndex,
-        ),
-      }));
-    }
-
-    if (changeScheduleRequest.field === "court") {
-      return Array.from({ length: Math.max(1, courtCount) }, (_, index) => ({
-        value: String(index),
-        label: `Cancha ${index + 1}`,
-        hint: occupantHint(
-          changeScheduleMatch.playDate,
-          changeScheduleMatch.startTime,
-          index,
-        ),
-      }));
-    }
-
-    const playDay = (config?.playDays ?? []).find(
-      (day) => day.date === changeScheduleMatch.playDate,
-    );
-    const times = playDay
-      ? startTimesForPlayDay(playDay, slotMinutes)
-      : [
-          ...new Set(
-            (config?.playDays ?? []).flatMap((day) =>
-              startTimesForPlayDay(day, slotMinutes),
-            ),
-          ),
-        ];
-    if (
-      changeScheduleMatch.startTime &&
-      !times.includes(changeScheduleMatch.startTime)
-    ) {
-      times.unshift(changeScheduleMatch.startTime);
-    }
-    return times.map((time) => ({
-      value: time,
-      label: time,
-      hint: occupantHint(
-        changeScheduleMatch.playDate,
-        time,
-        changeScheduleMatch.courtIndex,
-      ),
-    }));
+  const timePickerRules = useMemo(() => {
+    if (!config || !activeCategoryId) return [];
+    return buildZonesSlotRules({
+      categories,
+      pairs,
+      config,
+      courtCount,
+      liveZonesByCategory: { [activeCategoryId]: zones },
+      excludeMatchId: changeScheduleMatch?.id,
+    });
   }, [
-    changeScheduleRequest,
-    changeScheduleMatch,
-    changeScheduleZone,
-    dayOptions,
+    activeCategoryId,
+    categories,
+    changeScheduleMatch?.id,
+    config,
     courtCount,
-    config?.playDays,
-    slotMinutes,
+    pairs,
     zones,
-    externalCourtSlots,
   ]);
+  const timePickerCategories = useMemo(
+    () => zoneRuleGridCategories(categories),
+    [categories],
+  );
   const changePairOptions = useMemo(
     () =>
       categoryPairs
-        .filter((pair) => Boolean(pair.player2))
+        .filter(pairEligibleForZones)
         .map((pair) => ({
           id: pair.id,
           label: pairOptionLabel(pair),
@@ -911,11 +852,11 @@ export function TournamentZonesPanel({
       setRebuildToken((n) => n + 1);
       router.refresh();
 
-      const withPartner = categoryPairs.filter((p) => p.player2).length;
+      const withPartner = categoryPairs.filter(pairEligibleForZones).length;
       toast.success("Zonas armadas", {
         description: [
           `${result.zoneCount} zona(s) · ${result.matchCount} partido(s)`,
-          `${withPartner} parejas con compañero`,
+          `${withPartner} parejas Parcial o Confirmado`,
           `${pairsWithPreferences} con preferencias`,
           result.warnings[0],
         ]
@@ -933,6 +874,26 @@ export function TournamentZonesPanel({
   const hasAssigned =
     Boolean(savedFixture?.zones.length) ||
     categoryPairs.some((p) => p.zoneLabel);
+  const eligiblePairCount = categoryPairs.filter(pairEligibleForZones).length;
+  const structureStale =
+    hasAssigned &&
+    zonesStructureIsStale({
+      pairCount: eligiblePairCount,
+      pairsPerZone,
+      zoneSizes: (savedFixture?.zones ?? zones).map((zone) =>
+        "pairIds" in zone ? zone.pairIds.length : 0,
+      ),
+    });
+  const zoneConfirm = buildActualizarConfirmCopy({
+    phase: "zones",
+    scope: "category",
+    modes,
+    categories: categories.map((item) => ({
+      id: item.id,
+      name: item.name,
+    })),
+    categoryId: activeCategoryId,
+  });
 
   return (
     <Card>
@@ -940,79 +901,92 @@ export function TournamentZonesPanel({
         <CardTitle className="flex items-center gap-2">
           <Grid3x3 className="size-4 text-muted-foreground" />
           Zonas{categoryMeta ? ` · ${categoryMeta.name}` : ""}
+          <span className="text-sm font-normal text-muted-foreground">
+            {categoryPairs.length} pareja
+            {categoryPairs.length === 1 ? "" : "s"}
+          </span>
         </CardTitle>
-        <CardDescription>
-          Zonas de 3 (round-robin, pasan 2) o de 4 (cada pareja juega 2:
-          apertura y luego ganador/ganador y perdedor/perdedor; pasan{" "}
-          {zone4Advancers}
-          {zone4Advancers === 2 ? " · APA" : " · FAP"}).{" "}
-          <span className="font-medium text-foreground">Actualizar</span>{" "}
-            arma en Modo Automático. Para retocar día, horario, cancha o
-            parejas, pasá a Modo Manual. Los resultados se guardan solos.
-          {!hasAssigned
-            ? " Todavía no hay un armado guardado."
-            : null}
-        </CardDescription>
         <CardAction>
           <div className="flex flex-wrap items-center justify-end gap-2">
-          {!readOnly && (
-            <ActualizarHoverHint
-              heading={
-                isManual
-                  ? "Actualizar está bloqueada en Modo Manual"
-                  : hasAssigned
-                    ? "Vuelve a armar las zonas de esta categoría"
-                    : "Arma las zonas de esta categoría"
-              }
-              effects={
-                isManual
-                  ? [
-                      "En Manual no se regeneran zonas ni horarios",
-                      "Ajustá día, horario, cancha y parejas a mano",
-                      "Tocá la pareja, o clic derecho / pulsación larga en día, horario o cancha",
-                    ]
-                  : [
-                      "Reasigna las parejas de cada zona",
-                      "Recalcula día, horario y cancha de los partidos",
-                      "También rearma fase intermedia y fase final",
-                    ]
-              }
-              note={
-                isManual
-                  ? "Pasá a Modo Automático si querés volver a generar."
-                  : hasAssigned
-                    ? "Pisa los ajustes que hayas hecho a mano en esta categoría. Usalo si cambiaste inscripciones o preferencias."
-                    : "Completa día, horario y cancha según preferencias."
-              }
-            >
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleActualizar}
-                disabled={isPending || !activeCategoryId || isManual}
-              >
-                <RefreshCw
-                  className={`size-4 ${isPending ? "animate-spin" : ""}`}
-                />
-                Actualizar
-              </Button>
-            </ActualizarHoverHint>
-          )}
+          {!readOnly && activeCategoryId ? (
+            <>
+              <FixtureEditModeSelect
+                clubSlug={clubSlug}
+                tournamentId={tournamentId}
+                categoryId={activeCategoryId}
+                categoryName={categoryMeta?.name}
+              />
+              <ActualizarConfirmButton
+                pending={isPending}
+                disabled={!activeCategoryId}
+                heading={
+                  structureStale
+                    ? "Las parejas ya no coinciden con estas tarjetas"
+                    : hasAssigned
+                      ? "Vuelve a armar las zonas de esta categoría"
+                      : "Arma las zonas de esta categoría"
+                }
+                effects={zoneConfirm.affects}
+                note={
+                  isManual
+                    ? structureStale
+                      ? "Rearma las tarjetas y seguís en Manual para seguir editando."
+                      : "En Manual también podés rehacer las tarjetas. Después seguís editando a mano."
+                    : hasAssigned
+                      ? "Pisa los ajustes de esta categoría. Las otras no cambian."
+                      : "Completa día, horario y cancha según preferencias."
+                }
+                confirm={zoneConfirm}
+                onConfirm={handleActualizar}
+              />
+            </>
+          ) : null}
           <ZonesCardsPdfMenu input={cardsPdfInput} />
+          <AyudaButton
+            title="Ayuda de zonas"
+            description="Cómo se arman las tarjetas y cómo se editan en esta pantalla."
+          >
+            <p>
+              Zonas de 3 (round-robin, pasan 2) o de 4 (cada pareja juega 2:
+              apertura y luego ganador/ganador y perdedor/perdedor; pasan{" "}
+              {zone4Advancers}
+              {zone4Advancers === 2 ? " · APA" : " · FAP"}).
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Actualizar</span>{" "}
+              arma las tarjetas. En Modo Manual podés rehacerlas si cambian las
+              parejas y seguir editando. Los resultados se guardan solos.
+              {!hasAssigned ? " Todavía no hay un armado guardado." : null}
+            </p>
+            <p>
+              Preferencias usadas: {pairsWithPreferences} pareja(s) ·{" "}
+              {preferenceCount} celda(s). El armado intenta respetar todas las
+              reglas; si algo no entra, la zona queda en ámbar (badge Revisar).
+            </p>
+            <p>
+              En Modo Manual los cambios se guardan. Tocá día, horario o
+              cancha para elegir las tres cosas juntas en la regla de slots.
+              En tablet o celular, tocá la pareja; con mouse, clic derecho.
+              Las otras zonas o categorías con la misma pareja o un choque de
+              cancha/horario se marcan en rojo.
+            </p>
+          </AyudaButton>
           </div>
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <p className="text-xs text-muted-foreground">
-          Preferencias usadas: {pairsWithPreferences} pareja(s) ·{" "}
-          {preferenceCount} celda(s). El armado intenta respetar todas las
-          reglas; si algo no entra, la zona queda en ámbar (badge Revisar). En
-          Modo Manual los cambios de día, horario, cancha y parejas se
-          guardan. En tablet, tocá la pareja; en día, horario o cancha
-          mantené pulsado. Con mouse, clic derecho. Las otras zonas o
-          categorías con la misma pareja o un choque de cancha/horario se
-          marcan en rojo.
-        </p>
+        {structureStale ? (
+          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            Hay {eligiblePairCount} pareja{eligiblePairCount === 1 ? "" : "s"}{" "}
+            Parcial o Confirmado y las tarjetas actuales ya no coinciden. Tocá{" "}
+            <span className="font-medium">Actualizar</span> para rehacer las
+            zonas
+            {isManual
+              ? " y seguir editando en Modo Manual"
+              : ""}
+            .
+          </p>
+        ) : null}
         {categories.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Creá una categoría para ver las zonas.
@@ -1047,11 +1021,10 @@ export function TournamentZonesPanel({
               onChangePairRequest={(pairId) =>
                 setChangePairRequest({ zoneId: zone.id, pairId })
               }
-              onChangeScheduleRequest={(matchId, field) =>
+              onChangeScheduleRequest={(matchId) =>
                 setChangeScheduleRequest({
                   zoneId: zone.id,
                   matchId,
-                  field,
                 })
               }
             />
@@ -1081,50 +1054,30 @@ export function TournamentZonesPanel({
             setChangePairRequest(null);
           }}
         />
-        <ChangeZoneListDialog
+        <ChangeZoneTimeDialog
           open={Boolean(changeScheduleRequest && changeScheduleMatch)}
           onOpenChange={(open) => {
             if (!open) setChangeScheduleRequest(null);
           }}
-          title={
-            changeScheduleRequest?.field === "day"
-              ? "Cambiar día"
-              : changeScheduleRequest?.field === "court"
-                ? "Cambiar cancha"
-                : "Cambiar horario"
+          zoneLabel={changeScheduleZone?.label ?? "esta zona"}
+          rules={timePickerRules}
+          categories={timePickerCategories}
+          selectedSlot={
+            changeScheduleMatch
+              ? {
+                  playDate: changeScheduleMatch.playDate,
+                  startTime: changeScheduleMatch.startTime,
+                  courtIndex: changeScheduleMatch.courtIndex,
+                }
+              : null
           }
-          description={
-            changeScheduleZone
-              ? `Partido de ${changeScheduleZone.label}. Las celdas ocupadas se indican a la derecha.`
-              : "Elegí una opción."
-          }
-          currentValue={
-            changeScheduleRequest?.field === "court"
-              ? changeScheduleMatch?.courtIndex != null
-                ? String(changeScheduleMatch.courtIndex)
-                : ""
-              : changeScheduleRequest?.field === "day"
-                ? (changeScheduleMatch?.playDate ?? "")
-                : (changeScheduleMatch?.startTime ?? "")
-          }
-          options={changeScheduleOptions}
-          searchable={changeScheduleRequest?.field === "time"}
-          searchPlaceholder="Buscar horario"
-          onSelect={(value) => {
+          onSelect={(slot) => {
             if (!changeScheduleRequest) return;
-            if (changeScheduleRequest.field === "day") {
-              patchMatch(changeScheduleRequest.zoneId, changeScheduleRequest.matchId, {
-                playDate: value,
-              });
-            } else if (changeScheduleRequest.field === "time") {
-              patchMatch(changeScheduleRequest.zoneId, changeScheduleRequest.matchId, {
-                startTime: value,
-              });
-            } else {
-              patchMatch(changeScheduleRequest.zoneId, changeScheduleRequest.matchId, {
-                courtIndex: Number(value),
-              });
-            }
+            patchMatch(changeScheduleRequest.zoneId, changeScheduleRequest.matchId, {
+              playDate: slot.playDate,
+              startTime: slot.startTime,
+              courtIndex: slot.courtIndex,
+            });
             setChangeScheduleRequest(null);
           }}
         />

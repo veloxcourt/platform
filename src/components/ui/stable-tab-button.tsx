@@ -1,6 +1,10 @@
 "use client";
 
-import type { MouseEvent, ReactNode } from "react";
+import type {
+  MouseEvent,
+  PointerEventHandler,
+  ReactNode,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -10,6 +14,11 @@ export function StableTabButton({
   children,
   onSelect,
   onContextMenu,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+  onPointerLeave,
   className,
   title,
 }: {
@@ -17,6 +26,11 @@ export function StableTabButton({
   children: ReactNode;
   onSelect: () => void;
   onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
+  onPointerDown?: PointerEventHandler<HTMLButtonElement>;
+  onPointerMove?: PointerEventHandler<HTMLButtonElement>;
+  onPointerUp?: PointerEventHandler<HTMLButtonElement>;
+  onPointerCancel?: PointerEventHandler<HTMLButtonElement>;
+  onPointerLeave?: PointerEventHandler<HTMLButtonElement>;
   className?: string;
   title?: string;
 }) {
@@ -32,6 +46,11 @@ export function StableTabButton({
       }}
       onClick={onSelect}
       onContextMenu={onContextMenu}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onPointerLeave={onPointerLeave}
       className={cn(
         "inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-lg border px-2.5 text-[0.8rem] font-medium whitespace-nowrap",
         "outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",

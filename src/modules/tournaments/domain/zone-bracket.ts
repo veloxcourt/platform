@@ -68,6 +68,24 @@ export function resultColumnsForFormat(
   }
 }
 
+function inclusiveRange(from: number, to: number): number[] {
+  return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+}
+
+/// Valores de carga rápida: sets a 6 → 0–7; set a 9 → 0–10; super TB → 0–15.
+export function scoreChoicesForColumn(
+  format: MatchFormat,
+  columnKey: string,
+): number[] {
+  if (columnKey.startsWith("stb")) {
+    return inclusiveRange(0, 15);
+  }
+  if (format === "ONE_SET_9") {
+    return inclusiveRange(0, 10);
+  }
+  return inclusiveRange(0, 7);
+}
+
 export function emptyScoresForFormat(format: MatchFormat): Record<string, string> {
   return Object.fromEntries(
     resultColumnsForFormat(format).map((c) => [c.key, ""]),
@@ -178,4 +196,19 @@ export function plannedZoneCount(
   pairsPerZone: number,
 ): number {
   return distributeZoneSizes(pairCount, pairsPerZone || 3).length;
+}
+
+export function zonesStructureIsStale(params: {
+  pairCount: number;
+  pairsPerZone: number;
+  zoneSizes: number[];
+}): boolean {
+  const expected = distributeZoneSizes(
+    params.pairCount,
+    params.pairsPerZone || 3,
+  );
+  if (expected.length !== params.zoneSizes.length) return true;
+  const actual = [...params.zoneSizes].sort((a, b) => b - a);
+  const planned = [...expected].sort((a, b) => b - a);
+  return planned.some((size, index) => size !== actual[index]);
 }

@@ -11,10 +11,10 @@ import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AyudaButton } from "./ayuda-button";
 import { cn } from "@/lib/utils";
 import {
   CALENDAR_PALETTE,
@@ -476,11 +476,6 @@ export function TournamentCategoriesPanel({
         >
           <div className="min-w-0 flex-1">
             <CardTitle>{compact ? "Simulación del torneo" : "Categorías"}</CardTitle>
-            <CardDescription>
-              {compact
-                ? "Estimá partidos y tiempos con N confirmadas por categoría."
-                : "Cada categoría compite con parejas y fixture propios. Activá Simulación para estimar el torneo completo con N confirmadas por categoría."}
-            </CardDescription>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {categories.length > 0 && (
@@ -512,6 +507,20 @@ export function TournamentCategoriesPanel({
                 Agregar categoría
               </Button>
             )}
+            <AyudaButton
+              title={compact ? "Ayuda de simulación" : "Ayuda de categorías"}
+              description={
+                compact
+                  ? "Cómo estimar el torneo con N confirmadas."
+                  : "Cómo se agregan categorías y se simula el torneo."
+              }
+            >
+              <p>
+                {compact
+                  ? "Estimá partidos y tiempos con N confirmadas por categoría."
+                  : "Cada categoría compite con parejas y fixture propios. Activá Simulación para estimar el torneo completo con N confirmadas por categoría."}
+              </p>
+            </AyudaButton>
           </div>
         </CardHeader>
         <CardContent className={compact ? "px-0" : undefined}>
@@ -1020,7 +1029,7 @@ function IntegralSimulation({
 
       <p className="text-xs text-muted-foreground">
         {view === "regla"
-          ? `Un solo conjunto de días con ${courtCount} regla${courtCount === 1 ? "" : "s"} por día (una por cancha). Los + / − alargan o recortan el mismo rango que en Parámetros. Clic derecho en el primer slot para elegir minutos de arranque (0 / 15 / 30 / 45). Los partidos se intercalan entre categorías: zonas → intermedia → final. El punto de color indica qué categoría ocupa cada slot.`
+          ? `Un solo conjunto de días con ${courtCount} regla${courtCount === 1 ? "" : "s"} por día (una por cancha). Los + / − alargan o recortan el mismo rango que en Parámetros. Clic derecho o mantené 2 s (tablet/celular) en el primer slot para elegir minutos de arranque (0 / 15 / 30 / 45). Los partidos se intercalan entre categorías: zonas → intermedia → final. El punto de color indica qué categoría ocupa cada slot.`
           : "Disponible y balance salen de la misma grilla de slots que el modo Regla (celdas libres tras empaquetar todas las categorías)."}
       </p>
     </div>

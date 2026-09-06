@@ -3,41 +3,35 @@
 import { useState, type ReactNode } from "react";
 
 import {
-  parseFixtureEditMode,
-  type FixtureEditMode,
+  parseFixtureEditModes,
+  type FixtureEditModes,
 } from "@/modules/tournaments/domain/fixture-edit-mode";
 import { FixtureEditModeProvider } from "./fixture-edit-mode-context";
-import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 
 export function FixtureEditModePage({
-  clubSlug,
-  tournamentId,
-  initialMode,
+  categoryId,
+  initialModes,
   children,
 }: {
   clubSlug: string;
   tournamentId: string;
-  initialMode?: FixtureEditMode | string | null;
+  categoryId: string;
+  categoryName?: string;
+  initialModes?: FixtureEditModes | string | null;
   children: ReactNode;
 }) {
   const readOnly = useTournamentReadOnly();
-  const [mode, setMode] = useState(() => parseFixtureEditMode(initialMode));
+  const [modes, setModes] = useState(() =>
+    parseFixtureEditModes(initialModes, [categoryId]),
+  );
 
   return (
     <FixtureEditModeProvider
-      mode={mode}
+      modes={modes}
       readOnly={readOnly}
-      setMode={setMode}
+      setModes={setModes}
     >
-      {!readOnly ? (
-        <div className="mb-3 flex justify-end">
-          <FixtureEditModeSelect
-            clubSlug={clubSlug}
-            tournamentId={tournamentId}
-          />
-        </div>
-      ) : null}
       {children}
     </FixtureEditModeProvider>
   );

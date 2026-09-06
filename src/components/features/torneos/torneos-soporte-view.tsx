@@ -25,6 +25,7 @@ import {
   type Zone4Advancers,
 } from "@/modules/tournaments/domain/config-schema";
 import { cn } from "@/lib/utils";
+import { AyudaButton } from "./ayuda-button";
 
 const MIN_PAIRS = 6;
 const MAX_PAIRS = 36;
@@ -94,12 +95,26 @@ export function TorneosSoporteView() {
   return (
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-3 rounded-lg border p-4">
-        <div>
+        <div className="flex items-start justify-between gap-3">
           <h2 className="font-medium">Cantidad de parejas</h2>
-          <p className="text-sm text-muted-foreground">
-            Elegí cuántas parejas tiene la categoría. El armado usa zonas de 3
-            (objetivo) y completa con zonas de 4 cuando no cierra.
-          </p>
+          <AyudaButton
+            title="Ayuda de soporte"
+            description="Cómo se calcula el armado según la cantidad de parejas."
+          >
+            <p>
+              Elegí cuántas parejas tiene la categoría. El armado usa zonas de
+              3 (objetivo) y completa con zonas de 4 cuando no cierra.
+            </p>
+            <p>
+              Federación (FAP) pasa 3 en zonas de 4; Asociación (APA) pasa 2.
+              En zonas de 3 siempre avanzan 2.
+            </p>
+            <p>
+              Cada pareja juega 2 partidos en zona. Las que avanzan entran a
+              eliminación directa. El cuadro se redondea a 4, 8, 16 o 32; los
+              huecos son byes (pasan sin jugar esa ronda).
+            </p>
+          </AyudaButton>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -179,10 +194,6 @@ export function TorneosSoporteView() {
               </option>
             ))}
           </select>
-          <p className="text-xs text-muted-foreground">
-            Federación (FAP) pasa 3; Asociación (APA) pasa 2. En zonas de 3
-            siempre avanzan 2.
-          </p>
         </div>
 
         <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
@@ -218,14 +229,7 @@ export function TorneosSoporteView() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="font-medium">Zonas</h2>
-          <p className="text-sm text-muted-foreground">
-            Cada pareja juega 2 partidos en zona. De una de 3 avanzan 2; de una
-            de 4 avanzan {zone4Advancers} (
-            {zone4Advancers === 2 ? "APA" : "FAP"}).
-          </p>
-        </div>
+        <h2 className="font-medium">Zonas</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {draw.zones.map((zone) => (
             <ZoneCard key={zone.label} zone={zone} />
@@ -234,15 +238,12 @@ export function TorneosSoporteView() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="font-medium">Llave</h2>
-          <p className="text-sm text-muted-foreground">
-            Las que avanzan entran a eliminación directa. El cuadro se redondea
-            a 4, 8, 16 o 32; los huecos son byes (pasan sin jugar esa ronda).
-            En total hay {draw.knockoutMatches} partido
-            {draw.knockoutMatches === 1 ? "" : "s"} de llave.
-          </p>
-        </div>
+        <h2 className="font-medium">
+          Llave
+          {draw.knockoutMatches > 0
+            ? ` · ${draw.knockoutMatches} partido${draw.knockoutMatches === 1 ? "" : "s"}`
+            : ""}
+        </h2>
         {draw.rounds.length === 0 ? (
           <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
             Con esta cantidad no se arma llave.

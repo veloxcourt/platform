@@ -10,43 +10,45 @@ import {
 } from "react";
 
 import {
-  parseFixtureEditMode,
+  DEFAULT_FIXTURE_EDIT_MODES,
+  fixtureEditModeForCategory,
+  parseFixtureEditModes,
   type FixtureEditMode,
+  type FixtureEditModes,
 } from "@/modules/tournaments/domain/fixture-edit-mode";
 
 type FlushFn = () => Promise<unknown>;
 
 type FixtureEditModeContextValue = {
-  mode: FixtureEditMode;
-  isManual: boolean;
-  scheduleLocked: boolean;
-  setMode: (mode: FixtureEditMode) => void;
+  modes: FixtureEditModes;
+  readOnly: boolean;
+  setModes: (modes: FixtureEditModes) => void;
+  setCategoryMode: (categoryId: string, mode: FixtureEditMode) => void;
   registerPersistFlush: (fn: FlushFn) => () => void;
   flushPendingPersists: () => Promise<void>;
 };
 
 const FixtureEditModeContext = createContext<FixtureEditModeContextValue>({
-  mode: "AUTO",
-  isManual: false,
-  scheduleLocked: true,
-  setMode: () => {},
+  modes: DEFAULT_FIXTURE_EDIT_MODES,
+  readOnly: false,
+  setModes: () => {},
+  setCategoryMode: () => {},
   registerPersistFlush: () => () => {},
   flushPendingPersists: async () => {},
 });
 
 export function FixtureEditModeProvider({
-  mode,
+  modes,
   readOnly,
-  setMode,
+  setModes,
   children,
 }: {
-  mode: FixtureEditMode | string | null | undefined;
+  modes: FixtureEditModes;
   readOnly: boolean;
-  setMode: (mode: FixtureEditMode) => void;
+  setModes: (modes: FixtureEditModes) => void;
   children: ReactNode;
 }) {
-  const parsed = parseFixtureEditMode(mode);
-  const isManual = parsed === "MANUAL";
+  const parsed = parseFixtureEditModes(modes);
   const flushesRef = useRef(new Set<FlushFn>());
 
   const registerPersistFlush = useCallback((fn: FlushFn) => {
@@ -60,13 +62,20 @@ export function FixtureEditModeProvider({
     await Promise.all([...flushesRef.current].map((fn) => fn()));
   }, []);
 
+  const setCategoryMode = useCallback(
+    (categoryId: string, mode: FixtureEditMode) => {
+      setModes({ ...parsed, [categoryId]: mode });
+    },
+    [parsed, setModes],
+  );
+
   return (
     <FixtureEditModeContext.Provider
       value={{
-        mode: parsed,
-        isManual,
-        scheduleLocked: readOnly || !isManual,
-        setMode,
+        modes: parsed,
+        readOnly,
+        setModes,
+        setCategoryMode,
         registerPersistFlush,
         flushPendingPersists,
       }}
@@ -76,12 +85,28 @@ export function FixtureEditModeProvider({
   );
 }
 
-export function useFixtureEditMode() {
+export function useFixtureEditModes() {
   return useContext(FixtureEditModeContext);
 }
 
+export function useFixtureEditMode(categoryId: string | undefined) {
+  const { modes, readOnly, setCategoryMode } = useFixtureEditModes();
+  const mode = fixtureEditModeForCategory(modes, categoryId);
+  const isManual = mode === "MANUAL";
+  return {
+    mode,
+    modes,
+    isManual,
+    scheduleLocked: readOnly || !isManual,
+    setMode: (next: FixtureEditMode) => {
+      if (!categoryId) return;
+      setCategoryMode(categoryId, next);
+    },
+  };
+}
+
 export function useRegisterFixturePersistFlush(fn: FlushFn) {
-  const { registerPersistFlush } = useFixtureEditMode();
+  const { registerPersistFlush } = useFixtureEditModes();
   const fnRef = useRef(fn);
   fnRef.current = fn;
 
@@ -95,7 +120,7 @@ export function FixturePersistFlushBinder({
 }: {
   flushRef: { current: () => Promise<void> };
 }) {
-  const { flushPendingPersists } = useFixtureEditMode();
+  const { flushPendingPersists } = useFixtureEditModes();
   flushRef.current = flushPendingPersists;
   return null;
 }

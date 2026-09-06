@@ -77,6 +77,30 @@ export function isValidPlayDayWindow(
   return playDayWindowMinutes(startTime, endTime) > 0;
 }
 
+/// Horas de reloj (00–23) que caen en la ventana del día de juego.
+export function clockHoursInPlayWindow(
+  startTime: string,
+  endTime: string,
+): string[] {
+  if (!startTime || !endTime || !isValidPlayDayWindow(startTime, endTime)) {
+    return [];
+  }
+  const start = timeToMinutes(startTime);
+  const end = closingMinutes(startTime, endTime);
+  const hours: string[] = [];
+  const seen = new Set<number>();
+  const firstHour = Math.floor(start / 60) * 60;
+  for (let abs = firstHour; abs < end; abs += 60) {
+    const hour = Math.floor((((abs % 1440) + 1440) % 1440) / 60);
+    if (seen.has(hour)) continue;
+    seen.add(hour);
+    hours.push(String(hour).padStart(2, "0"));
+  }
+  return hours;
+}
+
+export const CLOCK_MINUTE_STEPS = ["00", "10", "20", "30", "40", "50"] as const;
+
 export function playDayEndHint(
   startTime: string,
   endTime: string,

@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { normalizeText } from "@/components/features/turnos/player-combobox";
 import type { PlayerRef } from "@/modules/bookings/domain/types";
+import { pairConfirmationDisplayState } from "@/modules/tournaments/domain/pair-confirmation";
 import type {
   PairListItem,
   SlotReservationItem,
@@ -20,6 +21,7 @@ import type {
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
 import {
+  setPairsConfirmationAction,
   updatePairPlayerConfirmationAction,
   updatePairPlayerPaymentAction,
   updatePairStatusAction,
@@ -36,10 +38,12 @@ const ROW_FILTER_LABELS: Record<RowFilter, string> = {
 };
 
 function pairRowState(pair: PairListItem) {
-  if (pair.status === "CANCELLED") return "cancelled" as const;
-  if (!pair.player2) return "incomplete" as const;
-  if (pair.status === "CONFIRMED") return "confirmed" as const;
-  return "pending" as const;
+  return pairConfirmationDisplayState({
+    status: pair.status,
+    hasPartner: Boolean(pair.player2),
+    player1Confirmed: pair.player1Confirmed,
+    player2Confirmed: pair.player2Confirmed,
+  });
 }
 
 export function PairsTable({
@@ -84,7 +88,13 @@ export function PairsTable({
       if (categoryFilterId && pair.categoryId !== categoryFilterId) return false;
       const state = pairRowState(pair);
       if (rowFilter === "incomplete" && state !== "incomplete") return false;
-      if (rowFilter === "pending" && state !== "pending") return false;
+      if (
+        rowFilter === "pending" &&
+        state !== "pending" &&
+        state !== "partial"
+      ) {
+        return false;
+      }
       if (!q) return true;
       return (
         normalizeText(pair.player1.name).includes(q) ||
@@ -94,6 +104,21 @@ export function PairsTable({
       );
     });
   }, [pairs, query, rowFilter, categoryFilterId]);
+
+  const confirmationSummary = useMemo(() => {
+    const slots = filtered.flatMap((pair) => {
+      const flags = [pair.player1Confirmed];
+      if (pair.player2) flags.push(pair.player2Confirmed);
+      return flags;
+    });
+    const total = slots.length;
+    const checked = slots.filter(Boolean).length;
+    return {
+      all: total > 0 && checked === total,
+      some: checked > 0 && checked < total,
+      total,
+    };
+  }, [filtered]);
 
   function openAdd(categoryId?: string) {
     const id = categoryId ?? categoryFilterId ?? categories[0]?.id ?? null;
@@ -194,11 +219,49 @@ export function PairsTable({
         <table className="w-full text-sm">
           <thead className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
             <tr>
+              <th className="w-8 px-2 py-2 text-center font-medium">#</th>
               <th className="px-3 py-2 font-medium">Jugadores</th>
               <th className="px-3 py-2 font-medium">Categoría</th>
               <th className="px-3 py-2 font-medium">Zona</th>
               <th className="px-3 py-2 font-medium">Estado</th>
-              <th className="w-20 px-3 py-2 text-center font-medium">Confirmó</th>
+              <th className="w-20 px-3 py-2 text-center font-medium">
+                <div className="flex flex-col items-center gap-1">
+                  <Checkbox
+                    checked={confirmationSummary.all}
+                    indeterminate={confirmationSummary.some}
+                    disabled={
+                      readOnly ||
+                      isPending ||
+                      confirmationSummary.total === 0
+                    }
+                    aria-label={
+                      confirmationSummary.all
+                        ? "Quitar confirmación de todos"
+                        : "Confirmar a todos"
+                    }
+                    title={
+                      confirmationSummary.all
+                        ? "Quitar confirmación de todos"
+                        : "Confirmar a todos"
+                    }
+                    onCheckedChange={() =>
+                      runAction(
+                        () =>
+                          setPairsConfirmationAction(
+                            clubSlug,
+                            tournamentId,
+                            filtered.map((pair) => pair.id),
+                            !confirmationSummary.all,
+                          ),
+                        confirmationSummary.all
+                          ? "Confirmación quitada"
+                          : "Todos confirmados",
+                      )
+                    }
+                  />
+                  Confirmó
+                </div>
+              </th>
               <th className="w-20 px-3 py-2 text-center font-medium">Pagó</th>
               <th className="px-3 py-2" />
             </tr>
@@ -207,14 +270,14 @@ export function PairsTable({
             {filtered.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-3 py-6 text-center text-muted-foreground"
                 >
                   Sin inscripciones.
                 </td>
               </tr>
             ) : (
-              filtered.map((pair) => {
+              filtered.map((pair, index) => {
                 const inactive = pair.status === "CANCELLED";
                 const toggleDisabled = isPending || inactive || readOnly;
                 const rowState = pairRowState(pair);
@@ -227,6 +290,9 @@ export function PairsTable({
                       rowState === "incomplete" && "bg-amber-50/40 dark:bg-amber-950/10",
                     )}
                   >
+                    <td className="px-2 py-2 text-center align-top text-xs tabular-nums text-muted-foreground">
+                      {index + 1}
+                    </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-col gap-1.5">
                         <PairPlayerRow
@@ -440,7 +506,10 @@ function PairStateBadge({
     return <Badge variant="secondary">Sin compañero</Badge>;
   }
   if (state === "confirmed") {
-    return <Badge>Confirmada</Badge>;
+    return <Badge>Confirmado</Badge>;
+  }
+  if (state === "partial") {
+    return <Badge variant="secondary">Parcial</Badge>;
   }
   return <Badge variant="outline">Pendiente</Badge>;
 }
