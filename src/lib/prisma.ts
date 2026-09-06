@@ -184,6 +184,7 @@ async function applyRuntimeSchema() {
     `DO $$ BEGIN CREATE TYPE "ImprovementKind" AS ENUM ('IMPROVE', 'ADD'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
     `DO $$ BEGIN CREATE TYPE "ImprovementStatus" AS ENUM ('PENDING', 'IN_PROGRESS', 'DONE'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
     `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "zoneQualification" JSONB`,
+    `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "roundPhaseConfigs" JSONB`,
     `CREATE TABLE IF NOT EXISTS "club_improvements" (
       "id" TEXT NOT NULL,
       "clubId" TEXT NOT NULL,

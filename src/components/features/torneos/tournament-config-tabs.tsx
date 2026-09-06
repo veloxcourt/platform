@@ -206,6 +206,7 @@ export function TournamentConfigTabs({
             clubSlug={clubSlug}
             tournamentId={tournamentId}
             initial={config}
+            categories={categories}
             panel="parameters"
           />
         ) : (
@@ -240,6 +241,7 @@ export function TournamentConfigTabs({
           clubSlug={clubSlug}
           tournamentId={tournamentId}
           initial={config}
+          categories={categories}
           panel="category"
           focusCategoryId={subTab}
         />

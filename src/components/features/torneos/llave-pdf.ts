@@ -10,7 +10,10 @@ import type { FinalPhaseStartRound } from "@/modules/tournaments/domain/config-s
 import type { FapNode } from "@/modules/tournaments/domain/fap-llaves";
 import { officialRoundPhase } from "@/modules/tournaments/domain/intermediate-phase";
 import {
+  bracketSideLabel,
   formatBracketHorario,
+  resolvedBracketSideLabel,
+  resolvedMatchWinnerLabel,
   type BracketMatchSchedule,
 } from "./official-bracket-diagram";
 import type { GrillaPdfAction } from "./zones-match-grid-pdf";
@@ -42,42 +45,89 @@ const ROUND_FROM_ROOT = [
   "32 avos",
 ] as const;
 
-const LEAF_W = 36;
-const LEAF_H = 6.2;
-const MATCH_W = 34;
-const MATCH_H = 12;
-const CONN_W = 5;
-const V_GAP = 1.3;
+const PAIR_W = 38;
+const PAIR_H = 8.4;
+const MATCH_W = 38;
+const MATCH_H = 11;
+const UNIT_GAP = 1.1;
+const CONN_W = 8;
+const V_GAP = 6;
 
 type Box = {
   x: number;
   y: number;
   w: number;
   h: number;
-  kind: "leaf" | "match";
+  kind: "pair" | "match";
   title: string;
   subtitle?: string;
+  seed?: string;
   horario?: string;
+  winner?: boolean;
   phase?: "intermediate" | "final" | null;
   bye?: boolean;
 };
 
-type Elbow = {
-  xTop: number;
-  xBottom: number;
-  xSpine: number;
-  top: number;
-  bottom: number;
+type Connector = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+};
+
+type Layout = {
+  w: number;
+  h: number;
+  mid: number;
+  boxes: Box[];
+  connectors: Connector[];
+};
+
+const EMPTY_LAYOUT: Layout = {
+  w: 0,
+  h: PAIR_H,
+  mid: 0,
+  boxes: [],
+  connectors: [],
 };
 
 function leafLabel(node: FapNode, resolveLabel?: (label: string) => string): string {
-  const seed =
-    node.kind === "bye"
-      ? "Bye"
-      : node.kind === "qualifier"
-        ? node.qualifier.label
-        : `Ganador n° ${node.id}`;
-  return resolveLabel?.(seed) ?? seed;
+  return resolvedBracketSideLabel(node, resolveLabel);
+}
+
+function pairBox(
+  x: number,
+  y: number,
+  node: FapNode,
+  draw: LlavePdfDraw,
+  winnerName?: string,
+): Box {
+  const raw = bracketSideLabel(node);
+  const title = leafLabel(node, draw.resolveLabel);
+  return {
+    x,
+    y,
+    w: PAIR_W,
+    h: PAIR_H,
+    kind: "pair",
+    title,
+    seed: title !== raw ? raw : undefined,
+    winner: Boolean(winnerName && winnerName === title),
+    bye: node.kind === "bye",
+  };
+}
+
+function toConnector(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): Connector {
+  return { x1, y1, x2, y2 };
+}
+
+function connectorMidX(conn: Connector): number {
+  return conn.x1 + Math.max(2.5, (conn.x2 - conn.x1) / 2);
 }
 
 function layout(
@@ -86,67 +136,99 @@ function layout(
   y: number,
   depth: number,
   draw: LlavePdfDraw,
-): { w: number; h: number; mid: number; boxes: Box[]; elbows: Elbow[] } {
+): Layout {
   if (node.kind !== "match") {
     return {
-      w: LEAF_W,
-      h: LEAF_H,
-      mid: y + LEAF_H / 2,
-      boxes: [
-        {
-          x,
-          y,
-          w: LEAF_W,
-          h: LEAF_H,
-          kind: "leaf",
-          title: leafLabel(node, draw.resolveLabel),
-          bye: node.kind === "bye",
-        },
-      ],
-      elbows: [],
+      w: PAIR_W,
+      h: PAIR_H,
+      mid: y + PAIR_H / 2,
+      boxes: [pairBox(x, y, node, draw)],
+      connectors: [],
     };
   }
 
-  const left = layout(node.left, x, y, depth + 1, draw);
-  const right = layout(node.right, x, y + left.h + V_GAP, depth + 1, draw);
-  const childW = Math.max(left.w, right.w);
-  const matchX = x + childW + CONN_W;
-  const mid = (left.mid + right.mid) / 2;
   const label = ROUND_FROM_ROOT[depth] ?? "Ronda";
   const schedule = draw.scheduleByOfficialId?.get(node.id);
+  const winnerName = resolvedMatchWinnerLabel(node.id, draw.resolveLabel);
+  const leftIsMatch = node.left.kind === "match";
+  const rightIsMatch = node.right.kind === "match";
+  const compact = !leftIsMatch && !rightIsMatch;
+  const matchBox: Box = {
+    x,
+    y,
+    w: MATCH_W,
+    h: MATCH_H,
+    kind: "match",
+    title: label,
+    subtitle: draw.showOfficialId ? `n° ${node.id}` : undefined,
+    horario: formatBracketHorario(schedule),
+    phase: draw.startsAtRound
+      ? officialRoundPhase(label, draw.startsAtRound)
+      : null,
+  };
+
+  if (compact) {
+    const metaY = y + PAIR_H + UNIT_GAP;
+    const pair2Y = metaY + MATCH_H + UNIT_GAP;
+    return {
+      w: MATCH_W,
+      h: pair2Y + PAIR_H - y,
+      mid: metaY + MATCH_H / 2,
+      boxes: [
+        pairBox(x, y, node.left, draw, winnerName),
+        { ...matchBox, y: metaY },
+        pairBox(x, pair2Y, node.right, draw, winnerName),
+      ],
+      connectors: [],
+    };
+  }
+
+  const left = leftIsMatch
+    ? layout(node.left, x, y, depth + 1, draw)
+    : { ...EMPTY_LAYOUT, mid: y };
+  const rightY = y + (leftIsMatch ? left.h + V_GAP : 0);
+  const right = rightIsMatch
+    ? layout(node.right, x, rightY, depth + 1, draw)
+    : { ...EMPTY_LAYOUT, mid: rightY };
+  const childW = Math.max(left.w, right.w);
+  const matchX = x + childW + (childW > 0 ? CONN_W : 0);
+  const unitH = PAIR_H + UNIT_GAP + MATCH_H + UNIT_GAP + PAIR_H;
+  const childSpan = leftIsMatch && rightIsMatch ? left.h + V_GAP + right.h : left.h + right.h;
+  const mid =
+    leftIsMatch && rightIsMatch
+      ? (left.mid + right.mid) / 2
+      : leftIsMatch
+        ? left.mid
+        : right.mid;
+  const unitY = mid - unitH / 2;
+  const pair1Y = unitY;
+  const metaY = unitY + PAIR_H + UNIT_GAP;
+  const pair2Y = metaY + MATCH_H + UNIT_GAP;
+
+  const connectors: Connector[] = [...left.connectors, ...right.connectors];
+  if (left.w > 0) {
+    connectors.push(
+      toConnector(x + left.w, left.mid, matchX, pair1Y + PAIR_H / 2),
+    );
+  }
+  if (right.w > 0) {
+    connectors.push(
+      toConnector(x + right.w, right.mid, matchX, pair2Y + PAIR_H / 2),
+    );
+  }
 
   return {
     w: matchX + MATCH_W - x,
-    h: left.h + V_GAP + right.h,
-    mid,
+    h: Math.max(childSpan, pair2Y + PAIR_H - y, unitY + unitH - y),
+    mid: metaY + MATCH_H / 2,
     boxes: [
       ...left.boxes,
       ...right.boxes,
-      {
-        x: matchX,
-        y: mid - MATCH_H / 2,
-        w: MATCH_W,
-        h: MATCH_H,
-        kind: "match",
-        title: label,
-        subtitle: draw.showOfficialId ? `n° ${node.id}` : "Ganador",
-        horario: formatBracketHorario(schedule),
-        phase: draw.startsAtRound
-          ? officialRoundPhase(label, draw.startsAtRound)
-          : null,
-      },
+      pairBox(matchX, pair1Y, node.left, draw, winnerName),
+      { ...matchBox, x: matchX, y: metaY },
+      pairBox(matchX, pair2Y, node.right, draw, winnerName),
     ],
-    elbows: [
-      ...left.elbows,
-      ...right.elbows,
-      {
-        xTop: x + left.w,
-        xBottom: x + right.w,
-        xSpine: matchX,
-        top: left.mid,
-        bottom: right.mid,
-      },
-    ],
+    connectors,
   };
 }
 
@@ -198,14 +280,17 @@ function uniqueFilename(name: string, ext: "pdf" | "png" = "pdf"): string {
 }
 
 function fillFor(box: Box): [number, number, number] {
-  if (box.kind === "leaf") return box.bye ? [250, 250, 250] : [255, 255, 255];
+  if (box.kind === "pair") return box.bye ? [250, 250, 250] : [255, 255, 255];
   if (box.phase === "intermediate") return [254, 243, 199];
   if (box.phase === "final") return [237, 233, 254];
   return [204, 251, 241];
 }
 
 function strokeFor(box: Box): [number, number, number] {
-  if (box.kind === "leaf") return box.bye ? [161, 161, 170] : [212, 212, 216];
+  if (box.kind === "pair") {
+    if (box.winner) return [82, 82, 91];
+    return box.bye ? [161, 161, 170] : [212, 212, 216];
+  }
   if (box.phase === "intermediate") return [245, 158, 11];
   if (box.phase === "final") return [139, 92, 246];
   return [45, 212, 191];
@@ -376,17 +461,17 @@ function drawPage(
     { align: "center" },
   );
 
-  for (const elbow of laid.elbows) {
-    const xTop = originX + elbow.xTop * scale;
-    const xBottom = originX + elbow.xBottom * scale;
-    const xSpine = originX + elbow.xSpine * scale;
-    const top = originY + elbow.top * scale;
-    const bottom = originY + elbow.bottom * scale;
-    doc.setDrawColor(161, 161, 170);
-    doc.setLineWidth(0.25);
-    doc.line(xTop, top, xSpine, top);
-    doc.line(xSpine, top, xSpine, bottom);
-    doc.line(xBottom, bottom, xSpine, bottom);
+  doc.setDrawColor(161, 161, 170);
+  doc.setLineWidth(0.25);
+  for (const conn of laid.connectors) {
+    const x1 = originX + conn.x1 * scale;
+    const y1 = originY + conn.y1 * scale;
+    const x2 = originX + conn.x2 * scale;
+    const y2 = originY + conn.y2 * scale;
+    const midX = originX + connectorMidX(conn) * scale;
+    doc.line(x1, y1, midX, y1);
+    if (Math.abs(y2 - y1) > 0.2) doc.line(midX, y1, midX, y2);
+    doc.line(midX, y2, x2, y2);
   }
 
   for (const box of laid.boxes) {
@@ -399,12 +484,22 @@ function drawPage(
     doc.setLineWidth(0.2);
     doc.roundedRect(x, y, w, h, 0.8, 0.8, "FD");
     doc.setTextColor(24, 24, 27);
-    if (box.kind === "leaf") {
+    if (box.kind === "pair") {
       doc.setFont("helvetica", box.bye ? "normal" : "bold");
-      doc.setFontSize(Math.max(6, 8 * scale));
-      doc.text(fitCentered(doc, box.title, w - 2.8), x + w / 2, y + h / 2 + 0.8, {
+      doc.setFontSize(Math.max(6, 7.2 * scale));
+      const titleY = box.seed ? y + h / 2 - 0.4 : y + h / 2 + 0.8;
+      doc.text(fitCentered(doc, box.title, w - 2.8), x + w / 2, titleY, {
         align: "center",
       });
+      if (box.seed) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(Math.max(5, 5.8 * scale));
+        doc.setTextColor(113, 113, 122);
+        doc.text(fitCentered(doc, box.seed, w - 2.8), x + w / 2, titleY + 2.6, {
+          align: "center",
+        });
+        doc.setTextColor(24, 24, 27);
+      }
       continue;
     }
     const number = box.subtitle ?? "";
@@ -417,7 +512,7 @@ function drawPage(
     doc.setFont("helvetica", "normal");
     doc.setFontSize(Math.max(5.5, 6.5 * scale));
     doc.setTextColor(82, 82, 91);
-    doc.text(fitCentered(doc, box.title, w - 2.8), x + w / 2, y + 5.4, {
+    doc.text(fitCentered(doc, box.title, w - 2.8), x + w / 2, y + 5.6, {
       align: "center",
     });
     doc.setFont("helvetica", "normal");
@@ -427,9 +522,12 @@ function drawPage(
       box.horario && box.horario !== "Sin horario" ? 24 : 113,
       box.horario && box.horario !== "Sin horario" ? 27 : 122,
     );
-    doc.text(fitCentered(doc, box.horario ?? "Sin horario", w - 2.4), x + w / 2, y + 8.8, {
-      align: "center",
-    });
+    doc.text(
+      fitCentered(doc, box.horario ?? "Sin horario", w - 2.4),
+      x + w / 2,
+      y + 8.6,
+      { align: "center" },
+    );
   }
 
   const footerMid = pageH - footerH / 2 + 1.1;
@@ -448,7 +546,7 @@ async function buildLlavePdf(
   club?: LlavePdfClub,
 ) {
   const doc = new jsPDF({
-    orientation: "landscape",
+    orientation: "portrait",
     unit: "mm",
     format: "a4",
   });
@@ -636,17 +734,17 @@ async function buildLlavePng(
     }
     ctx.strokeStyle = "#a1a1aa";
     ctx.lineWidth = 1;
-    for (const elbow of item.laid.elbows) {
-      const xTop = originX + elbow.xTop * px;
-      const xBottom = originX + elbow.xBottom * px;
-      const xSpine = originX + elbow.xSpine * px;
-      const top = originY + elbow.top * px;
-      const bottom = originY + elbow.bottom * px;
+    for (const conn of item.laid.connectors) {
+      const x1 = originX + conn.x1 * px;
+      const y1 = originY + conn.y1 * px;
+      const x2 = originX + conn.x2 * px;
+      const y2 = originY + conn.y2 * px;
+      const midX = originX + connectorMidX(conn) * px;
       ctx.beginPath();
-      ctx.moveTo(xTop, top);
-      ctx.lineTo(xSpine, top);
-      ctx.lineTo(xSpine, bottom);
-      ctx.lineTo(xBottom, bottom);
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(midX, y1);
+      if (Math.abs(y2 - y1) > 0.5) ctx.lineTo(midX, y2);
+      ctx.lineTo(x2, y2);
       ctx.stroke();
     }
     for (const box of item.laid.boxes) {
@@ -664,9 +762,15 @@ async function buildLlavePng(
       ctx.stroke();
       ctx.fillStyle = "#18181b";
       ctx.textAlign = "center";
-      if (box.kind === "leaf") {
+      if (box.kind === "pair") {
         ctx.font = `${box.bye ? "normal" : "bold"} 11px Helvetica, Arial, sans-serif`;
-        ctx.fillText(fitCanvas(ctx, box.title, w - 10), x + w / 2, y + h / 2 + 4);
+        const titleY = box.seed ? y + h / 2 - 2 : y + h / 2 + 4;
+        ctx.fillText(fitCanvas(ctx, box.title, w - 10), x + w / 2, titleY);
+        if (box.seed) {
+          ctx.font = "10px Helvetica, Arial, sans-serif";
+          ctx.fillStyle = "#71717a";
+          ctx.fillText(fitCanvas(ctx, box.seed, w - 10), x + w / 2, titleY + 12);
+        }
         ctx.textAlign = "left";
         continue;
       }
@@ -678,11 +782,11 @@ async function buildLlavePng(
       ctx.textAlign = "center";
       ctx.font = "10px Helvetica, Arial, sans-serif";
       ctx.fillStyle = "#52525b";
-      ctx.fillText(box.title, x + w / 2, y + 28, w - 12);
+      ctx.fillText(box.title, x + w / 2, y + 26, w - 12);
       ctx.font = "10px Helvetica, Arial, sans-serif";
       ctx.fillStyle =
         box.horario && box.horario !== "Sin horario" ? "#18181b" : "#71717a";
-      ctx.fillText(box.horario ?? "Sin horario", x + w / 2, y + 44, w - 10);
+      ctx.fillText(box.horario ?? "Sin horario", x + w / 2, y + 42, w - 10);
       ctx.textAlign = "left";
     }
     originY += item.laid.h * px + gap;

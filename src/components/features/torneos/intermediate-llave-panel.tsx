@@ -105,7 +105,8 @@ export function IntermediateLlavePanel({
             >
               <p>
                 Diagrama oficial del cuadro. Tocá Calcular para traer los
-                nombres que clasificaron de zona.
+                nombres que clasificaron de zona. Los cruces posteriores
+                muestran a los ganadores cuando ya hay resultado.
               </p>
             </AyudaButton>
           </div>

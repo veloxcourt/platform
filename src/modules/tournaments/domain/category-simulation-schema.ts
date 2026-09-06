@@ -13,3 +13,14 @@ export const updateCategorySimulationSchema = z.object({
 export type UpdateCategorySimulationValues = z.infer<
   typeof updateCategorySimulationSchema
 >;
+
+/** Parejas que usa la simulación / llave oficial de una categoría. */
+export function simulationPairCount(category: {
+  simulationConfirmedCount?: number | null;
+  confirmedCount: number;
+}): number {
+  if (category.simulationConfirmedCount != null) {
+    return category.simulationConfirmedCount;
+  }
+  return Math.max(category.confirmedCount, 8);
+}

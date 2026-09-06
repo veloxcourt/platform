@@ -1,5 +1,6 @@
 import {
   FINAL_PHASE_START_ROUND_LABELS,
+  type BracketRound,
   type FinalPhaseStartRound,
   type MatchFormat,
 } from "./config-schema";
@@ -30,6 +31,53 @@ export type OfficialRound = {
   label: string;
   crossings: FapCrossing[];
 };
+
+export const OFFICIAL_LABEL_TO_BRACKET_ROUND: Record<string, BracketRound> = {
+  "32 avos": "ROUND_64",
+  "16 avos": "ROUND_32",
+  Octavos: "ROUND_16",
+  Cuartos: "QUARTER_FINALS",
+  Semifinal: "SEMI_FINALS",
+  Final: "FINAL",
+};
+
+export type OfficialPhaseInstances = {
+  knockout: OfficialRound[];
+  final: OfficialRound[];
+  knockoutKeys: BracketRound[];
+  finalKeys: BracketRound[];
+  knockoutMatches: number;
+  finalMatches: number;
+};
+
+function officialKeys(rounds: OfficialRound[]): BracketRound[] {
+  return rounds
+    .map((round) => OFFICIAL_LABEL_TO_BRACKET_ROUND[round.label])
+    .filter((key): key is BracketRound => Boolean(key));
+}
+
+function officialMatchCount(rounds: OfficialRound[]): number {
+  return rounds.reduce((sum, round) => sum + round.crossings.length, 0);
+}
+
+export function officialPhaseInstances(params: {
+  pairCount: number;
+  zone4Advancers: 2 | 3;
+  startsAt: FinalPhaseStartRound;
+}): OfficialPhaseInstances {
+  const split = splitOfficialRounds(
+    officialLlaveRounds(params.pairCount, params.zone4Advancers),
+    params.startsAt,
+  );
+  return {
+    knockout: split.intermediate,
+    final: split.final,
+    knockoutKeys: officialKeys(split.intermediate),
+    finalKeys: officialKeys(split.final),
+    knockoutMatches: officialMatchCount(split.intermediate),
+    finalMatches: officialMatchCount(split.final),
+  };
+}
 
 export type IntermediatePhaseSettings = {
   zone4Advancers: 2 | 3;

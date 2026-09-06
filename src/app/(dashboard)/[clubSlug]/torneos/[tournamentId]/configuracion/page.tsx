@@ -7,6 +7,7 @@ import {
   parseTournamentMode,
   withTournamentMode,
 } from "@/lib/tournament-mode";
+import { getTournamentCategories } from "@/modules/tournaments/application/get-tournament-categories";
 import { getTournamentConfig } from "@/modules/tournaments/application/get-tournament-config";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
 
@@ -26,7 +27,10 @@ export default async function TorneoConfiguracionPage({
   const mode = parseTournamentMode(modo);
 
   const repo = getTournamentRepository();
-  const data = await getTournamentConfig(repo, clubSlug, tournamentId);
+  const [data, categoriesData] = await Promise.all([
+    getTournamentConfig(repo, clubSlug, tournamentId),
+    getTournamentCategories(repo, clubSlug, tournamentId),
+  ]);
   if (!data) notFound();
 
   return (
@@ -53,6 +57,7 @@ export default async function TorneoConfiguracionPage({
         clubSlug={clubSlug}
         tournamentId={tournamentId}
         initial={data.config}
+        categories={categoriesData?.categories ?? []}
       />
     </div>
   );

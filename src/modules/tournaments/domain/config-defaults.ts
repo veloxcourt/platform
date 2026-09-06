@@ -1,10 +1,13 @@
 import { addDaysISO } from "@/lib/date";
 import type {
   FinalPhaseConfigValues,
+  FinalPhaseStartRound,
   PhaseConfigValues,
   PlayDayValues,
+  RoundConfigMapValues,
 } from "./config-schema";
 import { toPlayDayValues } from "./play-day-slots";
+import { seedRoundConfigs } from "./round-phase-config";
 
 const DEFAULT_PLAY_WINDOW = {
   startTime: "09:00",
@@ -83,4 +86,19 @@ export function defaultPhaseConfigs(): {
       playDates: [],
     },
   };
+}
+
+export function defaultRoundConfigs(
+  startsAt: FinalPhaseStartRound = "SEMI_FINALS",
+  knockout?: PhaseConfigValues,
+  final?: PhaseConfigValues,
+  existing?: Partial<RoundConfigMapValues>,
+): RoundConfigMapValues {
+  const defaults = defaultPhaseConfigs();
+  return seedRoundConfigs(
+    knockout ?? defaults.knockout,
+    final ?? defaults.final,
+    startsAt,
+    existing,
+  );
 }

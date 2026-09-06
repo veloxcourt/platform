@@ -37,6 +37,50 @@ export type DailyPlayDayOption = {
   label: string;
 };
 
+export type DailyRgb = [number, number, number];
+
+export function parseHexColor(hex: string): DailyRgb | null {
+  const raw = hex.trim().replace(/^#/, "");
+  const full =
+    raw.length === 3
+      ? raw
+          .split("")
+          .map((part) => part + part)
+          .join("")
+      : raw;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
+  return [
+    Number.parseInt(full.slice(0, 2), 16),
+    Number.parseInt(full.slice(2, 4), 16),
+    Number.parseInt(full.slice(4, 6), 16),
+  ];
+}
+
+function mixRgb(from: DailyRgb, toward: DailyRgb, amount: number): DailyRgb {
+  return [
+    Math.round(from[0] + (toward[0] - from[0]) * amount),
+    Math.round(from[1] + (toward[1] - from[1]) * amount),
+    Math.round(from[2] + (toward[2] - from[2]) * amount),
+  ];
+}
+
+function rgbCss(rgb: DailyRgb) {
+  return `rgb(${rgb[0]} ${rgb[1]} ${rgb[2]})`;
+}
+
+/// Fondo y borde claros a partir del color de la categoría.
+export function categoryCardTone(hex: string) {
+  const rgb = parseHexColor(hex) ?? [100, 116, 139];
+  const fill = mixRgb(rgb, [255, 255, 255], 0.78);
+  const border = mixRgb(rgb, [255, 255, 255], 0.4);
+  return {
+    fill,
+    border,
+    fillCss: rgbCss(fill),
+    borderCss: rgbCss(border),
+  };
+}
+
 export function tournamentPlayDayOptions(
   config: TournamentConfig | null,
 ): DailyPlayDayOption[] {

@@ -16,10 +16,13 @@ import type {
   SlotCellStatus,
 } from "@/modules/tournaments/domain/court-day-slots";
 import {
+  formatDaySlotLabel,
   listSelectablePreferenceSlotsForDay,
   mergeRegistrationDaySlots,
   preferenceDensityLabel,
   preferenceDensityLevel,
+  slotBoxWidthRem,
+  slotDurationMinutes,
 } from "@/modules/tournaments/domain/court-day-slots";
 import {
   PLAY_DAY_START_MINUTES,
@@ -325,6 +328,7 @@ export function SlotRuleGrid({
       )}
 
       {rules.map((day) => {
+        const daySlotLabel = formatDaySlotLabel(day);
         const daySlots =
           mode === "registration"
             ? mergeRegistrationDaySlots(day)
@@ -355,8 +359,8 @@ export function SlotRuleGrid({
             <span className="ml-2 text-sm font-normal text-muted-foreground">
               {mode === "simulation" ? `${day.playDate} · ` : ""}
               {day.startTime}–{day.endTime}
-              {mode === "simulation" && day.slotMinutes
-                ? ` · slots de ${day.slotMinutes} min`
+              {mode === "simulation" && daySlotLabel
+                ? ` · ${daySlotLabel}`
                 : ""}
             </span>
           </p>
@@ -486,6 +490,7 @@ export function SlotRuleGrid({
                 )}
                 <div className="flex flex-nowrap gap-1.5">
                   {court.slots.map((slot) => {
+                    if (slot.spanContinuation) return null;
                     const clickable = isClickable(mode, slot, interactive);
                     const canSetStartMinutes =
                       mode === "simulation" &&
@@ -550,10 +555,18 @@ export function SlotRuleGrid({
                       selectedSlot.startTime === slot.startTime &&
                       selectedSlot.courtIndex === slot.courtIndex;
 
+                    const duration = slotDurationMinutes(slot);
+                    const boxWidthRem = slotBoxWidthRem(duration);
+
                     return (
                       <button
                         key={slot.id}
                         type="button"
+                        style={
+                          boxWidthRem != null
+                            ? { width: `${boxWidthRem}rem` }
+                            : undefined
+                        }
                         disabled={
                           !clickable &&
                           !canSetStartMinutes &&
@@ -614,6 +627,7 @@ export function SlotRuleGrid({
                         )}
                         className={cn(
                           SLOT_BOX_CLASS,
+                          boxWidthRem != null && "w-auto",
                           canSetStartMinutes && "select-none",
                           conflict
                             ? cellClass("reserved")

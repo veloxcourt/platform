@@ -536,6 +536,8 @@ model TournamentSettings {
   zonesPlayDates        String[]    @default([])
   knockoutPlayDates     String[]    @default([])
   finalPlayDates        String[]    @default([])
+  /// Formato / duración / días por instancia de llave (16 avos, Octavos, etc.).
+  roundPhaseConfigs     Json?
   /// Fixture armado de zonas (JSON): parejas por zona + partidos con d?a/hora/cancha.
   zonesFixture          Json?
   /// Fixture armado de fase intermedia (JSON): rondas + partidos con d?a/hora/cancha.

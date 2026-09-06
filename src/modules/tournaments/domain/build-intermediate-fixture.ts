@@ -1,3 +1,4 @@
+import { timeToMinutes } from "@/modules/bookings/domain/rules";
 import { buildEmptyCourtDaySlots } from "./court-day-slots";
 import type { PlayDayValues } from "./config-schema";
 import type { FinalPhaseStartRound } from "./config-schema";
@@ -64,6 +65,8 @@ export type BuildIntermediateFixtureInput = {
   categories: BuildIntermediateCategoryInput[];
   /// Canchas/horarios ya tomados (otras categorías), para no pisarlos.
   reservedMatches?: ZoneMatchStamp[];
+  /// Duración real del partido por instancia (Cuartos 60, Semi 90, etc.).
+  roundSlotMinutes?: (categoryId: string, roundLabel: string) => number;
 };
 
 export type BuildFinalCategoryInput = BuildIntermediateCategoryInput & {
@@ -77,6 +80,8 @@ export type BuildFinalFixtureInput = {
   categories: BuildFinalCategoryInput[];
   /// Canchas/horarios ya tomados (otras categorías), para no pisarlos.
   reservedMatches?: ZoneMatchStamp[];
+  /// Duración real del partido por instancia (Cuartos 60, Semi 90, etc.).
+  roundSlotMinutes?: (categoryId: string, roundLabel: string) => number;
 };
 
 type ResourceSlot = {
@@ -148,12 +153,16 @@ function feederOfficialIds(left: string, right: string): number[] {
   return ids;
 }
 
-function latestZoneBound(matches: ZoneMatchStamp[]): SlotBound | null {
+function latestZoneBound(
+  matches: ZoneMatchStamp[],
+  cellMinutes: number,
+): SlotBound | null {
   let best: SlotBound | null = null;
   for (const match of matches) {
-    if (!match.playDate || match.slotIndex == null) continue;
-    const bound = { playDate: match.playDate, slotIndex: match.slotIndex };
-    best = laterBound(best, bound);
+    if (!match.playDate) continue;
+    const slotIndex = matchLastSlotIndex(match, cellMinutes);
+    if (slotIndex == null) continue;
+    best = laterBound(best, { playDate: match.playDate, slotIndex });
   }
   return best;
 }
@@ -205,51 +214,107 @@ function buildLastDaySlots(input: BuildFinalFixtureInput) {
   );
 }
 
+function stampCellCount(
+  match: Pick<ZoneMatchStamp, "startTime" | "endTime">,
+  cellMinutes: number,
+): number {
+  if (!match.startTime || !match.endTime) return 1;
+  const start = timeToMinutes(match.startTime);
+  let end = timeToMinutes(match.endTime);
+  if (end <= start) end += 24 * 60;
+  return Math.max(1, Math.ceil((end - start) / Math.max(1, cellMinutes)));
+}
+
+function matchLastSlotIndex(
+  match: Pick<ZoneMatchStamp, "slotIndex" | "startTime" | "endTime">,
+  cellMinutes: number,
+): number | null {
+  if (match.slotIndex == null) return null;
+  return match.slotIndex + stampCellCount(match, cellMinutes) - 1;
+}
+
+function cellsNeededFor(duration: number, cellMinutes: number) {
+  return Math.max(1, Math.ceil(duration / Math.max(1, cellMinutes)));
+}
+
+function consecutiveResources(
+  resources: ResourceSlot[],
+  start: ResourceSlot,
+  cellsNeeded: number,
+): ResourceSlot[] | null {
+  const block = resources
+    .filter(
+      (resource) =>
+        resource.playDate === start.playDate &&
+        resource.courtIndex === start.courtIndex &&
+        resource.slotIndex >= start.slotIndex &&
+        resource.slotIndex < start.slotIndex + cellsNeeded,
+    )
+    .sort((a, b) => a.slotIndex - b.slotIndex);
+  if (block.length < cellsNeeded) return null;
+  return block;
+}
+
+function occupyBlock(occupied: Set<string>, block: ResourceSlot[]) {
+  for (const slot of block) {
+    occupied.add(resourceKey(slot.playDate, slot.courtIndex, slot.startTime));
+  }
+}
+
 function occupyZoneSlots(
   occupied: Set<string>,
   resources: ResourceSlot[],
   matches: ZoneMatchStamp[],
+  cellMinutes: number,
 ) {
   for (const match of matches) {
     if (!match.playDate || match.courtIndex == null || !match.startTime) {
       continue;
     }
+    const start = resources.find(
+      (resource) =>
+        resource.playDate === match.playDate &&
+        resource.courtIndex === match.courtIndex &&
+        resource.startTime === match.startTime,
+    );
+    const cells = stampCellCount(match, cellMinutes);
+    if (start) {
+      const block = consecutiveResources(resources, start, cells);
+      if (block) {
+        occupyBlock(occupied, block);
+        continue;
+      }
+    }
     occupied.add(
       resourceKey(match.playDate, match.courtIndex, match.startTime),
     );
-    for (const resource of resources) {
-      if (
-        resource.playDate === match.playDate &&
-        resource.courtIndex === match.courtIndex &&
-        resource.startTime === match.startTime
-      ) {
-        occupied.add(
-          resourceKey(resource.playDate, resource.courtIndex, resource.startTime),
-        );
-      }
-    }
   }
 }
 
-function pickSlot(params: {
+function pickSlotBlock(params: {
   resources: ResourceSlot[];
   occupied: Set<string>;
   afterBound: SlotBound | null;
   requireRest: boolean;
-}): ResourceSlot | null {
+  cellsNeeded: number;
+}): { start: ResourceSlot; block: ResourceSlot[] } | null {
   const restAfter =
     params.requireRest && params.afterBound
       ? restBound(params.afterBound)
       : params.afterBound;
 
   for (const slot of params.resources) {
-    if (
-      occupiedHas(params.occupied, slot) ||
-      (restAfter && !isSlotAfterBound(slot, restAfter))
-    ) {
+    if (restAfter && !isSlotAfterBound(slot, restAfter)) continue;
+    const block = consecutiveResources(
+      params.resources,
+      slot,
+      params.cellsNeeded,
+    );
+    if (!block) continue;
+    if (block.some((resource) => occupiedHas(params.occupied, resource))) {
       continue;
     }
-    return slot;
+    return { start: slot, block };
   }
   return null;
 }
@@ -258,15 +323,28 @@ function occupiedHas(occupied: Set<string>, slot: ResourceSlot) {
   return occupied.has(resourceKey(slot.playDate, slot.courtIndex, slot.startTime));
 }
 
-function pickLastFreeSlot(
+function pickLastFreeBlock(
   resources: ResourceSlot[],
   occupied: Set<string>,
-): ResourceSlot | null {
+  cellsNeeded: number,
+): { start: ResourceSlot; block: ResourceSlot[] } | null {
   for (let index = resources.length - 1; index >= 0; index--) {
     const slot = resources[index];
-    if (slot && !occupiedHas(occupied, slot)) return slot;
+    if (!slot) continue;
+    const block = consecutiveResources(resources, slot, cellsNeeded);
+    if (!block) continue;
+    if (block.some((resource) => occupiedHas(occupied, resource))) continue;
+    return { start: slot, block };
   }
   return null;
+}
+
+function durationForRound(
+  input: { slotMinutes: number; roundSlotMinutes?: (categoryId: string, roundLabel: string) => number },
+  categoryId: string,
+  roundLabel: string,
+) {
+  return input.roundSlotMinutes?.(categoryId, roundLabel) ?? input.slotMinutes;
 }
 
 export function buildIntermediateFixture(
@@ -309,12 +387,12 @@ export function buildIntermediateFixture(
   const allZoneMatches = input.categories.flatMap(
     (category) => category.zonesFixtureMatches,
   );
-  occupyZoneSlots(occupied, resources, allZoneMatches);
-  occupyZoneSlots(occupied, resources, input.reservedMatches ?? []);
-  const zonesBound = latestZoneBound([
-    ...allZoneMatches,
-    ...(input.reservedMatches ?? []),
-  ]);
+  occupyZoneSlots(occupied, resources, allZoneMatches, input.slotMinutes);
+  occupyZoneSlots(occupied, resources, input.reservedMatches ?? [], input.slotMinutes);
+  const zonesBound = latestZoneBound(
+    [...allZoneMatches, ...(input.reservedMatches ?? [])],
+    input.slotMinutes,
+  );
 
   const queues = input.categories
     .map((category) => {
@@ -365,34 +443,47 @@ export function buildIntermediateFixture(
 
       let afterBound = zonesBound;
       for (const feeder of feeders) {
-        if (feeder.playDate && feeder.slotIndex != null) {
-          afterBound = laterBound(afterBound, {
-            playDate: feeder.playDate,
-            slotIndex: feeder.slotIndex,
-          });
+        if (feeder.playDate) {
+          const slotIndex = matchLastSlotIndex(feeder, input.slotMinutes);
+          if (slotIndex != null) {
+            afterBound = laterBound(afterBound, {
+              playDate: feeder.playDate,
+              slotIndex,
+            });
+          }
         }
       }
 
-      let slot: ResourceSlot | null = null;
+      const duration = durationForRound(
+        input,
+        pending.categoryId,
+        pending.roundLabel,
+      );
+      const cellsNeeded = cellsNeededFor(duration, input.slotMinutes);
+      let picked: { start: ResourceSlot; block: ResourceSlot[] } | null = null;
       let usedRestFallback = false;
       if (!missingFeeder || feeders.length === 0) {
-        slot = pickSlot({
+        picked = pickSlotBlock({
           resources,
           occupied,
           afterBound,
           requireRest: Boolean(afterBound),
+          cellsNeeded,
         });
-        if (!slot && afterBound) {
-          slot = pickSlot({
+        if (!picked && afterBound) {
+          picked = pickSlotBlock({
             resources,
             occupied,
             afterBound,
             requireRest: false,
+            cellsNeeded,
           });
-          usedRestFallback = Boolean(slot);
+          usedRestFallback = Boolean(picked);
         }
       }
 
+      const slot = picked?.start ?? null;
+      const last = picked?.block[picked.block.length - 1] ?? null;
       const list = scheduledByCategory.get(pending.categoryId) ?? [];
       const scheduled: IntermediateScheduledMatch = {
         officialId: pending.officialId,
@@ -402,22 +493,20 @@ export function buildIntermediateFixture(
         right: pending.right,
         playDate: slot?.playDate ?? null,
         startTime: slot?.startTime ?? null,
-        endTime: slot?.endTime ?? null,
+        endTime: last?.endTime ?? slot?.endTime ?? null,
         courtIndex: slot?.courtIndex ?? null,
         slotIndex: slot?.slotIndex ?? null,
         noRestGap: usedRestFallback,
       };
 
-      if (!slot) {
+      if (!picked) {
         warnings.push(
           missingFeeder && feeders.length > 0
             ? `${pending.roundLabel} n° ${pending.officialId}: sin horario posterior a sus feeders.`
             : `${pending.roundLabel} n° ${pending.officialId}: sin horario disponible.`,
         );
       } else {
-        occupied.add(
-          resourceKey(slot.playDate, slot.courtIndex, slot.startTime),
-        );
+        occupyBlock(occupied, picked.block);
         if (usedRestFallback) {
           noRestIds.add(`${pending.categoryId}:${pending.officialId}`);
         }
@@ -514,12 +603,17 @@ export function buildFinalFixture(
     ...category.zonesFixtureMatches,
     ...(category.priorKnockoutMatches ?? []),
   ]);
-  occupyZoneSlots(occupied, resources, priorStamps);
-  occupyZoneSlots(occupied, resources, input.reservedMatches ?? []);
-  const zonesBound = latestZoneBound([
-    ...priorStamps,
-    ...(input.reservedMatches ?? []),
-  ]);
+  occupyZoneSlots(occupied, resources, priorStamps, input.slotMinutes);
+  occupyZoneSlots(
+    occupied,
+    resources,
+    input.reservedMatches ?? [],
+    input.slotMinutes,
+  );
+  const zonesBound = latestZoneBound(
+    [...priorStamps, ...(input.reservedMatches ?? [])],
+    input.slotMinutes,
+  );
 
   const queues = input.categories
     .map((category) => {
@@ -579,38 +673,51 @@ export function buildFinalFixture(
 
       let afterBound = zonesBound;
       for (const feeder of feeders) {
-        if (feeder.playDate && feeder.slotIndex != null) {
-          afterBound = laterBound(afterBound, {
-            playDate: feeder.playDate,
-            slotIndex: feeder.slotIndex,
-          });
+        if (feeder.playDate) {
+          const slotIndex = matchLastSlotIndex(feeder, input.slotMinutes);
+          if (slotIndex != null) {
+            afterBound = laterBound(afterBound, {
+              playDate: feeder.playDate,
+              slotIndex,
+            });
+          }
         }
       }
 
-      let slot: ResourceSlot | null = null;
+      const duration = durationForRound(
+        input,
+        pending.categoryId,
+        pending.roundLabel,
+      );
+      const cellsNeeded = cellsNeededFor(duration, input.slotMinutes);
+      let picked: { start: ResourceSlot; block: ResourceSlot[] } | null = null;
       let usedRestFallback = false;
       if (!missingFeeder || feeders.length === 0) {
-        slot = pickSlot({
+        picked = pickSlotBlock({
           resources,
           occupied,
           afterBound,
           requireRest: Boolean(afterBound),
+          cellsNeeded,
         });
-        if (!slot && afterBound) {
-          slot = pickSlot({
+        if (!picked && afterBound) {
+          picked = pickSlotBlock({
             resources,
             occupied,
             afterBound,
             requireRest: false,
+            cellsNeeded,
           });
-          usedRestFallback = Boolean(slot);
+          usedRestFallback = Boolean(picked);
         }
       }
-      if (!slot) {
-        slot = pickLastFreeSlot(resources, occupied);
-        usedRestFallback = Boolean(slot);
+      if (!picked) {
+        picked = pickLastFreeBlock(resources, occupied, cellsNeeded);
+        usedRestFallback = Boolean(picked);
       }
 
+      const slot = picked?.start ?? null;
+      const last = picked?.block[picked.block.length - 1] ?? null;
       const list = scheduledByCategory.get(pending.categoryId) ?? [];
       const scheduled: IntermediateScheduledMatch = {
         officialId: pending.officialId,
@@ -620,22 +727,20 @@ export function buildFinalFixture(
         right: pending.right,
         playDate: slot?.playDate ?? null,
         startTime: slot?.startTime ?? null,
-        endTime: slot?.endTime ?? null,
+        endTime: last?.endTime ?? slot?.endTime ?? null,
         courtIndex: slot?.courtIndex ?? null,
         slotIndex: slot?.slotIndex ?? null,
         noRestGap: usedRestFallback,
       };
 
-      if (!slot) {
+      if (!picked) {
         warnings.push(
           missingFeeder && feeders.length > 0
             ? `${pending.roundLabel} n° ${pending.officialId}: sin horario posterior a sus feeders.`
             : `${pending.roundLabel} n° ${pending.officialId}: sin horario disponible.`,
         );
       } else {
-        occupied.add(
-          resourceKey(slot.playDate, slot.courtIndex, slot.startTime),
-        );
+        occupyBlock(occupied, picked.block);
         if (usedRestFallback) {
           noRestIds.add(`${pending.categoryId}:${pending.officialId}`);
         }

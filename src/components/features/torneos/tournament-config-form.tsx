@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -18,8 +18,14 @@ import {
 } from "@/components/ui/card";
 import { AyudaButton } from "./ayuda-button";
 import { formatShortDate } from "@/lib/date";
-import type { TournamentConfig } from "@/modules/tournaments/domain/types";
+import type {
+  TournamentCategoryItem,
+  TournamentConfig,
+} from "@/modules/tournaments/domain/types";
+import { simulationPairCount } from "@/modules/tournaments/domain/category-simulation-schema";
+import { officialPhaseInstances } from "@/modules/tournaments/domain/intermediate-phase";
 import {
+  BRACKET_ROUND_LABELS,
   MATCH_FORMAT_LABELS,
   MATCH_FORMAT_VALUES,
   FINAL_PHASE_START_ROUND_LABELS,
@@ -29,13 +35,12 @@ import {
   ZONE4_ADVANCERS_LABELS,
   ZONE4_ADVANCERS_VALUES,
   tournamentConfigSchema,
+  type BracketRound,
   type TournamentConfigValues,
   type TournamentPhaseKey,
 } from "@/modules/tournaments/domain/config-schema";
-import {
-  intermediateMatchCount,
-  intermediateRoundLabels,
-} from "@/modules/tournaments/domain/bracket-rounds";
+import { defaultRoundConfigs } from "@/modules/tournaments/domain/config-defaults";
+import { materializeCategoryRounds } from "@/modules/tournaments/domain/round-phase-config";
 import { saveTournamentConfigAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/configuracion/actions";
 import {
   materializePlayDaySelection,
@@ -75,37 +80,206 @@ function formatSlotsWithClock(slotCount: number, totalMinutes: number): string {
   return `${label} (${formatCourtHours(totalMinutes)})`;
 }
 
+function PlayDateChecks({
+  selectedDates,
+  playDays,
+  disabled,
+  ariaPrefix,
+  onToggle,
+}: {
+  selectedDates: string[];
+  playDays: TournamentConfigValues["playDays"];
+  disabled: boolean;
+  ariaPrefix: string;
+  onToggle: (date: string, checked: boolean) => void;
+}) {
+  if (playDays.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Definí inicio y fin del torneo en Info para ver los días de juego.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap gap-3">
+      {playDays.map((day, dayIndex) => {
+        const date = day?.date ?? "";
+        const label = `Día ${dayIndex + 1}`;
+        const checked = Boolean(date && selectedDates.includes(date));
+        return (
+          <label
+            key={`${ariaPrefix}-${dayIndex}-${date || "empty"}`}
+            className="flex cursor-pointer items-center gap-2 rounded-md border border-border/80 bg-background/90 px-2.5 py-1.5 text-sm"
+          >
+            <Checkbox
+              checked={checked}
+              disabled={disabled || !date}
+              onCheckedChange={(value) => onToggle(date, value === true)}
+              aria-label={`${ariaPrefix}: ${label}`}
+            />
+            <span className="font-medium">{label}</span>
+            {date ? (
+              <span className="text-xs text-muted-foreground">
+                {formatShortDate(date)}
+              </span>
+            ) : null}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function RoundInstanceFields({
+  categoryIndex,
+  round,
+  control,
+  register,
+  setValue,
+  playDays,
+}: {
+  categoryIndex: number;
+  round: BracketRound;
+  control: ReturnType<typeof useForm<TournamentConfigValues>>["control"];
+  register: ReturnType<typeof useForm<TournamentConfigValues>>["register"];
+  setValue: ReturnType<typeof useForm<TournamentConfigValues>>["setValue"];
+  playDays: TournamentConfigValues["playDays"];
+}) {
+  const readOnly = useTournamentReadOnly();
+  const base = `categories.${categoryIndex}.rounds.${round}` as const;
+  const selectedDates =
+    useWatch({
+      control,
+      name: `${base}.playDates`,
+    }) ?? [];
+
+  function togglePlayDate(date: string, checked: boolean) {
+    if (readOnly || !date) return;
+    const current = Array.isArray(selectedDates) ? selectedDates : [];
+    const next = checked
+      ? current.includes(date)
+        ? current
+        : [...current, date]
+      : current.filter((d) => d !== date);
+    setValue(`${base}.playDates`, next, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  }
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="flex flex-col gap-1.5 sm:col-span-2">
+        <Label>Formato</Label>
+        <select
+          className={SELECT_CLASS}
+          disabled={readOnly}
+          {...register(`${base}.matchFormat`)}
+        >
+          {MATCH_FORMAT_VALUES.map((format) => (
+            <option key={format} value={format}>
+              {MATCH_FORMAT_LABELS[format]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Duración (min)</Label>
+        <Input
+          type="number"
+          min={30}
+          max={180}
+          step={15}
+          disabled={readOnly}
+          readOnly={readOnly}
+          {...register(`${base}.matchDurationMin`, { valueAsNumber: true })}
+        />
+      </div>
+      <div className="flex flex-col gap-1.5 sm:col-span-2">
+        <Label>Días de juego</Label>
+        <PlayDateChecks
+          selectedDates={selectedDates}
+          playDays={playDays}
+          disabled={readOnly}
+          ariaPrefix={BRACKET_ROUND_LABELS[round]}
+          onToggle={togglePlayDate}
+        />
+      </div>
+    </div>
+  );
+}
+
 function PhaseFields({
   categoryIndex,
   phase,
   control,
   register,
   setValue,
+  getValues,
   errors,
   playDays,
   finalStartsAtRound,
+  pairCount,
+  zone4Advancers,
 }: {
   categoryIndex: number;
   phase: TournamentPhaseKey;
   control: ReturnType<typeof useForm<TournamentConfigValues>>["control"];
   register: ReturnType<typeof useForm<TournamentConfigValues>>["register"];
   setValue: ReturnType<typeof useForm<TournamentConfigValues>>["setValue"];
+  getValues: ReturnType<typeof useForm<TournamentConfigValues>>["getValues"];
   errors: ReturnType<
     typeof useForm<TournamentConfigValues>
   >["formState"]["errors"];
   playDays: TournamentConfigValues["playDays"];
   finalStartsAtRound?: TournamentConfigValues["categories"][number]["phases"]["final"]["startsAtRound"];
+  pairCount: number;
+  zone4Advancers: 2 | 3;
 }) {
   const meta = TOURNAMENT_PHASE_META[phase];
   const phaseErrors = errors.categories?.[categoryIndex]?.phases?.[phase];
-  const intermediateLabels =
-    phase === "knockout" && finalStartsAtRound
-      ? intermediateRoundLabels(finalStartsAtRound)
-      : [];
-  const intermediateMatches =
-    phase === "knockout" && finalStartsAtRound
-      ? intermediateMatchCount(finalStartsAtRound)
-      : 0;
+  const instances =
+    phase !== "zones" && finalStartsAtRound
+      ? officialPhaseInstances({
+          pairCount,
+          zone4Advancers,
+          startsAt: finalStartsAtRound,
+        })
+      : null;
+  const instanceKeys =
+    phase === "knockout"
+      ? (instances?.knockoutKeys ?? [])
+      : phase === "final"
+        ? (instances?.finalKeys ?? [])
+        : [];
+  const instanceLabels =
+    phase === "knockout"
+      ? (instances?.knockout.map((round) => round.label) ?? [])
+      : phase === "final"
+        ? (instances?.final.map((round) => round.label) ?? [])
+        : [];
+  const instanceMatches =
+    phase === "knockout"
+      ? (instances?.knockoutMatches ?? 0)
+      : phase === "final"
+        ? (instances?.finalMatches ?? 0)
+        : 0;
+  const [selectedRound, setSelectedRound] = useState<BracketRound | "">(
+    instanceKeys[0] ?? "",
+  );
+  const instanceKeyList = instanceKeys.join(",");
+
+  useEffect(() => {
+    if (instanceKeys.length === 0) {
+      setSelectedRound("");
+      return;
+    }
+    if (!instanceKeys.includes(selectedRound as BracketRound)) {
+      setSelectedRound(instanceKeys[0]);
+    }
+  }, [instanceKeyList, instanceKeys, selectedRound]);
+
   const base = `categories.${categoryIndex}.phases.${phase}` as const;
   const selectedDates =
     useWatch({
@@ -129,20 +303,53 @@ function PhaseFields({
     });
   }
 
+  function applyToAllInstances() {
+    const sourceKey = selectedRound || instanceKeys[0];
+    if (!sourceKey) return;
+    const source = getValues(`categories.${categoryIndex}.rounds.${sourceKey}`);
+    for (const key of instanceKeys.slice(1)) {
+      setValue(
+        `categories.${categoryIndex}.rounds.${key}`,
+        {
+          matchFormat: source.matchFormat,
+          matchDurationMin: source.matchDurationMin,
+          playDates: [...(source.playDates ?? [])],
+        },
+        { shouldDirty: true, shouldValidate: true },
+      );
+    }
+  }
+
   return (
     <div className={PHASE_PANEL_CLASS[phase]}>
       <div className="mb-3">
         <p className="font-medium">{meta.label}</p>
         <p className="text-sm text-muted-foreground">{meta.description}</p>
-        {phase === "knockout" && intermediateLabels.length > 0 && (
+        {phase === "knockout" && instanceLabels.length > 0 && (
           <p className="mt-1 text-sm text-muted-foreground">
-            Instancias en esta fase: {intermediateLabels.join(", ")} (
-            {intermediateMatches} partidos con llave de 32 parejas).
+            Con {pairCount} pareja{pairCount === 1 ? "" : "s"}:{" "}
+            {instanceLabels.join(", ")} ({instanceMatches} partido
+            {instanceMatches === 1 ? "" : "s"}).
           </p>
         )}
-        {phase === "knockout" && intermediateLabels.length === 0 && (
+        {phase === "knockout" && instanceLabels.length === 0 && (
           <p className="mt-1 text-sm text-muted-foreground">
-            Sin rondas intermedias: la fase final comienza en 16 avos.
+            {pairCount < 6
+              ? "Definí más parejas en Categorías (simulación) para armar la llave."
+              : `Con ${pairCount} parejas no hay fase intermedia: la llave entra directo a la fase final.`}
+          </p>
+        )}
+        {phase === "final" && instanceLabels.length > 0 && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            Con {pairCount} pareja{pairCount === 1 ? "" : "s"}:{" "}
+            {instanceLabels.join(", ")} ({instanceMatches} partido
+            {instanceMatches === 1 ? "" : "s"}).
+          </p>
+        )}
+        {phase === "final" && instanceLabels.length === 0 && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            Definí la cantidad de parejas en Categorías (simulación) para ver
+            las instancias.
           </p>
         )}
       </div>
@@ -162,8 +369,7 @@ function PhaseFields({
               ))}
             </select>
             <p className="text-xs text-muted-foreground">
-              Las instancias anteriores se juegan con el formato de la fase
-              intermedia.
+              Las instancias anteriores se configuran en la fase intermedia.
             </p>
             {errors.categories?.[categoryIndex]?.phases?.final
               ?.startsAtRound && (
@@ -176,78 +382,102 @@ function PhaseFields({
             )}
           </div>
         )}
-        <div className="flex flex-col gap-1.5 sm:col-span-2">
-          <Label>Formato</Label>
-          <select
-            className={SELECT_CLASS}
-            disabled={readOnly}
-            {...register(`${base}.matchFormat`)}
-          >
-            {MATCH_FORMAT_VALUES.map((f) => (
-              <option key={f} value={f}>
-                {MATCH_FORMAT_LABELS[f]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label>Duración (min)</Label>
-          <Input
-            type="number"
-            min={30}
-            max={180}
-            step={15}
-            disabled={readOnly}
-            readOnly={readOnly}
-            {...register(`${base}.matchDurationMin`, { valueAsNumber: true })}
-          />
-          {phaseErrors?.matchDurationMin && (
-            <p className="text-xs text-destructive">
-              {phaseErrors.matchDurationMin.message}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-col gap-1.5 sm:col-span-2">
-          <Label>Días de juego de esta fase</Label>
-          {playDays.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Definí inicio y fin del torneo en Info para ver los días de juego.
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-3">
-              {playDays.map((day, dayIndex) => {
-                const date = day?.date ?? "";
-                const label = `Día ${dayIndex + 1}`;
-                const checked = Boolean(date && selectedDates.includes(date));
-                return (
-                  <label
-                    key={`${phase}-${dayIndex}-${date || "empty"}`}
-                    className="flex cursor-pointer items-center gap-2 rounded-md border border-border/80 bg-background/90 px-2.5 py-1.5 text-sm"
-                  >
-                    <Checkbox
-                      checked={checked}
-                      disabled={readOnly || !date}
-                      onCheckedChange={(value) =>
-                        togglePlayDate(date, value === true)
-                      }
-                      aria-label={`${meta.label}: ${label}`}
-                    />
-                    <span className="font-medium">{label}</span>
-                    {date ? (
-                      <span className="text-xs text-muted-foreground">
-                        {formatShortDate(date)}
-                      </span>
-                    ) : null}
-                  </label>
-                );
-              })}
+        {phase === "zones" ? (
+          <>
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <Label>Formato</Label>
+              <select
+                className={SELECT_CLASS}
+                disabled={readOnly}
+                {...register(`${base}.matchFormat`)}
+              >
+                {MATCH_FORMAT_VALUES.map((f) => (
+                  <option key={f} value={f}>
+                    {MATCH_FORMAT_LABELS[f]}
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Indicá en qué días se juega esta fase (sirve para evaluar la
-            disponibilidad por fase).
-          </p>
-        </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Duración (min)</Label>
+              <Input
+                type="number"
+                min={30}
+                max={180}
+                step={15}
+                disabled={readOnly}
+                readOnly={readOnly}
+                {...register(`${base}.matchDurationMin`, { valueAsNumber: true })}
+              />
+              {phaseErrors?.matchDurationMin && (
+                <p className="text-xs text-destructive">
+                  {phaseErrors.matchDurationMin.message}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <Label>Días de juego de esta fase</Label>
+              <PlayDateChecks
+                selectedDates={selectedDates}
+                playDays={playDays}
+                disabled={readOnly}
+                ariaPrefix={meta.label}
+                onToggle={togglePlayDate}
+              />
+              <p className="text-xs text-muted-foreground">
+                Indicá en qué días se juega esta fase (sirve para evaluar la
+                disponibilidad por fase).
+              </p>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col gap-3 sm:col-span-2">
+            {instanceKeys.length > 0 ? (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Instancia</Label>
+                  <select
+                    className={SELECT_CLASS}
+                    disabled={readOnly}
+                    value={selectedRound}
+                    onChange={(event) =>
+                      setSelectedRound(event.target.value as BracketRound)
+                    }
+                  >
+                    {instanceKeys.map((round) => (
+                      <option key={round} value={round}>
+                        {BRACKET_ROUND_LABELS[round]}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Elegí la instancia para editar su formato, duración y días.
+                  </p>
+                </div>
+                {selectedRound ? (
+                  <RoundInstanceFields
+                    key={selectedRound}
+                    categoryIndex={categoryIndex}
+                    round={selectedRound}
+                    control={control}
+                    register={register}
+                    setValue={setValue}
+                    playDays={playDays}
+                  />
+                ) : null}
+                {!readOnly && instanceKeys.length > 1 && (
+                  <button
+                    type="button"
+                    className="self-start text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    onClick={applyToAllInstances}
+                  >
+                    Aplicar a todas las instancias de esta fase
+                  </button>
+                )}
+              </>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -259,20 +489,28 @@ function CategoryPhaseCard({
   control,
   register,
   setValue,
+  getValues,
   errors,
   playDays,
+  pairCount,
+  zone4Advancers,
 }: {
   categoryIndex: number;
   categoryName: string;
   control: ReturnType<typeof useForm<TournamentConfigValues>>["control"];
   register: ReturnType<typeof useForm<TournamentConfigValues>>["register"];
   setValue: ReturnType<typeof useForm<TournamentConfigValues>>["setValue"];
+  getValues: ReturnType<typeof useForm<TournamentConfigValues>>["getValues"];
   errors: ReturnType<
     typeof useForm<TournamentConfigValues>
   >["formState"]["errors"];
   playDays: TournamentConfigValues["playDays"];
+  pairCount: number;
+  zone4Advancers: 2 | 3;
 }) {
   const readOnly = useTournamentReadOnly();
+  const [selectedPhase, setSelectedPhase] =
+    useState<TournamentPhaseKey>("zones");
   const finalStartsAtRound = useWatch({
     control,
     name: `categories.${categoryIndex}.phases.final.startsAtRound`,
@@ -285,11 +523,12 @@ function CategoryPhaseCard({
         <CardAction>
           <AyudaButton
             title={`Ayuda de ${categoryName}`}
-            description="Formato y días por fase de esta categoría."
+            description="Formato y días por fase e instancia de esta categoría."
           >
             <p>
-              Formato por fase para esta categoría del torneo. Asigná los días
-              en los que se juega cada fase.
+              Elegí la fase (zonas, intermedia o final). En intermedia y final,
+              después elegí la instancia para configurar formato, duración y
+              días.
             </p>
           </AyudaButton>
         </CardAction>
@@ -299,19 +538,40 @@ function CategoryPhaseCard({
           type="hidden"
           {...register(`categories.${categoryIndex}.categoryId`)}
         />
-        {TOURNAMENT_PHASE_KEYS.map((phase) => (
-          <PhaseFields
-            key={phase}
-            categoryIndex={categoryIndex}
-            phase={phase}
-            control={control}
-            register={register}
-            setValue={setValue}
-            errors={errors}
-            playDays={playDays}
-            finalStartsAtRound={finalStartsAtRound}
-          />
-        ))}
+        <div className="flex flex-col gap-1.5">
+          <Label>Fase</Label>
+          <select
+            className={SELECT_CLASS}
+            disabled={readOnly}
+            value={selectedPhase}
+            onChange={(event) =>
+              setSelectedPhase(event.target.value as TournamentPhaseKey)
+            }
+          >
+            {TOURNAMENT_PHASE_KEYS.map((phase) => (
+              <option key={phase} value={phase}>
+                {TOURNAMENT_PHASE_META[phase].label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Elegí la fase para editar su configuración.
+          </p>
+        </div>
+        <PhaseFields
+          key={selectedPhase}
+          categoryIndex={categoryIndex}
+          phase={selectedPhase}
+          control={control}
+          register={register}
+          setValue={setValue}
+          getValues={getValues}
+          errors={errors}
+          playDays={playDays}
+          finalStartsAtRound={finalStartsAtRound}
+          pairCount={pairCount}
+          zone4Advancers={zone4Advancers}
+        />
       </CardContent>
     </Card>
   );
@@ -454,6 +714,7 @@ export function TournamentConfigForm({
   clubSlug,
   tournamentId,
   initial,
+  categories = [],
   /** Si se indica, muestra solo el formato de esa categoría. */
   focusCategoryId,
   /**
@@ -466,6 +727,7 @@ export function TournamentConfigForm({
   clubSlug: string;
   tournamentId: string;
   initial: TournamentConfig;
+  categories?: TournamentCategoryItem[];
   focusCategoryId?: string;
   panel?: "parameters" | "category" | "all";
 }) {
@@ -477,6 +739,7 @@ export function TournamentConfigForm({
     control,
     handleSubmit,
     setValue,
+    getValues,
     formState: { errors },
   } = useForm<TournamentConfigValues>({
     resolver: zodResolver(tournamentConfigSchema),
@@ -499,6 +762,12 @@ export function TournamentConfigForm({
             playDates: category.phases.final.playDates ?? [],
           },
         },
+        rounds: defaultRoundConfigs(
+          category.phases.final.startsAtRound,
+          category.phases.knockout,
+          category.phases.final,
+          category.rounds,
+        ),
         intervalMin: category.intervalMin,
         pairsPerZone: category.pairsPerZone ?? 3,
         zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
@@ -519,6 +788,18 @@ export function TournamentConfigForm({
       name: "categories.0.phases.zones.matchDurationMin",
     }) ?? 75;
   const intervalMin = useWatch({ control, name: "categories.0.intervalMin" }) ?? 0;
+  const sharedZone4Watch = useWatch({
+    control,
+    name: "categories.0.zone4Advancers",
+  });
+  const sharedZone4Advancers: 2 | 3 =
+    sharedZone4Watch === 2 || Number(sharedZone4Watch) === 2 ? 2 : 3;
+  const pairCountByCategory = new Map(
+    categories.map((category) => [
+      category.id,
+      simulationPairCount(category),
+    ]),
+  );
   const slotMinutes = zonesPlaySlotMinutes(zonesDuration, intervalMin);
   const courts =
     Number.isFinite(courtCount) && courtCount > 0 ? Number(courtCount) : 0;
@@ -559,33 +840,39 @@ export function TournamentConfigForm({
       playDays: values.playDays.map((day) =>
         materializePlayDaySelection(toPlayDayValues(day), slotMin),
       ),
-      categories: values.categories.map((category) => ({
-        ...category,
-        // Comunes a todas las categorías (por ahora).
-        pairsPerZone: sharedPairs,
-        zone4Advancers: sharedZone4Advancers,
-        intervalMin: sharedInterval,
-        phases: {
-          zones: {
-            ...category.phases.zones,
-            playDates: category.phases.zones.playDates.filter((d) =>
-              validDates.has(d),
-            ),
+      categories: values.categories.map((category) => {
+        const instances = officialPhaseInstances({
+          pairCount: pairCountByCategory.get(category.categoryId) ?? 0,
+          zone4Advancers: sharedZone4Advancers,
+          startsAt: category.phases.final.startsAtRound,
+        });
+        const materialized = materializeCategoryRounds({
+          startsAt: category.phases.final.startsAtRound,
+          rounds: category.rounds,
+          knockout: category.phases.knockout,
+          final: category.phases.final,
+          zones: category.phases.zones,
+          validDates,
+          knockoutKeys: instances.knockoutKeys,
+          finalKeys: instances.finalKeys,
+        });
+        return {
+          ...category,
+          // Comunes a todas las categorías (por ahora).
+          pairsPerZone: sharedPairs,
+          zone4Advancers: sharedZone4Advancers,
+          intervalMin: sharedInterval,
+          rounds: materialized.rounds,
+          phases: {
+            zones: materialized.zones,
+            knockout: materialized.knockout,
+            final: {
+              ...materialized.final,
+              startsAtRound: category.phases.final.startsAtRound,
+            },
           },
-          knockout: {
-            ...category.phases.knockout,
-            playDates: category.phases.knockout.playDates.filter((d) =>
-              validDates.has(d),
-            ),
-          },
-          final: {
-            ...category.phases.final,
-            playDates: category.phases.final.playDates.filter((d) =>
-              validDates.has(d),
-            ),
-          },
-        },
-      })),
+        };
+      }),
     };
 
     if (readOnly) return;
@@ -647,8 +934,11 @@ export function TournamentConfigForm({
               control={control}
               register={register}
               setValue={setValue}
+              getValues={getValues}
               errors={errors}
               playDays={playDaysWatch}
+              pairCount={pairCountByCategory.get(category.categoryId) ?? 0}
+              zone4Advancers={sharedZone4Advancers}
             />
           ))
         : null}

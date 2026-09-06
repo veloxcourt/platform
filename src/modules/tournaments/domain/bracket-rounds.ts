@@ -1,6 +1,9 @@
 import {
+  BRACKET_ROUND_LABELS,
+  BRACKET_ROUND_VALUES,
   FINAL_PHASE_START_ROUND_LABELS,
   FINAL_PHASE_START_ROUND_VALUES,
+  type BracketRound,
   type FinalPhaseStartRound,
 } from "./config-schema";
 
@@ -25,6 +28,32 @@ export function intermediateRoundLabels(
   return intermediateRounds(finalStartsAt).map(
     (round) => FINAL_PHASE_START_ROUND_LABELS[round],
   );
+}
+
+/// Instancias de la fase final: desde el corte hasta la Final.
+export function finalRoundKeys(
+  finalStartsAt: FinalPhaseStartRound,
+): BracketRound[] {
+  const startIdx = BRACKET_ROUND_VALUES.indexOf(finalStartsAt);
+  if (startIdx < 0) return ["FINAL"];
+  return BRACKET_ROUND_VALUES.slice(startIdx);
+}
+
+export function finalRoundLabels(
+  finalStartsAt: FinalPhaseStartRound,
+): string[] {
+  return finalRoundKeys(finalStartsAt).map(
+    (round) => BRACKET_ROUND_LABELS[round],
+  );
+}
+
+export function phaseRoundKeys(
+  phase: "knockout" | "final",
+  finalStartsAt: FinalPhaseStartRound,
+): BracketRound[] {
+  return phase === "knockout"
+    ? intermediateRounds(finalStartsAt)
+    : finalRoundKeys(finalStartsAt);
 }
 
 /// Partidos de la fase intermedia asumiendo llave desde `bracketSize` (p. ej. 32 parejas).

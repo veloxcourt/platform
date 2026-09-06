@@ -118,7 +118,9 @@ export function FinalLlavePanel({
               <p>
                 Elegí la categoría para ver el cuadro oficial. Ámbar es fase
                 intermedia; violeta es fase final (desde {startsAtLabel}). Cada
-                cruce muestra día, hora y cancha cuando ya hay armado.
+                cruce es un bloque de tres fichas: pareja, partido y pareja.
+                Los nombres se completan con los ganadores de la ronda
+                anterior.
               </p>
             </AyudaButton>
           </div>

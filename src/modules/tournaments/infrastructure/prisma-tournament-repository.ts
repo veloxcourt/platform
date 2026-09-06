@@ -25,6 +25,10 @@ import type {
 } from "../domain/slot-reservation-schema";
 import { defaultPhaseConfigs, syncPlayDaysToRange } from "../domain/config-defaults";
 import {
+  materializeCategoryRounds,
+  parseStoredRoundConfigs,
+} from "../domain/round-phase-config";
+import {
   playDayPersistFields,
   toPlayDayValues,
 } from "../domain/play-day-slots";
@@ -110,6 +114,10 @@ import {
 } from "../domain/zones-slot-registration";
 import type { SlotReservationRef } from "../domain/court-day-slots";
 import { listSelectablePreferenceSlots } from "../domain/court-day-slots";
+import {
+  fixtureCellMinutes,
+  slotMinutesForOfficialLabel,
+} from "../domain/instance-slot-config";
 
 function toDbDate(dateISO: string): Date {
   return new Date(`${dateISO}T00:00:00.000Z`);
@@ -123,6 +131,7 @@ let intermediateFixtureColumnReady = false;
 let finalFixtureColumnReady = false;
 let fixtureEditModeColumnReady = false;
 let fixtureEditModesColumnReady = false;
+let roundPhaseConfigsColumnReady = false;
 
 async function ensureFixtureEditModeColumn() {
   if (fixtureEditModeColumnReady) return;
@@ -185,6 +194,56 @@ async function ensureFinalFixtureColumn() {
 
 async function ensureZoneQualificationColumn() {
   await ensureRuntimeSchema();
+}
+
+async function ensureRoundPhaseConfigsColumn() {
+  if (roundPhaseConfigsColumnReady) return;
+  await ensureRuntimeSchema();
+  roundPhaseConfigsColumnReady = true;
+}
+
+async function readRoundPhaseConfigsByCategory(
+  categoryIds: string[],
+): Promise<Map<string, unknown>> {
+  const byCategory = new Map<string, unknown>();
+  if (categoryIds.length === 0) return byCategory;
+  try {
+    await ensureRoundPhaseConfigsColumn();
+    const rows = await prisma.$queryRawUnsafe<
+      Array<{ categoryId: string; roundPhaseConfigs: unknown }>
+    >(
+      `SELECT "categoryId", "roundPhaseConfigs" FROM "tournament_settings" WHERE "categoryId" = ANY($1::text[])`,
+      categoryIds,
+    );
+    for (const row of rows) {
+      byCategory.set(row.categoryId, row.roundPhaseConfigs);
+    }
+  } catch (error) {
+    console.error("[tournaments] roundPhaseConfigs unavailable", error);
+  }
+  return byCategory;
+}
+
+async function writeRoundPhaseConfigs(
+  categoryId: string,
+  rounds: unknown,
+) {
+  await ensureRoundPhaseConfigsColumn();
+  const updated = await prisma.$executeRawUnsafe(
+    `UPDATE "tournament_settings" SET "roundPhaseConfigs" = $1::jsonb WHERE "categoryId" = $2`,
+    JSON.stringify(rounds),
+    categoryId,
+  );
+  if (updated === 0) {
+    await prisma.tournamentSettings.create({
+      data: { categoryId },
+    });
+    await prisma.$executeRawUnsafe(
+      `UPDATE "tournament_settings" SET "roundPhaseConfigs" = $1::jsonb WHERE "categoryId" = $2`,
+      JSON.stringify(rounds),
+      categoryId,
+    );
+  }
 }
 
 function mapStoredPlayDay(day: {
@@ -309,7 +368,7 @@ const CATEGORY_INCLUDE = {
   },
 } as const;
 
-/** Sin zoneQualification: Prisma no debe SELECT-ear columnas que aún no existen. */
+/** Sin zoneQualification / roundPhaseConfigs: Prisma no debe SELECT-ear columnas que aún no existen. */
 const SETTINGS_SELECT = {
   categoryId: true,
   zonesMatchFormat: true,
@@ -376,6 +435,7 @@ function mapCategoryPhaseConfig(
     zonesPlayDates?: string[];
     knockoutPlayDates?: string[];
     finalPlayDates?: string[];
+    roundPhaseConfigs?: unknown;
     zonesFixture?: unknown;
     intermediateFixture?: unknown;
     finalFixture?: unknown;
@@ -403,10 +463,25 @@ function mapCategoryPhaseConfig(
     };
   }
 
+  const materialized = materializeCategoryRounds({
+    startsAt: phases.final.startsAtRound,
+    rounds: parseStoredRoundConfigs(settings?.roundPhaseConfigs),
+    knockout: phases.knockout,
+    final: phases.final,
+    zones: phases.zones,
+  });
+  phases.zones = materialized.zones;
+  phases.knockout = materialized.knockout;
+  phases.final = {
+    ...materialized.final,
+    startsAtRound: phases.final.startsAtRound,
+  };
+
   return {
     categoryId: category.id,
     categoryName: normalizeCategoryLabel(category.name),
     phases,
+    rounds: materialized.rounds,
     intervalMin: settings?.intervalMin ?? 0,
     pairsPerZone: settings?.pairsPerZone ?? 3,
     zone4Advancers: settings?.zone4Advancers === 2 ? 2 : 3,
@@ -864,6 +939,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     input: { includePairs: boolean; name: string },
   ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
     await ensureRuntimeSchema();
+    await ensureRoundPhaseConfigsColumn();
     const source = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId },
       include: {
@@ -883,7 +959,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     if (!cloneName) return { ok: false, error: "Ingresá el nombre del torneo" };
 
     try {
-      const cloneId = await prisma.$transaction(async (tx) => {
+      const cloned = await prisma.$transaction(async (tx) => {
         const clone = await tx.tournament.create({
           data: {
             clubId,
@@ -949,7 +1025,12 @@ export class PrismaTournamentRepository implements TournamentRepository {
           categoryIdMap.set(category.id, created.id);
         }
 
-        if (!input.includePairs) return clone.id;
+        if (!input.includePairs) {
+          return {
+            cloneId: clone.id,
+            categoryIdMap: [...categoryIdMap.entries()],
+          };
+        }
 
         const pairIdMap = new Map<string, string>();
         for (const pair of source.pairs) {
@@ -1015,10 +1096,23 @@ export class PrismaTournamentRepository implements TournamentRepository {
           });
         }
 
-        return clone.id;
+        return {
+          cloneId: clone.id,
+          categoryIdMap: [...categoryIdMap.entries()],
+        };
       });
 
-      return { ok: true, id: cloneId };
+      const sourceRounds = await readRoundPhaseConfigsByCategory(
+        source.categories.map((category) => category.id),
+      );
+      for (const [sourceId, targetId] of cloned.categoryIdMap) {
+        const rounds = sourceRounds.get(sourceId);
+        if (rounds != null) {
+          await writeRoundPhaseConfigs(targetId, rounds);
+        }
+      }
+
+      return { ok: true, id: cloned.cloneId };
     } catch {
       return { ok: false, error: "No se pudo clonar el torneo" };
     }
@@ -1764,6 +1858,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     if (!tournament) return { ok: false, error: "Torneo no encontrado" };
 
     await ensureRuntimeSchema();
+    await ensureRoundPhaseConfigsColumn();
     const category = await prisma.tournamentCategory.findFirst({
       where: { id: categoryId, tournamentId },
       include: { settings: SETTINGS_INCLUDE },
@@ -2045,17 +2140,16 @@ export class PrismaTournamentRepository implements TournamentRepository {
         ...knockoutFixtureStamps(item.intermediateFixture),
       ]);
 
-    const slotMinutes = Math.max(
+    const slotMinutes = fixtureCellMinutes(
+      builderCategories.map((category) => ({
+        config:
+          config.categories.find(
+            (item) => item.categoryId === category.categoryId,
+          ) ?? config.categories[0]!,
+        pairCount: category.pairCount,
+        phase: "knockout" as const,
+      })),
       60,
-      ...builderCategories.map((category) => {
-        const categoryConfig = config.categories.find(
-          (item) => item.categoryId === category.categoryId,
-        );
-        return (
-          (categoryConfig?.phases.knockout.matchDurationMin ?? 90) +
-          (categoryConfig?.intervalMin ?? 0)
-        );
-      }),
     );
 
     const result = buildIntermediateFixture({
@@ -2064,6 +2158,13 @@ export class PrismaTournamentRepository implements TournamentRepository {
       slotMinutes,
       categories: builderCategories,
       reservedMatches,
+      roundSlotMinutes: (id, label) => {
+        const categoryConfig = config.categories.find(
+          (item) => item.categoryId === id,
+        );
+        if (!categoryConfig) return slotMinutes;
+        return slotMinutesForOfficialLabel(categoryConfig, label, "knockout");
+      },
     });
 
     if (
@@ -2236,17 +2337,16 @@ export class PrismaTournamentRepository implements TournamentRepository {
         ...knockoutFixtureStamps(item.finalFixture),
       ]);
 
-    const slotMinutes = Math.max(
+    const slotMinutes = fixtureCellMinutes(
+      builderCategories.map((category) => ({
+        config:
+          config.categories.find(
+            (item) => item.categoryId === category.categoryId,
+          ) ?? config.categories[0]!,
+        pairCount: category.pairCount,
+        phase: "final" as const,
+      })),
       60,
-      ...builderCategories.map((category) => {
-        const categoryConfig = config.categories.find(
-          (item) => item.categoryId === category.categoryId,
-        );
-        return (
-          (categoryConfig?.phases.final.matchDurationMin ?? 120) +
-          (categoryConfig?.intervalMin ?? 0)
-        );
-      }),
     );
 
     const result = buildFinalFixture({
@@ -2255,6 +2355,13 @@ export class PrismaTournamentRepository implements TournamentRepository {
       slotMinutes,
       categories: builderCategories,
       reservedMatches,
+      roundSlotMinutes: (id, label) => {
+        const categoryConfig = config.categories.find(
+          (item) => item.categoryId === id,
+        );
+        if (!categoryConfig) return slotMinutes;
+        return slotMinutesForOfficialLabel(categoryConfig, label, "final");
+      },
     });
 
     if (
@@ -2535,6 +2642,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     clubId: string,
     tournamentId: string,
   ): Promise<TournamentConfig | null> {
+    await ensureRoundPhaseConfigsColumn();
     const tournament = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId, type: "ZONAS" },
       include: {
@@ -2598,6 +2706,8 @@ export class PrismaTournamentRepository implements TournamentRepository {
     } catch (error) {
       console.error("[tournaments] zoneQualification unavailable", error);
     }
+    const roundConfigsByCategory =
+      await readRoundPhaseConfigsByCategory(categoryIds);
 
     return {
       tournamentId: tournament.id,
@@ -2630,6 +2740,11 @@ export class PrismaTournamentRepository implements TournamentRepository {
                   .zoneQualification ??
                 qualificationByCategory.get(category.id) ??
                 null,
+              roundPhaseConfigs:
+                (category.settings as { roundPhaseConfigs?: unknown })
+                  .roundPhaseConfigs ??
+                roundConfigsByCategory.get(category.id) ??
+                null,
             }
           : {
               zonesFixture: fixtureByCategory.get(category.id) ?? null,
@@ -2637,6 +2752,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
                 intermediateByCategory.get(category.id) ?? null,
               finalFixture: finalByCategory.get(category.id) ?? null,
               zoneQualification: qualificationByCategory.get(category.id) ?? null,
+              roundPhaseConfigs: roundConfigsByCategory.get(category.id) ?? null,
               zonesMatchFormat: "ONE_SET_6",
               zonesMatchDurationMin: 75,
               knockoutMatchFormat: "TWO_SETS_STB",
@@ -2661,6 +2777,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     tournamentId: string,
     input: TournamentConfigValues,
   ): Promise<MutationResult> {
+    await ensureRoundPhaseConfigsColumn();
     const tournament = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId, type: "ZONAS" },
       select: { id: true, startDate: true, endDate: true },
@@ -2733,6 +2850,10 @@ export class PrismaTournamentRepository implements TournamentRepository {
       ),
     ]);
 
+    for (const category of input.categories) {
+      await writeRoundPhaseConfigs(category.categoryId, category.rounds);
+    }
+
     return { ok: true };
   }
 
@@ -2753,6 +2874,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     if (!tournament) return { ok: false, error: "Torneo no encontrado" };
 
     await ensureRuntimeSchema();
+    await ensureRoundPhaseConfigsColumn();
     const [source, target] = await Promise.all([
       prisma.tournamentCategory.findFirst({
         where: { id: sourceCategoryId, tournamentId },
@@ -2803,6 +2925,14 @@ export class PrismaTournamentRepository implements TournamentRepository {
         finalPlayDates: s.finalPlayDates,
       },
     });
+
+    const sourceRounds = await readRoundPhaseConfigsByCategory([
+      sourceCategoryId,
+    ]);
+    const rounds = sourceRounds.get(sourceCategoryId);
+    if (rounds != null) {
+      await writeRoundPhaseConfigs(targetCategoryId, rounds);
+    }
 
     return { ok: true };
   }

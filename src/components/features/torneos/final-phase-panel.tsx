@@ -157,8 +157,9 @@ export function FinalPhasePanel({
         categoryId,
         pairs,
         matchFormat: settings.matchFormat,
+        liveFinalFixture: draft,
       }),
-    [categoryId, config, pairs, settings.matchFormat],
+    [categoryId, config, draft, pairs, settings.matchFormat],
   );
   const pdfRows = useMemo(() => {
     if (!category) return [];

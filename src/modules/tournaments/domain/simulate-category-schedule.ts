@@ -9,6 +9,7 @@ import {
   type TournamentPhaseKey,
 } from "./config-schema";
 import { intermediateMatchCount } from "./bracket-rounds";
+import { categoryInstanceLoads } from "./instance-slot-config";
 import { playDayWindowMinutes } from "./play-day";
 
 const PAIR_COUNT_BY_ROUND: Record<FinalPhaseStartRound, number> = {
@@ -331,6 +332,55 @@ function phaseFromPool(
   return phase;
 }
 
+function phaseFromInstanceLoads(
+  key: TournamentPhaseKey,
+  loads: { matchCount: number; slotMinutes: number; playDates: string[] }[],
+  playDays: PlayDayValues[],
+  remaining: Map<string, number>,
+  preferEnd: boolean,
+  fallbackDates: string[],
+): PhaseScheduleSimulation {
+  let matchCount = 0;
+  let minutesNeeded = 0;
+  const dates = new Set<string>();
+  for (const load of loads) {
+    matchCount += load.matchCount;
+    minutesNeeded += load.matchCount * load.slotMinutes;
+    for (const date of load.playDates) {
+      if (date) dates.add(date);
+    }
+  }
+  const phaseDates = dates.size > 0 ? [...dates] : fallbackDates;
+  const phasePlayDays = playDaysForPhase(playDays, phaseDates);
+  const minutesAvailable = sumCapacityForDates(remaining, phaseDates);
+  const surplusMinutes = minutesAvailable - minutesNeeded;
+  const missingPlayDates = matchCount > 0 && phasePlayDays.length === 0;
+
+  for (const load of loads) {
+    const needed = load.matchCount * load.slotMinutes;
+    if (needed <= 0) continue;
+    const available = sumCapacityForDates(remaining, load.playDates);
+    consumeCapacity(
+      remaining,
+      load.playDates,
+      Math.min(needed, available),
+      preferEnd,
+    );
+  }
+
+  return {
+    key,
+    label: TOURNAMENT_PHASE_META[key].label,
+    matchCount,
+    dayCount: phasePlayDays.length,
+    minutesNeeded,
+    minutesAvailable,
+    surplusMinutes,
+    fits: !missingPlayDates && surplusMinutes >= 0,
+    missingPlayDates,
+  };
+}
+
 function finalizeSimulationTotals(
   result: Omit<
     CategoryScheduleSimulation,
@@ -634,6 +684,18 @@ export function simulateCategorySchedule(
   const { zones, knockout, final } = categoryConfig.phases;
   const interval = categoryConfig.intervalMin;
   const remaining = buildDayCapacityMap(playDays, courts);
+  const instanceLoads = categoryInstanceLoads(categoryConfig, pairs);
+  const knockoutLoads = instanceLoads.filter((load) => load.phase === "knockout");
+  const finalLoads = instanceLoads.filter((load) => load.phase === "final");
+  if (knockoutLoads.length > 0) {
+    intermediateMatches = knockoutLoads.reduce(
+      (sum, load) => sum + load.matchCount,
+      0,
+    );
+  }
+  if (finalLoads.length > 0) {
+    finalMatches = finalLoads.reduce((sum, load) => sum + load.matchCount, 0);
+  }
 
   const phases: PhaseScheduleSimulation[] = [
     phaseFromPool(
@@ -646,26 +708,44 @@ export function simulateCategorySchedule(
       remaining,
       false,
     ),
-    phaseFromPool(
-      "knockout",
-      intermediateMatches,
-      knockout.matchDurationMin,
-      interval,
-      knockout.playDates,
-      playDays,
-      remaining,
-      true,
-    ),
-    phaseFromPool(
-      "final",
-      finalMatches,
-      final.matchDurationMin,
-      interval,
-      final.playDates,
-      playDays,
-      remaining,
-      true,
-    ),
+    knockoutLoads.length > 0
+      ? phaseFromInstanceLoads(
+          "knockout",
+          knockoutLoads,
+          playDays,
+          remaining,
+          true,
+          knockout.playDates,
+        )
+      : phaseFromPool(
+          "knockout",
+          intermediateMatches,
+          knockout.matchDurationMin,
+          interval,
+          knockout.playDates,
+          playDays,
+          remaining,
+          true,
+        ),
+    finalLoads.length > 0
+      ? phaseFromInstanceLoads(
+          "final",
+          finalLoads,
+          playDays,
+          remaining,
+          true,
+          final.playDates,
+        )
+      : phaseFromPool(
+          "final",
+          finalMatches,
+          final.matchDurationMin,
+          interval,
+          final.playDates,
+          playDays,
+          remaining,
+          true,
+        ),
   ];
 
   return finalizeSimulationTotals(

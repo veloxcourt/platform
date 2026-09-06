@@ -3,14 +3,23 @@ import {
   timeToMinutes,
   closingMinutes,
 } from "@/modules/bookings/domain/rules";
-import { TOURNAMENT_PHASE_META } from "./config-schema";
-import type { PlayDayValues } from "./config-schema";
-import { playDayWindowMinutes } from "./play-day";
+import {
+  BRACKET_ROUND_VALUES,
+  TOURNAMENT_PHASE_META,
+} from "./config-schema";
+import type { BracketRound, PlayDayValues } from "./config-schema";
+import {
+  categoryInstanceLoads,
+  gcdOf,
+  slotStepMinutes,
+} from "./instance-slot-config";
+import { playDayTimelineMinutes, playDayWindowMinutes } from "./play-day";
 import {
   buildPlayDayRulerSlots,
   playDayRulerSelectedMinutes,
 } from "./play-day-slots";
 import type { CategoryScheduleSimulation } from "./simulate-category-schedule";
+import type { CategoryPhaseConfig } from "./types";
 
 /// Con pairsPerZone = 3, cada pareja juega 2 partidos en zonas (fixture).
 /// Las preferencias de inscripción no usan este tope: se marcan todos los rangos posibles.
@@ -44,6 +53,12 @@ export interface CourtDaySlot {
   projectedSource?: "self" | "other";
   /// En simulación: categoría que ocupa la celda (para color y leyenda).
   projectedCategoryId?: string;
+  /// Partido que ocupa más de una celda (60 en grilla de 30, 90, etc.).
+  spanCells?: number;
+  /// true = celda de continuación; no cuenta como partido extra.
+  spanContinuation?: boolean;
+  /// Duración real del partido o del hueco libre (para el ancho visual).
+  durationMinutes?: number;
   /// Partido real: código corto, ej. A1.
   matchCode?: string | null;
   /// Más de uno = choque de categorías en la misma cancha/hora.
@@ -104,11 +119,26 @@ export interface CourtDayRule {
   endTime: string;
   /// Duración de cada celda en este día (puede cambiar si la fase es distinta).
   slotMinutes?: number;
+  /// Duraciones reales de partido en este día (60 y 90, etc.).
+  matchDurations?: number[];
   courts: {
     courtIndex: number;
     courtLabel: string;
     slots: CourtDaySlot[];
   }[];
+}
+
+/// Un partido de 60 min = el cuadrado actual (w-16). El resto escala.
+export const MATCH_SLOT_UNIT_MIN = 60;
+export const MATCH_SLOT_UNIT_REM = 4;
+
+export function slotDurationMinutes(slot: Pick<CourtDaySlot, "startTime" | "endTime" | "durationMinutes">): number {
+  if (slot.durationMinutes && slot.durationMinutes > 0) return slot.durationMinutes;
+  return slotLengthMinutes(slot as CourtDaySlot);
+}
+
+export function slotBoxWidthRem(durationMinutes: number): number {
+  return (Math.max(1, durationMinutes) / MATCH_SLOT_UNIT_MIN) * MATCH_SLOT_UNIT_REM;
 }
 
 function slotId(playDate: string, courtIndex: number, slotIndex: number) {
@@ -209,7 +239,11 @@ function groupSlotsIntoRules(
           courtLabel: `Cancha ${courtIndex + 1}`,
           slots: daySlots
             .filter((s) => s.courtIndex === courtIndex)
-            .sort((a, b) => a.slotIndex - b.slotIndex),
+            .sort(
+              (a, b) =>
+                playDayTimelineMinutes(a.startTime, day.startTime) -
+                playDayTimelineMinutes(b.startTime, day.startTime),
+            ),
         })),
       };
     });
@@ -309,8 +343,149 @@ function freeSlotsForDates(
 interface PhaseLoad {
   playDates: string[];
   matchCount: number;
+  matchDurations?: number[];
   source: "self" | "other";
   categoryId?: string;
+}
+
+function slotLengthMinutes(slot: CourtDaySlot): number {
+  const start = timeToMinutes(slot.startTime);
+  let end = timeToMinutes(slot.endTime);
+  if (end <= start) end += 24 * 60;
+  return Math.max(1, end - start);
+}
+
+function consecutiveFreeOnCourt(
+  slots: CourtDaySlot[],
+  start: CourtDaySlot,
+  cellsNeeded: number,
+): CourtDaySlot[] | null {
+  const block = slots
+    .filter(
+      (slot) =>
+        slot.playDate === start.playDate &&
+        slot.courtIndex === start.courtIndex &&
+        slot.slotIndex >= start.slotIndex &&
+        slot.slotIndex < start.slotIndex + cellsNeeded,
+    )
+    .sort((a, b) => a.slotIndex - b.slotIndex);
+  if (block.length < cellsNeeded) return null;
+  if (block.some((slot) => slot.status !== "free" || slot.blockReason)) {
+    return null;
+  }
+  return block;
+}
+
+function markProjectedBlock(
+  block: CourtDaySlot[],
+  phase: SimulationPhaseKey,
+  source: "self" | "other",
+  categoryId?: string,
+  durationMinutes?: number,
+) {
+  const lead = block[0];
+  const last = block[block.length - 1];
+  for (let index = 0; index < block.length; index++) {
+    const slot = block[index];
+    if (!slot) continue;
+    slot.status = "projected";
+    slot.projectedPhase = phase;
+    slot.projectedSource = source;
+    slot.projectedCategoryId = categoryId;
+    slot.spanContinuation = index > 0;
+    if (index === 0 && lead) {
+      slot.spanCells = block.length;
+      slot.durationMinutes =
+        durationMinutes && durationMinutes > 0
+          ? durationMinutes
+          : block.reduce((sum, cell) => sum + slotLengthMinutes(cell), 0);
+      if (last) slot.endTime = last.endTime;
+    }
+  }
+}
+
+function sameDisplayGroup(a: CourtDaySlot, b: CourtDaySlot): boolean {
+  return (
+    a.status === b.status &&
+    a.blockReason === b.blockReason &&
+    a.projectedPhase === b.projectedPhase &&
+    a.projectedCategoryId === b.projectedCategoryId &&
+    a.projectedSource === b.projectedSource
+  );
+}
+
+/// Una caja = un partido (o un hueco libre). 60 min = cuadrado actual.
+export function collapseCourtSlotsToMatches(
+  slots: CourtDaySlot[],
+  cellMinutes: number,
+  visualUnit = MATCH_SLOT_UNIT_MIN,
+): CourtDaySlot[] {
+  const sorted = [...slots].sort((a, b) => a.slotIndex - b.slotIndex);
+  const out: CourtDaySlot[] = [];
+  let index = 0;
+  while (index < sorted.length) {
+    const slot = sorted[index];
+    if (!slot) break;
+    if (slot.spanContinuation) {
+      index += 1;
+      continue;
+    }
+    if (slot.status === "projected") {
+      const cells = Math.max(1, slot.spanCells ?? 1);
+      const block = sorted.slice(index, index + cells);
+      const last = block[block.length - 1] ?? slot;
+      const duration =
+        slot.durationMinutes && slot.durationMinutes > 0
+          ? slot.durationMinutes
+          : block.reduce((sum, cell) => sum + slotLengthMinutes(cell), 0);
+      out.push({
+        ...slot,
+        spanCells: 1,
+        spanContinuation: false,
+        durationMinutes: duration,
+        endTime: last.endTime,
+      });
+      index += cells;
+      continue;
+    }
+    const group = [slot];
+    let minutes = slotLengthMinutes(slot);
+    while (minutes < visualUnit && index + group.length < sorted.length) {
+      const next = sorted[index + group.length];
+      if (!next || next.status === "projected" || next.spanContinuation) break;
+      if (!sameDisplayGroup(slot, next)) break;
+      group.push(next);
+      minutes += slotLengthMinutes(next);
+      if (minutes >= visualUnit) break;
+    }
+    const last = group[group.length - 1] ?? slot;
+    out.push({
+      ...slot,
+      durationMinutes: minutes || cellMinutes,
+      endTime: last.endTime,
+    });
+    index += group.length;
+  }
+  return out;
+}
+
+function collapseRulesToMatches(
+  rules: CourtDayRule[],
+  cellMinutesByDate: Map<string, number>,
+): CourtDayRule[] {
+  return rules.map((rule) => {
+    const cellMinutes =
+      cellMinutesByDate.get(rule.playDate) ??
+      rule.slotMinutes ??
+      MATCH_SLOT_UNIT_MIN;
+    return {
+      ...rule,
+      courts: rule.courts.map((court) => ({
+        ...court,
+        slots: collapseCourtSlotsToMatches(court.slots, cellMinutes),
+      })),
+    };
+  });
 }
 
 /// Coloca partidos intercalados (A, B, A, B…) llenando canchas en paralelo por horario.
@@ -325,6 +500,7 @@ function packInterleavedProjectedMatches(
     .map((l) => ({
       ...l,
       dateSet: new Set(l.playDates.filter(Boolean)),
+      durations: l.matchDurations?.slice() ?? [],
       left: l.matchCount,
     }));
   if (remaining.length === 0) return;
@@ -334,6 +510,7 @@ function packInterleavedProjectedMatches(
 
   let cursor = 0;
   for (const slot of ordered) {
+    if (slot.status !== "free") continue;
     if (remaining.every((l) => l.left <= 0)) break;
 
     const n = remaining.length;
@@ -348,10 +525,24 @@ function packInterleavedProjectedMatches(
     }
     if (!chosen) continue;
 
-    slot.status = "projected";
-    slot.projectedPhase = phase;
-    slot.projectedSource = chosen.source;
-    slot.projectedCategoryId = chosen.categoryId;
+    const duration = chosen.durations.shift() ?? slotLengthMinutes(slot);
+    const cellsNeeded = Math.max(
+      1,
+      Math.ceil(duration / slotLengthMinutes(slot)),
+    );
+    const block = consecutiveFreeOnCourt(slots, slot, cellsNeeded);
+    if (!block) {
+      if (duration > 0) chosen.durations.unshift(duration);
+      continue;
+    }
+
+    markProjectedBlock(
+      block,
+      phase,
+      chosen.source,
+      chosen.categoryId,
+      duration,
+    );
     chosen.left -= 1;
   }
 }
@@ -449,6 +640,89 @@ export function buildZonesRegistrationGrid(
   return rules;
 }
 
+export type SimulationRoundLoad = {
+  key?: BracketRound;
+  playDates: string[];
+  slotMinutes: number;
+  matchCount: number;
+};
+
+export function isProjectedMatchLead(slot: CourtDaySlot): boolean {
+  return slot.status === "projected" && slot.spanContinuation !== true;
+}
+
+export function formatDaySlotLabel(day: Pick<CourtDayRule, "slotMinutes" | "matchDurations">): string | null {
+  const unique = [...new Set(day.matchDurations?.filter((value) => value > 0) ?? [])]
+    .sort((a, b) => a - b);
+  if (unique.length > 1) return `${unique.join(" y ")} min`;
+  if (unique.length === 1) return `slots de ${unique[0]} min`;
+  if (day.slotMinutes) return `slots de ${day.slotMinutes} min`;
+  return null;
+}
+
+export function simulationRoundsFromCategory(
+  config: CategoryPhaseConfig,
+  pairCount: number,
+): {
+  knockoutRounds: SimulationRoundLoad[];
+  finalRounds: SimulationRoundLoad[];
+} {
+  const loads = categoryInstanceLoads(config, pairCount);
+  return {
+    knockoutRounds: loads
+      .filter((load) => load.phase === "knockout")
+      .map((load) => ({
+        key: load.key,
+        playDates: load.playDates,
+        slotMinutes: load.slotMinutes,
+        matchCount: load.matchCount,
+      })),
+    finalRounds: loads
+      .filter((load) => load.phase === "final")
+      .map((load) => ({
+        key: load.key,
+        playDates: load.playDates,
+        slotMinutes: load.slotMinutes,
+        matchCount: load.matchCount,
+      })),
+  };
+}
+
+export function toSimulationCategoryLoad(
+  categoryId: string,
+  config: CategoryPhaseConfig,
+  pairCount: number,
+  matches: { zone: number; intermediate: number; final: number },
+): SimulationCategoryLoad {
+  const rounds = simulationRoundsFromCategory(config, pairCount);
+  const knockoutDates = [
+    ...new Set(rounds.knockoutRounds.flatMap((round) => round.playDates)),
+  ];
+  const finalDates = [
+    ...new Set(rounds.finalRounds.flatMap((round) => round.playDates)),
+  ];
+  return {
+    categoryId,
+    zonesPlayDates: config.phases.zones.playDates,
+    knockoutPlayDates:
+      knockoutDates.length > 0
+        ? knockoutDates
+        : config.phases.knockout.playDates,
+    finalPlayDates:
+      finalDates.length > 0 ? finalDates : config.phases.final.playDates,
+    zoneMatches: matches.zone,
+    intermediateMatches: matches.intermediate,
+    finalMatches: matches.final,
+    zonesSlotMinutes:
+      config.phases.zones.matchDurationMin + config.intervalMin,
+    knockoutSlotMinutes:
+      config.phases.knockout.matchDurationMin + config.intervalMin,
+    finalSlotMinutes:
+      config.phases.final.matchDurationMin + config.intervalMin,
+    ...rounds,
+  };
+}
+
 export interface SimulationCategoryLoad {
   categoryId: string;
   zonesPlayDates: string[];
@@ -460,34 +734,79 @@ export interface SimulationCategoryLoad {
   zonesSlotMinutes?: number;
   knockoutSlotMinutes?: number;
   finalSlotMinutes?: number;
+  knockoutRounds?: SimulationRoundLoad[];
+  finalRounds?: SimulationRoundLoad[];
+}
+
+type SimulationDateLoad = Pick<
+  SimulationCategoryLoad,
+  | "zonesPlayDates"
+  | "knockoutPlayDates"
+  | "finalPlayDates"
+  | "zonesSlotMinutes"
+  | "knockoutSlotMinutes"
+  | "finalSlotMinutes"
+  | "knockoutRounds"
+  | "finalRounds"
+>;
+
+export function slotSizesForSimulationDate(
+  playDate: string,
+  loads: SimulationDateLoad[],
+  fallback?: number,
+): number[] {
+  const sizes: number[] = [];
+  for (const load of loads) {
+    if (load.zonesPlayDates.includes(playDate) && load.zonesSlotMinutes) {
+      sizes.push(load.zonesSlotMinutes);
+    }
+    if (load.knockoutRounds && load.knockoutRounds.length > 0) {
+      for (const round of load.knockoutRounds) {
+        if (
+          round.matchCount > 0 &&
+          round.playDates.includes(playDate) &&
+          round.slotMinutes > 0
+        ) {
+          sizes.push(round.slotMinutes);
+        }
+      }
+    } else if (load.knockoutPlayDates.includes(playDate)) {
+      sizes.push(load.knockoutSlotMinutes ?? fallback ?? 0);
+    }
+    if (load.finalRounds && load.finalRounds.length > 0) {
+      for (const round of load.finalRounds) {
+        if (
+          round.matchCount > 0 &&
+          round.playDates.includes(playDate) &&
+          round.slotMinutes > 0
+        ) {
+          sizes.push(round.slotMinutes);
+        }
+      }
+    } else if (load.finalPlayDates.includes(playDate)) {
+      sizes.push(load.finalSlotMinutes ?? fallback ?? 0);
+    }
+  }
+  return sizes.filter((value) => value > 0);
+}
+
+export function matchDurationsForSimulationDate(
+  playDate: string,
+  loads: SimulationDateLoad[],
+  fallback?: number,
+): number[] {
+  return [...new Set(slotSizesForSimulationDate(playDate, loads, fallback))].sort(
+    (a, b) => a - b,
+  );
 }
 
 export function slotMinutesForSimulationDate(
   playDate: string,
-  loads: Pick<
-    SimulationCategoryLoad,
-    | "zonesPlayDates"
-    | "knockoutPlayDates"
-    | "finalPlayDates"
-    | "zonesSlotMinutes"
-    | "knockoutSlotMinutes"
-    | "finalSlotMinutes"
-  >[],
+  loads: SimulationDateLoad[],
   fallback: number,
 ): number {
-  let max = 0;
-  for (const load of loads) {
-    if (load.zonesPlayDates.includes(playDate)) {
-      max = Math.max(max, load.zonesSlotMinutes ?? fallback);
-    }
-    if (load.knockoutPlayDates.includes(playDate)) {
-      max = Math.max(max, load.knockoutSlotMinutes ?? fallback);
-    }
-    if (load.finalPlayDates.includes(playDate)) {
-      max = Math.max(max, load.finalSlotMinutes ?? fallback);
-    }
-  }
-  return max > 0 ? max : Math.max(1, fallback);
+  const sizes = slotSizesForSimulationDate(playDate, loads, fallback);
+  return slotStepMinutes(sizes, fallback);
 }
 
 export interface BuildSimulationRuleGridInput {
@@ -512,6 +831,7 @@ export type ScheduledMatchMark = {
   pair1Label?: string | null;
   pair2Label?: string | null;
   projectedPhase?: SimulationPhaseKey;
+  durationMinutes?: number;
 };
 
 /// Grilla de partidos reales (Regla de Partidos): pinta el slot donde quedó cada partido.
@@ -526,6 +846,7 @@ export function buildMatchesRuleGrid(input: {
 }): CourtDayRule[] {
   const fallback = Math.max(1, input.defaultSlotMinutes);
   const slotMinutesByDate = new Map<string, number>();
+  const packMinutesByDate = new Map<string, number>();
   const slots: CourtDaySlot[] = [];
   const zonesDates = new Set(
     (input.zonesPlayDates ?? input.playDays.map((day) => day.date)).filter(
@@ -535,16 +856,25 @@ export function buildMatchesRuleGrid(input: {
 
   for (const day of input.playDays) {
     if (!day.date || !zonesDates.has(day.date)) continue;
-    const daySlotMinutes = Math.max(
+    const visualMinutes = Math.max(
       1,
       input.slotMinutesByDate?.[day.date] ?? fallback,
     );
-    slotMinutesByDate.set(day.date, daySlotMinutes);
+    const dayDurations = input.matches
+      .filter((match) => match.playDate === day.date && match.durationMinutes)
+      .map((match) => match.durationMinutes as number);
+    const packMinutes = gcdOf([
+      ...dayDurations,
+      visualMinutes,
+      MATCH_SLOT_UNIT_MIN,
+    ]);
+    slotMinutesByDate.set(day.date, visualMinutes);
+    packMinutesByDate.set(day.date, packMinutes);
     slots.push(
       ...buildEmptyCourtDaySlots(
         { ...day, hasSlotSelection: false },
         input.courtCount,
-        daySlotMinutes,
+        packMinutes,
       ),
     );
   }
@@ -564,29 +894,125 @@ export function buildMatchesRuleGrid(input: {
 
   for (const match of input.matches) {
     if (!match.playDate || match.courtIndex == null) continue;
-    const byIndex =
-      match.slotIndex != null
-        ? byKey.get(
-            `${match.playDate}:${match.courtIndex}:${match.slotIndex}`,
-          )
-        : undefined;
-    const slot =
-      byIndex ??
-      (match.startTime
-        ? byTime.get(
-            `${match.playDate}:${match.courtIndex}:${match.startTime}`,
-          )
-        : undefined);
+    const timeKey = match.startTime
+      ? `${match.playDate}:${match.courtIndex}:${match.startTime}`
+      : "";
+    let slot = match.startTime ? byTime.get(timeKey) : undefined;
+    if (!slot && match.startTime) {
+      const minutes =
+        match.durationMinutes ??
+        packMinutesByDate.get(match.playDate) ??
+        fallback;
+      const startMin = timeToMinutes(match.startTime);
+      slot = {
+        id: `${match.playDate}:${match.courtIndex}:manual:${match.startTime}`,
+        playDate: match.playDate,
+        courtIndex: match.courtIndex,
+        slotIndex: startMin,
+        startTime: match.startTime,
+        endTime: displayTime(startMin + minutes),
+        status: "free",
+        durationMinutes: minutes,
+      };
+      slots.push(slot);
+      byTime.set(timeKey, slot);
+    }
+    if (!slot && match.slotIndex != null) {
+      slot = byKey.get(
+        `${match.playDate}:${match.courtIndex}:${match.slotIndex}`,
+      );
+    }
+    if (!slot) continue;
+    const cellMinutes = packMinutesByDate.get(match.playDate) ?? fallback;
+    const duration = match.durationMinutes ?? cellMinutes;
+    const cellsNeeded = Math.max(1, Math.ceil(duration / cellMinutes));
+    const block =
+      consecutiveSlotsOnCourt(slots, slot, cellsNeeded) ?? [slot];
+    paintMatchBlock(block, match, duration);
+  }
+
+  const rules = collapseRulesToMatches(
+    groupSlotsIntoRules(
+      input.playDays,
+      slots,
+      input.courtCount,
+      slotMinutesByDate,
+    ),
+    packMinutesByDate,
+  );
+  const labelByDate = new Map(
+    input.playDays
+      .filter((day) => day.date)
+      .map((day, index) => [day.date, `Día ${index + 1}`] as const),
+  );
+  const durationsByDate = new Map<string, number[]>();
+  for (const match of input.matches) {
+    if (!match.playDate || !match.durationMinutes) continue;
+    const list = durationsByDate.get(match.playDate) ?? [];
+    list.push(match.durationMinutes);
+    durationsByDate.set(match.playDate, list);
+  }
+  for (const rule of rules) {
+    rule.dayLabel = labelByDate.get(rule.playDate) ?? rule.dayLabel;
+    const fromMatches = durationsByDate.get(rule.playDate) ?? [];
+    const unique = [...new Set(fromMatches.filter((value) => value > 0))].sort(
+      (a, b) => a - b,
+    );
+    rule.matchDurations =
+      unique.length > 0
+        ? unique
+        : rule.slotMinutes
+          ? [rule.slotMinutes]
+          : undefined;
+  }
+  return rules;
+}
+
+function consecutiveSlotsOnCourt(
+  slots: CourtDaySlot[],
+  start: CourtDaySlot,
+  cellsNeeded: number,
+): CourtDaySlot[] | null {
+  const block = slots
+    .filter(
+      (slot) =>
+        slot.playDate === start.playDate &&
+        slot.courtIndex === start.courtIndex &&
+        slot.slotIndex >= start.slotIndex &&
+        slot.slotIndex < start.slotIndex + cellsNeeded,
+    )
+    .sort((a, b) => a.slotIndex - b.slotIndex);
+  if (block.length < cellsNeeded) return null;
+  return block;
+}
+
+function paintMatchBlock(
+  block: CourtDaySlot[],
+  match: ScheduledMatchMark,
+  _durationMinutes: number,
+) {
+  const occupant = {
+    categoryId: match.categoryId,
+    matchCode: match.matchCode ?? null,
+    pair1Label: match.pair1Label ?? null,
+    pair2Label: match.pair2Label ?? null,
+  };
+  for (let index = 0; index < block.length; index++) {
+    const slot = block[index];
     if (!slot) continue;
     slot.status = "projected";
     slot.projectedPhase = match.projectedPhase ?? "zones";
     slot.projectedSource = "self";
-    const occupant = {
-      categoryId: match.categoryId,
-      matchCode: match.matchCode ?? null,
-      pair1Label: match.pair1Label ?? null,
-      pair2Label: match.pair2Label ?? null,
-    };
+    slot.spanContinuation = index > 0;
+    if (index === 0) {
+      slot.spanCells = block.length;
+      slot.durationMinutes =
+        _durationMinutes > 0
+          ? _durationMinutes
+          : block.reduce((sum, cell) => sum + slotLengthMinutes(cell), 0);
+      const last = block[block.length - 1];
+      if (last) slot.endTime = last.endTime;
+    }
     const occupants = slot.occupants ?? [];
     if (
       !occupants.some(
@@ -607,22 +1033,61 @@ export function buildMatchesRuleGrid(input: {
       slot.matchCode = match.matchCode;
     }
   }
+}
 
-  const rules = groupSlotsIntoRules(
-    input.playDays,
-    slots,
-    input.courtCount,
-    slotMinutesByDate,
+/// Mete horarios manuales (ej. 11:20) que no caen en la regla de 30/60 min.
+export function insertOffGridSlotsIntoRules(
+  rules: CourtDayRule[],
+  extras: Array<{
+    playDate?: string | null;
+    startTime?: string | null;
+    courtIndex?: number | null;
+  }>,
+): CourtDayRule[] {
+  const pending = extras.filter(
+    (item): item is {
+      playDate: string;
+      startTime: string;
+      courtIndex: number;
+    } =>
+      Boolean(item.playDate?.trim() && item.startTime?.trim()) &&
+      item.courtIndex != null,
   );
-  const labelByDate = new Map(
-    input.playDays
-      .filter((day) => day.date)
-      .map((day, index) => [day.date, `Día ${index + 1}`] as const),
-  );
-  for (const rule of rules) {
-    rule.dayLabel = labelByDate.get(rule.playDate) ?? rule.dayLabel;
-  }
-  return rules;
+  if (pending.length === 0) return rules;
+
+  return rules.map((rule) => ({
+    ...rule,
+    courts: rule.courts.map((court) => {
+      let slots = court.slots;
+      for (const extra of pending) {
+        if (extra.playDate !== rule.playDate) continue;
+        if (extra.courtIndex !== court.courtIndex) continue;
+        if (slots.some((slot) => slot.startTime === extra.startTime)) continue;
+        const minutes = Math.max(1, rule.slotMinutes ?? 30);
+        const startMin = timeToMinutes(extra.startTime);
+        slots = [
+          ...slots,
+          {
+            id: `${rule.playDate}:${court.courtIndex}:manual:${extra.startTime}`,
+            playDate: rule.playDate,
+            courtIndex: court.courtIndex,
+            slotIndex: startMin,
+            startTime: extra.startTime,
+            endTime: displayTime(startMin + minutes),
+            status: "free",
+          },
+        ];
+      }
+      return {
+        ...court,
+        slots: [...slots].sort(
+          (a, b) =>
+            playDayTimelineMinutes(a.startTime, rule.startTime) -
+            playDayTimelineMinutes(b.startTime, rule.startTime),
+        ),
+      };
+    }),
+  }));
 }
 
 /// Grilla de simulación (modo regla): canchas compartidas.
@@ -633,23 +1098,25 @@ export function buildSimulationRuleGrid(
   input: BuildSimulationRuleGridInput,
 ): CourtDayRule[] {
   const slotMinutesByDate = new Map<string, number>();
+  const packMinutesByDate = new Map<string, number>();
   const slots: CourtDaySlot[] = [];
   for (const day of input.playDays) {
     if (!day.date) continue;
-    const daySlotMinutes = slotMinutesForSimulationDate(
+    const sizes = slotSizesForSimulationDate(
       day.date,
       input.categoryLoads,
       input.zonesSlotMinutes,
     );
-    slotMinutesByDate.set(day.date, daySlotMinutes);
-    // La duración la marca la fase de ese día (zonas 60, final 75, etc.).
-    // El rango start/end es lo compartido con Parámetros; no reusar índices
-    // de una regla de otro tamaño.
+    const visualMinutes = slotStepMinutes(sizes, input.zonesSlotMinutes);
+    const packMinutes = gcdOf([...sizes, MATCH_SLOT_UNIT_MIN]);
+    slotMinutesByDate.set(day.date, visualMinutes);
+    packMinutesByDate.set(day.date, packMinutes);
+    // Empaqueta en el MCD (60 y 90 → 30) y después cada partido es una caja.
     slots.push(
       ...buildEmptyCourtDaySlots(
         { ...day, hasSlotSelection: false },
         input.courtCount,
-        daySlotMinutes,
+        packMinutes,
       ),
     );
   }
@@ -667,6 +1134,10 @@ export function buildSimulationRuleGrid(
     loads.map((l) => ({
       playDates: l.zonesPlayDates,
       matchCount: l.zoneMatches,
+      matchDurations: Array.from(
+        { length: l.zoneMatches },
+        () => l.zonesSlotMinutes ?? input.zonesSlotMinutes,
+      ),
       source: l.source,
       categoryId: l.categoryId,
     })),
@@ -675,37 +1146,98 @@ export function buildSimulationRuleGrid(
   );
 
   const afterZones = latestProjectedCutoff(slots, ["zones"]);
-  packInterleavedProjectedMatches(
-    slots,
-    loads.map((l) => ({
-      playDates: l.knockoutPlayDates,
-      matchCount: l.intermediateMatches,
-      source: l.source,
-      categoryId: l.categoryId,
-    })),
-    "knockout",
-    afterZones,
-  );
+  packPhaseInstances(slots, loads, "knockout", afterZones);
 
   const afterKnockout = latestProjectedCutoff(slots, ["zones", "knockout"]);
-  packInterleavedProjectedMatches(
-    slots,
-    loads.map((l) => ({
-      playDates: l.finalPlayDates,
-      matchCount: l.finalMatches,
-      source: l.source,
-      categoryId: l.categoryId,
-    })),
-    "final",
-    afterKnockout,
-  );
+  packPhaseInstances(slots, loads, "final", afterKnockout);
 
-  return groupSlotsIntoRules(
-    input.playDays,
-    slots,
-    input.courtCount,
-    slotMinutesByDate,
+  const rules = collapseRulesToMatches(
+    groupSlotsIntoRules(
+      input.playDays,
+      slots,
+      input.courtCount,
+      slotMinutesByDate,
+    ),
+    packMinutesByDate,
   );
+  for (const rule of rules) {
+    rule.matchDurations = matchDurationsForSimulationDate(
+      rule.playDate,
+      input.categoryLoads,
+      input.zonesSlotMinutes,
+    );
+  }
+  return rules;
+}
+
+type SourcedCategoryLoad = SimulationCategoryLoad & {
+  source: "self" | "other";
+};
+
+function packPhaseInstances(
+  slots: CourtDaySlot[],
+  loads: SourcedCategoryLoad[],
+  phase: "knockout" | "final",
+  afterCutoff: { playDate: string; slotIndex: number } | null,
+) {
+  const roundsKey = phase === "knockout" ? "knockoutRounds" : "finalRounds";
+  const hasRounds = loads.some((load) => (load[roundsKey]?.length ?? 0) > 0);
+  if (!hasRounds) {
+    packInterleavedProjectedMatches(
+      slots,
+      loads.map((load) => ({
+        playDates:
+          phase === "knockout" ? load.knockoutPlayDates : load.finalPlayDates,
+        matchCount:
+          phase === "knockout" ? load.intermediateMatches : load.finalMatches,
+        matchDurations: Array.from(
+          {
+            length:
+              phase === "knockout"
+                ? load.intermediateMatches
+                : load.finalMatches,
+          },
+          () =>
+            (phase === "knockout"
+              ? load.knockoutSlotMinutes
+              : load.finalSlotMinutes) ?? 60,
+        ),
+        source: load.source,
+        categoryId: load.categoryId,
+      })),
+      phase,
+      afterCutoff,
+    );
+    return;
+  }
+
+  let cutoff = afterCutoff;
+  for (const key of BRACKET_ROUND_VALUES) {
+    const phaseLoads = loads
+      .map((load) => {
+        const rounds = (load[roundsKey] ?? []).filter(
+          (round) => round.key === key,
+        );
+        const matchCount = rounds.reduce(
+          (sum, round) => sum + round.matchCount,
+          0,
+        );
+        if (matchCount <= 0) return null;
+        return {
+          playDates: [...new Set(rounds.flatMap((round) => round.playDates))],
+          matchCount,
+          matchDurations: rounds.flatMap((round) =>
+            Array.from({ length: round.matchCount }, () => round.slotMinutes),
+          ),
+          source: load.source,
+          categoryId: load.categoryId,
+        };
+      })
+      .filter((load): load is NonNullable<typeof load> => Boolean(load));
+    if (phaseLoads.length === 0) continue;
+    packInterleavedProjectedMatches(slots, phaseLoads, phase, cutoff);
+    cutoff = latestProjectedCutoff(slots, ["zones", "knockout", "final"]);
+  }
 }
 
 function applyReservations(
@@ -924,31 +1456,33 @@ export function summarizeIntegralSimulation(
   }
 
   const freeByDate = new Map<string, number>();
+  const freeMinByDate = new Map<string, number>();
   let usedCells = 0;
   for (const slot of slots) {
     if (slot.status === "free") {
       freeByDate.set(slot.playDate, (freeByDate.get(slot.playDate) ?? 0) + 1);
+      freeMinByDate.set(
+        slot.playDate,
+        (freeMinByDate.get(slot.playDate) ?? 0) + slotDurationMinutes(slot),
+      );
     } else if (slot.status === "projected") {
       usedCells += 1;
     }
   }
 
   const freeMinByPhase = emptyPhaseCounter();
-  for (const [date, count] of freeByDate) {
+  for (const [date, minutes] of freeMinByDate) {
     let owner: SimulationPhaseKey | null = null;
     for (const key of PHASE_PACK_ORDER) {
       if (datesByPhase[key].has(date)) owner = key;
     }
-    if (owner) {
-      freeMinByPhase[owner] +=
-        count * ruleSlotMinutes(rules, date, fallbackMin);
-    }
+    if (owner) freeMinByPhase[owner] += minutes;
   }
 
   const packedByPhase = emptyPhaseCounter();
   const packedByCategory = new Map<string, Record<SimulationPhaseKey, number>>();
   for (const slot of slots) {
-    if (slot.status !== "projected" || !slot.projectedPhase) continue;
+    if (!isProjectedMatchLead(slot) || !slot.projectedPhase) continue;
     packedByPhase[slot.projectedPhase] += 1;
     if (!slot.projectedCategoryId) continue;
     const row =
@@ -1003,7 +1537,7 @@ export function summarizeIntegralSimulation(
   for (const [date, count] of freeByDate) {
     if (!assignedDates.has(date)) continue;
     freeCells += count;
-    freeMinutes += count * ruleSlotMinutes(rules, date, fallbackMin);
+    freeMinutes += freeMinByDate.get(date) ?? 0;
   }
 
   const minutesNeeded = phases.reduce((sum, p) => sum + p.minutesNeeded, 0);
@@ -1066,7 +1600,7 @@ export function applyPackedSlotsToSimulation(
   const phases = result.phases.map((phase) => {
     const selfPacked = slots.filter(
       (s) =>
-        s.status === "projected" &&
+        isProjectedMatchLead(s) &&
         s.projectedPhase === phase.key &&
         s.projectedSource === "self",
     ).length;
@@ -1107,7 +1641,7 @@ export function applyPackedSlotsToSimulation(
   for (const phase of result.phases) {
     const selfPacked = slots.filter(
       (s) =>
-        s.status === "projected" &&
+        isProjectedMatchLead(s) &&
         s.projectedPhase === phase.key &&
         s.projectedSource === "self",
     ).length;

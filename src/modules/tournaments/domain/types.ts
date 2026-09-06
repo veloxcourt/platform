@@ -3,6 +3,7 @@ import type {
   FinalPhaseConfigValues,
   PhaseConfigValues,
   PlayDayValues,
+  RoundConfigMapValues,
 } from "./config-schema";
 import type { IntermediateFixturePersisted } from "./intermediate-fixture-schema";
 import type { FixtureEditModes } from "./fixture-edit-mode";
@@ -135,6 +136,8 @@ export interface CategoryPhaseConfig {
     knockout: PhaseConfigValues;
     final: FinalPhaseConfigValues;
   };
+  /// Formato / duración / días por instancia de llave.
+  rounds: RoundConfigMapValues;
   intervalMin: number;
   pairsPerZone: number;
   /// En zona de 4: 3 = FAP, 2 = APA.

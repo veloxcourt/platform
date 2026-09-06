@@ -26,6 +26,7 @@ import type {
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
 import type { PlayDayValues } from "@/modules/tournaments/domain/config-schema";
+import { simulationPairCount } from "@/modules/tournaments/domain/category-simulation-schema";
 import {
   canShiftPlayDayVisibleWindow,
   setPlayDayStartMinutes,
@@ -43,8 +44,10 @@ import {
 import { updatePlayDaysAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/configuracion/actions";
 import {
   buildSimulationRuleGrid,
+  simulationRoundsFromCategory,
   slotMinutesForSimulationDate,
   summarizeIntegralSimulation,
+  toSimulationCategoryLoad,
 } from "@/modules/tournaments/domain/court-day-slots";
 import type { SimulationCategoryLoad } from "@/modules/tournaments/domain/court-day-slots";
 import { downloadSimulationPdf } from "./simulation-pdf";
@@ -70,10 +73,7 @@ type SimulationRow = {
 };
 
 function defaultConfirmed(category: TournamentCategoryItem): string {
-  if (category.simulationConfirmedCount != null) {
-    return String(category.simulationConfirmedCount);
-  }
-  return String(Math.max(category.confirmedCount, 8));
+  return String(simulationPairCount(category));
 }
 
 function draftFromCategory(category: TournamentCategoryItem): SimulationDraft {
@@ -145,14 +145,19 @@ export function TournamentCategoriesPanel({
         category.phases.zones.matchDurationMin + category.intervalMin,
     ) ?? [75]),
   );
-  const phaseLoads = (config?.categories ?? []).map((category) => ({
-    zonesPlayDates: category.phases.zones.playDates,
-    knockoutPlayDates: category.phases.knockout.playDates,
-    finalPlayDates: category.phases.final.playDates,
-    zonesSlotMinutes: phaseSlotMinutes(category, "zones"),
-    knockoutSlotMinutes: phaseSlotMinutes(category, "knockout"),
-    finalSlotMinutes: phaseSlotMinutes(category, "final"),
-  }));
+  const phaseLoads = (config?.categories ?? []).map((category) => {
+    const item = categories.find((row) => row.id === category.categoryId);
+    const pairs = item ? simulationPairCount(item) : 8;
+    return {
+      zonesPlayDates: category.phases.zones.playDates,
+      knockoutPlayDates: category.phases.knockout.playDates,
+      finalPlayDates: category.phases.final.playDates,
+      zonesSlotMinutes: phaseSlotMinutes(category, "zones"),
+      knockoutSlotMinutes: phaseSlotMinutes(category, "knockout"),
+      finalSlotMinutes: phaseSlotMinutes(category, "final"),
+      ...simulationRoundsFromCategory(category, pairs),
+    };
+  });
 
   function slotMinutesForDate(playDate: string) {
     return slotMinutesForSimulationDate(playDate, phaseLoads, slotMinutes);
@@ -413,18 +418,17 @@ export function TournamentCategoriesPanel({
     }
     try {
       const categoryLoads: SimulationCategoryLoad[] = simulationRows.map(
-        (row) => ({
-          categoryId: row.category.id,
-          zonesPlayDates: row.categoryConfig.phases.zones.playDates,
-          knockoutPlayDates: row.categoryConfig.phases.knockout.playDates,
-          finalPlayDates: row.categoryConfig.phases.final.playDates,
-          zoneMatches: row.result.zoneMatches,
-          intermediateMatches: row.result.intermediateMatches,
-          finalMatches: row.result.finalMatches,
-          zonesSlotMinutes: phaseSlotMinutes(row.categoryConfig, "zones"),
-          knockoutSlotMinutes: phaseSlotMinutes(row.categoryConfig, "knockout"),
-          finalSlotMinutes: phaseSlotMinutes(row.categoryConfig, "final"),
-        }),
+        (row) =>
+          toSimulationCategoryLoad(
+            row.category.id,
+            row.categoryConfig,
+            simulationPairCount(row.category),
+            {
+              zone: row.result.zoneMatches,
+              intermediate: row.result.intermediateMatches,
+              final: row.result.finalMatches,
+            },
+          ),
       );
       const ruleGrid = buildSimulationRuleGrid({
         playDays,
@@ -769,18 +773,18 @@ function IntegralSimulation({
       ...rows.map((row) => phaseSlotMinutes(row.categoryConfig, "zones")),
     );
 
-  const categoryLoads: SimulationCategoryLoad[] = rows.map((row) => ({
-    categoryId: row.category.id,
-    zonesPlayDates: row.categoryConfig.phases.zones.playDates,
-    knockoutPlayDates: row.categoryConfig.phases.knockout.playDates,
-    finalPlayDates: row.categoryConfig.phases.final.playDates,
-    zoneMatches: row.result.zoneMatches,
-    intermediateMatches: row.result.intermediateMatches,
-    finalMatches: row.result.finalMatches,
-    zonesSlotMinutes: phaseSlotMinutes(row.categoryConfig, "zones"),
-    knockoutSlotMinutes: phaseSlotMinutes(row.categoryConfig, "knockout"),
-    finalSlotMinutes: phaseSlotMinutes(row.categoryConfig, "final"),
-  }));
+  const categoryLoads: SimulationCategoryLoad[] = rows.map((row) =>
+    toSimulationCategoryLoad(
+      row.category.id,
+      row.categoryConfig,
+      simulationPairCount(row.category),
+      {
+        zone: row.result.zoneMatches,
+        intermediate: row.result.intermediateMatches,
+        final: row.result.finalMatches,
+      },
+    ),
+  );
 
   const ruleGrid = buildSimulationRuleGrid({
     playDays,

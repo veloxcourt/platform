@@ -42,6 +42,21 @@ export const FINAL_PHASE_START_ROUND_LABELS: Record<
   SEMI_FINALS: "Semifinal",
 };
 
+/// Todas las instancias configurables de llave (intermedia + final).
+export const BRACKET_ROUND_VALUES = [
+  "ROUND_64",
+  ...FINAL_PHASE_START_ROUND_VALUES,
+  "FINAL",
+] as const;
+
+export type BracketRound = (typeof BRACKET_ROUND_VALUES)[number];
+
+export const BRACKET_ROUND_LABELS: Record<BracketRound, string> = {
+  ROUND_64: "32 avos",
+  ...FINAL_PHASE_START_ROUND_LABELS,
+  FINAL: "Final",
+};
+
 /// Fases del torneo por zonas (cada una puede tener formato y duración distintos).
 export const TOURNAMENT_PHASE_KEYS = ["zones", "knockout", "final"] as const;
 export type TournamentPhaseKey = (typeof TOURNAMENT_PHASE_KEYS)[number];
@@ -56,12 +71,13 @@ export const TOURNAMENT_PHASE_META: Record<
   },
   knockout: {
     label: "Fase intermedia",
-    description: "Llave directa entre zonas y final: el perdedor queda fuera.",
+    description:
+      "Llave directa entre zonas y final: el perdedor queda fuera. Cada instancia tiene su formato, duración y días.",
   },
   final: {
     label: "Fase final",
     description:
-      "Desde la instancia elegida hasta la final. Las rondas previas usan el formato de la fase intermedia.",
+      "Desde la instancia elegida hasta la final. Cada instancia tiene su formato, duración y días.",
   },
 };
 
@@ -78,6 +94,15 @@ const phaseConfigSchema = z.object({
 
 const finalPhaseConfigSchema = phaseConfigSchema.extend({
   startsAtRound: z.enum(FINAL_PHASE_START_ROUND_VALUES),
+});
+
+export const roundConfigMapSchema = z.object({
+  ROUND_64: phaseConfigSchema,
+  ROUND_32: phaseConfigSchema,
+  ROUND_16: phaseConfigSchema,
+  QUARTER_FINALS: phaseConfigSchema,
+  SEMI_FINALS: phaseConfigSchema,
+  FINAL: phaseConfigSchema,
 });
 
 export const playDaySchema = z
@@ -102,6 +127,8 @@ export const categoryPhaseConfigSchema = z.object({
     knockout: phaseConfigSchema,
     final: finalPhaseConfigSchema,
   }),
+  /// Formato / duración / días por instancia de llave (compartido entre intermedia y final).
+  rounds: roundConfigMapSchema,
   intervalMin: z.number().int().min(0).max(60),
   pairsPerZone: z
     .number()
@@ -142,6 +169,7 @@ export function normalizeZone4Advancers(
 
 export type PhaseConfigValues = z.infer<typeof phaseConfigSchema>;
 export type FinalPhaseConfigValues = z.infer<typeof finalPhaseConfigSchema>;
+export type RoundConfigMapValues = z.infer<typeof roundConfigMapSchema>;
 export type CategoryPhaseConfigValues = z.infer<typeof categoryPhaseConfigSchema>;
 export type TournamentConfigValues = z.infer<typeof tournamentConfigSchema>;
 export type PlayDayValues = z.infer<typeof playDaySchema>;

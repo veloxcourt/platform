@@ -6,6 +6,11 @@ import type {
   IntegralSimulationSummary,
 } from "@/modules/tournaments/domain/court-day-slots";
 import {
+  formatDaySlotLabel,
+  MATCH_SLOT_UNIT_MIN,
+  slotDurationMinutes,
+} from "@/modules/tournaments/domain/court-day-slots";
+import {
   breakdownCategorySimulation,
   formatSimulationDuration,
   type CategoryScheduleSimulation,
@@ -442,48 +447,8 @@ function drawLegend(
   return y + 3;
 }
 
-function dayGridHeight(day: CourtDayRule, contentW: number) {
-  const layout = slotLayout(day, contentW);
-  return 8 + day.courts.length * (layout.rowCount * (layout.slotH + layout.gap) + 2);
-}
-
-function slotLayout(day: CourtDayRule, contentW: number) {
-  const slotCount = day.courts[0]?.slots.length ?? 0;
-  const courtLabelW = 20;
-  const gap = 1.5;
-  const available = Math.max(20, contentW - courtLabelW);
-  const minW = 11;
-  if (slotCount === 0) {
-    return {
-      courtLabelW,
-      gap,
-      slotW: available,
-      slotH: 16,
-      fontSize: 9,
-      dotR: 1.8,
-      slotsPerRow: 1,
-      rowCount: 1,
-    };
-  }
-  let slotsPerRow = slotCount;
-  let slotW = (available - (slotCount - 1) * gap) / slotCount;
-  if (slotW < minW) {
-    slotsPerRow = Math.max(1, Math.floor((available + gap) / (minW + gap)));
-    slotW = (available - (slotsPerRow - 1) * gap) / slotsPerRow;
-  }
-  const slotH = Math.min(18, Math.max(13, slotW * 0.58));
-  const fontSize = Math.min(10, Math.max(7.2, slotW * 0.34));
-  const dotR = Math.min(2.3, Math.max(1.5, slotW * 0.075));
-  return {
-    courtLabelW,
-    gap,
-    slotW,
-    slotH,
-    fontSize,
-    dotR,
-    slotsPerRow,
-    rowCount: Math.ceil(slotCount / slotsPerRow),
-  };
+function dayGridHeight(day: CourtDayRule, _contentW: number) {
+  return 8 + day.courts.length * 20;
 }
 
 function drawDayGrid(
@@ -499,7 +464,7 @@ function drawDayGrid(
     day.dayLabel,
     day.playDate,
     `${day.startTime}–${day.endTime}`,
-    day.slotMinutes ? `slots de ${day.slotMinutes} min` : null,
+    formatDaySlotLabel(day),
   ]
     .filter(Boolean)
     .join("  ·  ");
@@ -509,25 +474,33 @@ function drawDayGrid(
   doc.text(title, x, y + 4);
   y += 7;
 
-  const layout = slotLayout(day, w);
-  const { slotH, fontSize, dotR } = layout;
+  const courtLabelW = 20;
+  const gap = 1.2;
+  const slotH = 16;
+  const available = Math.max(20, w - courtLabelW);
 
   for (const court of day.courts) {
-    const courtH = layout.rowCount * (slotH + layout.gap);
-    ensure(courtH + 2);
+    ensure(slotH + 2);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     setText(doc, COLOR.muted);
     doc.text(court.courtLabel, x, y + slotH / 2 + 1.2);
 
+    const units = court.slots.map(
+      (slot) => slotDurationMinutes(slot) / MATCH_SLOT_UNIT_MIN,
+    );
+    const totalUnits = units.reduce((sum, unit) => sum + unit, 0) || 1;
+    const unitW =
+      (available - Math.max(0, court.slots.length - 1) * gap) / totalUnits;
+    let sx = x + courtLabelW;
     court.slots.forEach((slot, index) => {
-      const col = index % layout.slotsPerRow;
-      const row = Math.floor(index / layout.slotsPerRow);
-      const sx = x + layout.courtLabelW + col * (layout.slotW + layout.gap);
-      const sy = y + row * (slotH + layout.gap);
-      drawSlot(doc, sx, sy, layout.slotW, slotH, slot, colorById, fontSize, dotR);
+      const sw = unitW * (units[index] ?? 1);
+      const fontSize = Math.min(10, Math.max(6.5, sw * 0.34));
+      const dotR = Math.min(2.3, Math.max(1.4, sw * 0.075));
+      drawSlot(doc, sx, y, sw, slotH, slot, colorById, fontSize, dotR);
+      sx += sw + gap;
     });
-    y += courtH + 2.2;
+    y += slotH + 2.2;
   }
   return y;
 }

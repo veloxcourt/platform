@@ -11,6 +11,7 @@ import type {
   PlayDayValues,
   TournamentConfigValues,
 } from "@/modules/tournaments/domain/config-schema";
+import { defaultRoundConfigs } from "@/modules/tournaments/domain/config-defaults";
 import { toPlayDayValues } from "@/modules/tournaments/domain/play-day-slots";
 import type { TournamentConfig } from "@/modules/tournaments/domain/types";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
@@ -80,6 +81,12 @@ function toConfigValues(
           startsAtRound: category.phases.final.startsAtRound,
         },
       },
+      rounds: defaultRoundConfigs(
+        category.phases.final.startsAtRound,
+        category.phases.knockout,
+        category.phases.final,
+        category.rounds,
+      ),
       intervalMin: category.intervalMin,
       pairsPerZone: category.pairsPerZone ?? 3,
       zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,

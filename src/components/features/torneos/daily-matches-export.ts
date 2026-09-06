@@ -7,6 +7,7 @@ import {
   openPngBlob,
 } from "@/lib/clipboard-png";
 import {
+  categoryCardTone,
   DAILY_PHASE_LABELS,
   type DailyMatchCard,
   type DailyMatchPhase,
@@ -275,9 +276,10 @@ async function buildDailyMatchesPdf(
       y = 24;
     }
     const x = margin + col * (cardW + gap);
+    const categoryTone = categoryCardTone(card.categoryColor);
     const tone = PHASE_TONE[card.phase];
-    doc.setFillColor(...tone.fill);
-    doc.setDrawColor(...tone.border);
+    doc.setFillColor(...categoryTone.fill);
+    doc.setDrawColor(...categoryTone.border);
     doc.setLineWidth(0.4);
     doc.roundedRect(x, y, cardW, cardH, 2, 2, "FD");
 
@@ -329,7 +331,7 @@ async function buildDailyMatchesPdf(
     );
 
     doc.setFillColor(255, 255, 255);
-    doc.setDrawColor(...tone.border);
+    doc.setDrawColor(...categoryTone.border);
     doc.setLineWidth(0.25);
     doc.roundedRect(x + 3, y + 15, cardW - 6, 8, 1, 1, "FD");
     doc.roundedRect(x + 3, y + 27.5, cardW - 6, 8, 1, 1, "FD");
@@ -419,16 +421,6 @@ async function buildDailyMatchesPng(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, pageW, pageH);
 
-  const fill: Record<DailyMatchPhase, string> = {
-    zonas: "#f0fdfa",
-    intermedia: "#fffbeb",
-    final: "#f5f3ff",
-  };
-  const border: Record<DailyMatchPhase, string> = {
-    zonas: "#99f6e4",
-    intermedia: "#fbbf24",
-    final: "#a78bfa",
-  };
   const badgeFill: Record<DailyMatchPhase, string> = {
     zonas: "#ccfbf1",
     intermedia: "#fde68a",
@@ -457,8 +449,9 @@ async function buildDailyMatchesPng(
       const row = Math.floor(index / cols);
       const x = margin + col * (cardW + gap);
       const y = headerH + row * (cardH + gap);
-      ctx.fillStyle = fill[card.phase];
-      ctx.strokeStyle = border[card.phase];
+      const categoryTone = categoryCardTone(card.categoryColor);
+      ctx.fillStyle = categoryTone.fillCss;
+      ctx.strokeStyle = categoryTone.borderCss;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.roundRect(x, y, cardW, cardH, 8);
@@ -507,7 +500,7 @@ async function buildDailyMatchesPng(
       );
 
       ctx.fillStyle = "#ffffff";
-      ctx.strokeStyle = border[card.phase];
+      ctx.strokeStyle = categoryTone.borderCss;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.roundRect(x + 12, y + 62, cardW - 24, 48, 5);

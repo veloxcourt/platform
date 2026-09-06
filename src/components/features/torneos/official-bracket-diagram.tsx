@@ -1,4 +1,12 @@
-import type { ReactNode } from "react";
+"use client";
+
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import type { FapNode } from "@/modules/tournaments/domain/fap-llaves";
 import type { FinalPhaseStartRound } from "@/modules/tournaments/domain/config-schema";
@@ -56,10 +64,35 @@ const ROUND_FROM_ROOT = [
   "32 avos",
 ] as const;
 
-function sideLabel(node: FapNode): string {
+type Slot = "left" | "right";
+
+export function bracketSideLabel(node: FapNode): string {
   if (node.kind === "bye") return "Bye";
   if (node.kind === "qualifier") return node.qualifier.label;
   return `Ganador n° ${node.id}`;
+}
+
+function resolveBracketLabel(
+  label: string,
+  resolveLabel?: (label: string) => string,
+): string {
+  return resolveLabel?.(label) ?? label;
+}
+
+export function resolvedBracketSideLabel(
+  node: FapNode,
+  resolveLabel?: (label: string) => string,
+): string {
+  return resolveBracketLabel(bracketSideLabel(node), resolveLabel);
+}
+
+export function resolvedMatchWinnerLabel(
+  officialId: number,
+  resolveLabel?: (label: string) => string,
+): string | undefined {
+  const raw = `Ganador n° ${officialId}`;
+  const resolved = resolveBracketLabel(raw, resolveLabel);
+  return resolved !== raw ? resolved : undefined;
 }
 
 export function OfficialBracketDiagram({
@@ -123,11 +156,12 @@ function BracketBranch({
   resolveLabel?: (label: string) => string;
 }) {
   if (node.kind !== "match") {
-    const seed = sideLabel(node);
+    const seed = bracketSideLabel(node);
+    const name = resolveLabel?.(seed) ?? seed;
     return (
-      <LeafBox
-        label={resolveLabel?.(seed) ?? seed}
-        seed={resolveLabel && resolveLabel(seed) !== seed ? seed : undefined}
+      <PairCard
+        name={name}
+        seed={name !== seed ? seed : undefined}
         bye={node.kind === "bye"}
       />
     );
@@ -137,87 +171,254 @@ function BracketBranch({
   const phase = startsAtRound
     ? officialRoundPhase(label, startsAtRound)
     : null;
+  const leftIsMatch = node.left.kind === "match";
+  const rightIsMatch = node.right.kind === "match";
+  const compact = !leftIsMatch && !rightIsMatch;
+  const winnerName = resolvedMatchWinnerLabel(node.id, resolveLabel);
+  const leftSeed = bracketSideLabel(node.left);
+  const rightSeed = bracketSideLabel(node.right);
+  const leftName = resolveBracketLabel(leftSeed, resolveLabel);
+  const rightName = resolveBracketLabel(rightSeed, resolveLabel);
+
+  const destSlots =
+    leftIsMatch && rightIsMatch
+      ? "both"
+      : leftIsMatch
+        ? "left"
+        : rightIsMatch
+          ? "right"
+          : undefined;
+
+  const matchUnit = (
+    <MatchUnit
+      label={label}
+      officialId={node.id}
+      showOfficialId={showOfficialId}
+      phase={phase}
+      schedule={scheduleByOfficialId?.get(node.id)}
+      leftName={leftName}
+      leftSeed={leftName !== leftSeed ? leftSeed : undefined}
+      leftBye={node.left.kind === "bye"}
+      rightName={rightName}
+      rightSeed={rightName !== rightSeed ? rightSeed : undefined}
+      rightBye={node.right.kind === "bye"}
+      winnerName={winnerName}
+      destSlots={destSlots}
+    />
+  );
+
+  if (compact) return matchUnit;
+
+  const branchProps = {
+    depth: depth + 1,
+    showOfficialId,
+    startsAtRound,
+    scheduleByOfficialId,
+    resolveLabel,
+  };
+
+  if (!(leftIsMatch && rightIsMatch)) {
+    const child = leftIsMatch ? node.left : node.right;
+    const dest = leftIsMatch ? "left" : "right";
+    return (
+      <JoinToNames feeds={[{ side: dest, child: <BracketBranch node={child} {...branchProps} /> }]}>
+        {matchUnit}
+      </JoinToNames>
+    );
+  }
 
   return (
-    <div className="flex items-center">
-      <div className="grid w-max grid-cols-[auto_1.25rem]">
-        <BracketArm>
-          <BracketBranch
-            node={node.left}
-            depth={depth + 1}
-            showOfficialId={showOfficialId}
-            startsAtRound={startsAtRound}
-            scheduleByOfficialId={scheduleByOfficialId}
-            resolveLabel={resolveLabel}
-          />
-        </BracketArm>
-        <ElbowCap side="top" />
-        <BracketArm>
-          <BracketBranch
-            node={node.right}
-            depth={depth + 1}
-            showOfficialId={showOfficialId}
-            startsAtRound={startsAtRound}
-            scheduleByOfficialId={scheduleByOfficialId}
-            resolveLabel={resolveLabel}
-          />
-        </BracketArm>
-        <ElbowCap side="bottom" />
+    <JoinToNames
+      feeds={[
+        { side: "left", child: <BracketBranch node={node.left} {...branchProps} /> },
+        { side: "right", child: <BracketBranch node={node.right} {...branchProps} /> },
+      ]}
+    >
+      {matchUnit}
+    </JoinToNames>
+  );
+}
+
+function JoinToNames({
+  feeds,
+  children,
+}: {
+  feeds: { side: Slot; child: ReactNode }[];
+  children: ReactNode;
+}) {
+  const joinId = useId().replace(/:/g, "");
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [paths, setPaths] = useState<string[]>([]);
+
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+
+    function measure() {
+      if (!wrap) return;
+      const box = wrap.getBoundingClientRect();
+      const next: string[] = [];
+      for (const side of ["left", "right"] as const) {
+        const source = wrap.querySelector<HTMLElement>(
+          `[data-join-source="${joinId}"][data-join-side="${side}"]`,
+        );
+        const dest = wrap.querySelector<HTMLElement>(
+          `[data-join-match="${joinId}"] [data-feed-dest="${side}"]`,
+        );
+        if (!source || !dest) continue;
+        const s = source.getBoundingClientRect();
+        const d = dest.getBoundingClientRect();
+        const x1 = s.right - box.left;
+        const y1 = s.top + s.height / 2 - box.top;
+        const x2 = d.left - box.left;
+        const y2 = d.top + d.height / 2 - box.top;
+        const midX = x1 + Math.max(10, (x2 - x1) / 2);
+        next.push(`M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`);
+      }
+      setPaths((prev) =>
+        prev.length === next.length && prev.every((path, i) => path === next[i])
+          ? prev
+          : next,
+      );
+    }
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, [joinId]);
+
+  return (
+    <div ref={wrapRef} className="relative flex items-center">
+      <div
+        className={cn(
+          "flex",
+          feeds.length > 1 ? "flex-col justify-around gap-6" : "items-center",
+        )}
+      >
+        {feeds.map((feed) => (
+          <div
+            key={feed.side}
+            data-join-source={joinId}
+            data-join-side={feed.side}
+          >
+            {feed.child}
+          </div>
+        ))}
       </div>
-      <div className="h-px w-3 shrink-0 bg-border" aria-hidden />
-      <MatchBox
+      <div className="w-6 shrink-0" aria-hidden />
+      <div data-join-match={joinId}>{children}</div>
+      <svg
+        className="pointer-events-none absolute inset-0 overflow-visible text-border"
+        width="100%"
+        height="100%"
+        aria-hidden
+      >
+        {paths.map((d) => (
+          <path
+            key={d}
+            d={d}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1"
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function MatchUnit({
+  label,
+  officialId,
+  showOfficialId,
+  phase,
+  schedule,
+  leftName,
+  leftSeed,
+  leftBye,
+  rightName,
+  rightSeed,
+  rightBye,
+  winnerName,
+  destSlots,
+}: {
+  label: string;
+  officialId: number;
+  showOfficialId: boolean;
+  phase?: "intermediate" | "final" | null;
+  schedule?: BracketMatchSchedule;
+  leftName: string;
+  leftSeed?: string;
+  leftBye: boolean;
+  rightName: string;
+  rightSeed?: string;
+  rightBye: boolean;
+  winnerName?: string;
+  destSlots?: Slot | "both";
+}) {
+  return (
+    <div className="m-1 flex w-[11.5rem] flex-col gap-1">
+      <PairCard
+        name={leftName}
+        seed={leftSeed}
+        bye={leftBye}
+        winner={winnerName === leftName}
+        feedDest={destSlots === "left" || destSlots === "both" ? "left" : undefined}
+      />
+      <MatchMeta
         label={label}
-        officialId={node.id}
+        officialId={officialId}
         showOfficialId={showOfficialId}
         phase={phase}
-        schedule={scheduleByOfficialId?.get(node.id)}
+        schedule={schedule}
+      />
+      <PairCard
+        name={rightName}
+        seed={rightSeed}
+        bye={rightBye}
+        winner={winnerName === rightName}
+        feedDest={destSlots === "right" || destSlots === "both" ? "right" : undefined}
       />
     </div>
   );
 }
 
-function BracketArm({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex items-center">
-      {children}
-      <div className="h-px min-w-0 flex-1 bg-border" aria-hidden />
-    </div>
-  );
-}
-
-function ElbowCap({ side }: { side: "top" | "bottom" }) {
-  return (
-    <div className="relative self-stretch" aria-hidden>
-      <div className="absolute inset-x-0 top-1/2 h-px bg-border" />
-      {side === "top" ? (
-        <div className="absolute top-1/2 right-0 bottom-0 w-px bg-border" />
-      ) : (
-        <div className="absolute top-0 right-0 h-1/2 w-px bg-border" />
-      )}
-    </div>
-  );
-}
-
-function LeafBox({
-  label,
+function PairCard({
+  name,
   seed,
   bye,
+  winner = false,
+  feedDest,
 }: {
-  label: string;
+  name: string;
   seed?: string;
   bye: boolean;
+  winner?: boolean;
+  feedDest?: Slot;
 }) {
+  const placeholder = /^ganador\s*n[°º.]?\s*\d+$/i.test(name.trim());
   return (
     <div
+      data-feed-dest={feedDest}
       className={cn(
-        "m-1 flex min-h-8 min-w-[8.5rem] max-w-[12rem] flex-col items-center justify-center rounded-md border px-2 py-0.5 text-center text-xs",
+        "flex min-h-8 w-full flex-col items-center justify-center rounded-md border px-2 py-1 text-center text-xs shadow-sm",
         bye
-          ? "border-dashed text-muted-foreground"
-          : "border-input bg-background font-medium",
+          ? "border-dashed bg-background text-muted-foreground"
+          : "border-input bg-background",
+        winner && "border-foreground/40 font-semibold",
+        !winner && !bye && "font-medium",
       )}
-      title={seed ? `${label} · ${seed}` : label}
+      title={seed ? `${name} · ${seed}` : name}
     >
-      <span className="w-full text-center leading-tight">{label}</span>
+      <span
+        className={cn(
+          "w-full text-center leading-tight",
+          placeholder && "text-muted-foreground",
+        )}
+      >
+        {name}
+      </span>
       {seed ? (
         <span className="w-full text-center text-[10px] font-normal text-muted-foreground">
           {seed}
@@ -227,7 +428,7 @@ function LeafBox({
   );
 }
 
-function MatchBox({
+function MatchMeta({
   label,
   officialId,
   showOfficialId,
@@ -246,7 +447,7 @@ function MatchBox({
   return (
     <div
       className={cn(
-        "m-1 flex min-h-8 min-w-[7.25rem] flex-col items-center justify-center rounded-md border px-2 py-1 text-center",
+        "relative flex min-h-11 w-full flex-col items-center justify-center rounded-md border px-2 py-1.5 text-center shadow-sm",
         phase === "intermediate" &&
           "border-amber-400 bg-amber-100 text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100",
         phase === "final" &&
@@ -255,10 +456,12 @@ function MatchBox({
           "border-teal-200/80 bg-teal-50/80 dark:border-teal-900 dark:bg-teal-950/30",
       )}
     >
-      <p className="text-[10px] leading-tight text-muted-foreground">{label}</p>
-      <p className="text-xs font-medium">
-        {showOfficialId ? `n° ${officialId}` : "Ganador"}
-      </p>
+      {showOfficialId ? (
+        <span className="absolute top-1 right-1.5 text-[10px] font-medium">
+          n° {officialId}
+        </span>
+      ) : null}
+      <p className="text-[11px] font-medium leading-tight">{label}</p>
       <p
         className={cn(
           "text-[10px] leading-tight",

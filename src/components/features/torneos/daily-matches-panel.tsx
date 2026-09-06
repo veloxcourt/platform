@@ -37,6 +37,7 @@ import {
 } from "./daily-matches-export";
 import {
   buildDailyMatchCards,
+  categoryCardTone,
   DAILY_PHASE_LABELS,
   type DailyMatchCard,
   type DailyMatchPhase,
@@ -44,15 +45,6 @@ import {
 import { ExportFileMenu } from "./export-file-menu";
 
 const PNG_COLUMN_OPTIONS = [1, 2, 3, 4] as const;
-
-const PHASE_CARD: Record<DailyMatchPhase, string> = {
-  zonas:
-    "border-teal-200/80 bg-teal-50/80 dark:border-teal-900 dark:bg-teal-950/30",
-  intermedia:
-    "border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40",
-  final:
-    "border-violet-400 bg-violet-50 dark:border-violet-800 dark:bg-violet-950/40",
-};
 
 const PHASE_BADGE: Record<DailyMatchPhase, string> = {
   zonas:
@@ -67,13 +59,15 @@ function MatchCard({ card }: { card: DailyMatchCard }) {
   const court =
     card.courtIndex == null ? "Sin cancha" : `Cancha ${card.courtIndex + 1}`;
   const time = card.startTime.trim() || "Sin horario";
+  const tone = categoryCardTone(card.categoryColor);
 
   return (
     <article
-      className={cn(
-        "flex min-h-[11rem] flex-col rounded-lg border p-3",
-        PHASE_CARD[card.phase],
-      )}
+      className="flex min-h-[11rem] flex-col rounded-lg border p-3"
+      style={{
+        backgroundColor: tone.fillCss,
+        borderColor: tone.borderCss,
+      }}
     >
       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
         <div>

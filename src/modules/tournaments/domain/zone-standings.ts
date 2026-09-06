@@ -150,7 +150,8 @@ function collectSets(
     return { sets: [set1, set2, stb], complete: true };
   }
 
-  const set3 = readSet(scores, "s3a", "s3b");
+  const set3 =
+    readSet(scores, "s3a", "s3b") ?? readSet(scores, "stba", "stbb");
   if (!set3 || !setWinner(set3)) return { sets: [set1, set2], complete: false };
   return { sets: [set1, set2, set3], complete: true };
 }

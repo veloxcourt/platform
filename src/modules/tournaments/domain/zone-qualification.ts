@@ -190,12 +190,16 @@ function seedPairByKey(
   return map;
 }
 
+function isByeLabel(label: string): boolean {
+  return /^bye$/i.test(label.trim());
+}
+
 function pairIdFromSide(
   label: string,
   seeds: Map<string, string>,
   winners: Map<number, string>,
 ): string | null {
-  if (/^bye$/i.test(label.trim())) return null;
+  if (isByeLabel(label)) return null;
   const qualifier = parseQualifierToken(label);
   if (qualifier) {
     return seeds.get(qualifierSeedKey(qualifier.place, qualifier.zone)) ?? null;
@@ -205,21 +209,42 @@ function pairIdFromSide(
   return null;
 }
 
+type KnockoutFixtureSource = {
+  fixture?: IntermediateFixturePersisted | null;
+  matchFormat: MatchFormat;
+};
+
 function buildWinnerMap(
-  fixtures: Array<IntermediateFixturePersisted | null | undefined>,
+  fixtures: KnockoutFixtureSource[],
   seeds: Map<string, string>,
-  matchFormat: MatchFormat,
 ): Map<number, string> {
-  const matches = fixtures.flatMap((fixture) =>
-    (fixture?.rounds ?? []).flatMap((round) => round.matches),
+  const matches = fixtures.flatMap((source) =>
+    (source.fixture?.rounds ?? []).flatMap((round) =>
+      round.matches.map((match) => ({
+        match,
+        matchFormat: source.matchFormat,
+      })),
+    ),
   );
   const winners = new Map<number, string>();
   for (let pass = 0; pass < 8; pass += 1) {
     let added = 0;
-    for (const match of matches) {
+    for (const { match, matchFormat } of matches) {
       if (winners.has(match.officialId)) continue;
       const leftId = pairIdFromSide(match.left, seeds, winners);
       const rightId = pairIdFromSide(match.right, seeds, winners);
+      const leftBye = isByeLabel(match.left);
+      const rightBye = isByeLabel(match.right);
+      if (leftBye && rightId) {
+        winners.set(match.officialId, rightId);
+        added += 1;
+        continue;
+      }
+      if (rightBye && leftId) {
+        winners.set(match.officialId, leftId);
+        added += 1;
+        continue;
+      }
       if (!leftId || !rightId) continue;
       const result = evaluateZoneMatch(
         {
@@ -242,16 +267,15 @@ export function buildKnockoutNameResolver({
   qualification,
   pairs,
   fixtures,
-  matchFormat,
 }: {
   qualification: ZoneQualificationPersisted | null | undefined;
   pairs: PairListItem[];
-  fixtures: Array<IntermediateFixturePersisted | null | undefined>;
-  matchFormat: MatchFormat;
+  fixtures: KnockoutFixtureSource[];
+  matchFormat?: MatchFormat;
 }): (label: string) => string {
   const names = pairNameById(pairs);
   const seeds = seedPairByKey(qualification);
-  const winners = buildWinnerMap(fixtures, seeds, matchFormat);
+  const winners = buildWinnerMap(fixtures, seeds);
 
   return (label: string) => {
     const pairId = pairIdFromSide(label, seeds, winners);

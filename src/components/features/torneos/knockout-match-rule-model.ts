@@ -1,4 +1,10 @@
-import { buildMatchesRuleGrid } from "@/modules/tournaments/domain/court-day-slots";
+import {
+  buildMatchesRuleGrid,
+  simulationRoundsFromCategory,
+  slotMinutesForSimulationDate,
+} from "@/modules/tournaments/domain/court-day-slots";
+import { slotMinutesForOfficialLabel } from "@/modules/tournaments/domain/instance-slot-config";
+import { simulationPairCount } from "@/modules/tournaments/domain/category-simulation-schema";
 import type {
   CourtDayRule,
   ScheduledMatchMark,
@@ -52,6 +58,7 @@ function knockoutMarks(
   categoryId: string,
   abbreviation: string | null | undefined,
   projectedPhase: SimulationPhaseKey,
+  durationForRound: (roundLabel: string) => number,
   excludeOfficialId?: number | null,
 ): ScheduledMatchMark[] {
   if (!fixture) return [];
@@ -72,6 +79,7 @@ function knockoutMarks(
           pair1Label: match.left,
           pair2Label: match.right,
           projectedPhase,
+          durationMinutes: durationForRound(round.label),
         };
       }),
   );
@@ -92,49 +100,91 @@ export function buildKnockoutSlotRules(params: {
   const abbreviationById = new Map(
     params.categories.map((category) => [category.id, category.abbreviation]),
   );
-  const slotMinutesByDate: Record<string, number> = {};
-  let defaultSlotMinutes = 60;
   const playDates = new Set<string>();
   const fallbackDay =
     params.phase === "intermediate"
       ? penultimatePlayDay(params.config.playDays)?.date
       : lastPlayDay(params.config.playDays)?.date;
-
-  for (const categoryConfig of params.config.categories) {
-    const phaseConfig =
-      params.phase === "intermediate"
-        ? categoryConfig.phases.knockout
-        : categoryConfig.phases.final;
-    const minutes = phaseConfig.matchDurationMin + categoryConfig.intervalMin;
-    defaultSlotMinutes = Math.max(defaultSlotMinutes, minutes);
-
-    for (const date of phaseConfig.playDates) {
-      if (!date) continue;
-      playDates.add(date);
-      slotMinutesByDate[date] = Math.max(slotMinutesByDate[date] ?? 0, minutes);
-    }
-
-    const fixture = fixtureOf(
+  const loads = params.config.categories.map((categoryConfig) => {
+    const zonesPlayDates = [
+      ...categoryConfig.phases.zones.playDates,
+      ...(categoryConfig.zonesFixture?.zones ?? []).flatMap((zone) =>
+        zone.matches.map((match) => match.playDate ?? ""),
+      ),
+    ].filter(Boolean);
+    const knockoutPlayDates = [
+      ...categoryConfig.phases.knockout.playDates,
+      ...(categoryConfig.intermediateFixture?.rounds ?? []).flatMap((round) =>
+        round.matches.map((match) => match.playDate ?? ""),
+      ),
+    ].filter(Boolean);
+    const liveFinal = fixtureOf(
       categoryConfig,
-      params.phase,
-      params.liveFixtureByCategory,
+      "final",
+      params.phase === "final" ? params.liveFixtureByCategory : undefined,
     );
-    for (const round of fixture?.rounds ?? []) {
-      for (const match of round.matches) {
-        if (!match.playDate) continue;
-        playDates.add(match.playDate);
-        slotMinutesByDate[match.playDate] = Math.max(
-          slotMinutesByDate[match.playDate] ?? 0,
-          minutes,
-        );
-      }
-    }
-  }
+    const liveIntermediate = fixtureOf(
+      categoryConfig,
+      "intermediate",
+      params.phase === "intermediate"
+        ? params.liveFixtureByCategory
+        : undefined,
+    );
+    const finalPlayDates = [
+      ...categoryConfig.phases.final.playDates,
+      ...(liveFinal?.rounds ?? []).flatMap((round) =>
+        round.matches.map((match) => match.playDate ?? ""),
+      ),
+    ].filter(Boolean);
+    const intermediateDates = [
+      ...knockoutPlayDates,
+      ...(liveIntermediate?.rounds ?? []).flatMap((round) =>
+        round.matches.map((match) => match.playDate ?? ""),
+      ),
+    ].filter(Boolean);
+    const category = params.categories.find(
+      (item) => item.id === categoryConfig.categoryId,
+    );
+    const pairs = category ? simulationPairCount(category) : 8;
+    return {
+      categoryId: categoryConfig.categoryId,
+      zonesPlayDates,
+      knockoutPlayDates: intermediateDates,
+      finalPlayDates,
+      zonesSlotMinutes:
+        categoryConfig.phases.zones.matchDurationMin +
+        categoryConfig.intervalMin,
+      knockoutSlotMinutes:
+        categoryConfig.phases.knockout.matchDurationMin +
+        categoryConfig.intervalMin,
+      finalSlotMinutes:
+        categoryConfig.phases.final.matchDurationMin +
+        categoryConfig.intervalMin,
+      ...simulationRoundsFromCategory(categoryConfig, pairs),
+    };
+  });
 
-  if (fallbackDay) {
-    playDates.add(fallbackDay);
-    slotMinutesByDate[fallbackDay] = Math.max(
-      slotMinutesByDate[fallbackDay] ?? 0,
+  let defaultSlotMinutes = 0;
+  for (const load of loads) {
+    const minutes =
+      params.phase === "intermediate"
+        ? load.knockoutSlotMinutes
+        : load.finalSlotMinutes;
+    defaultSlotMinutes = Math.max(defaultSlotMinutes, minutes);
+    const dates =
+      params.phase === "intermediate"
+        ? load.knockoutPlayDates
+        : load.finalPlayDates;
+    for (const date of dates) playDates.add(date);
+  }
+  if (defaultSlotMinutes <= 0) defaultSlotMinutes = 60;
+  if (fallbackDay) playDates.add(fallbackDay);
+
+  const slotMinutesByDate: Record<string, number> = {};
+  for (const date of playDates) {
+    slotMinutesByDate[date] = slotMinutesForSimulationDate(
+      date,
+      loads,
       defaultSlotMinutes,
     );
   }
@@ -157,6 +207,12 @@ export function buildKnockoutSlotRules(params: {
         categoryConfig.categoryId,
         abbreviationById.get(categoryConfig.categoryId),
         phaseKey,
+        (label) =>
+          slotMinutesForOfficialLabel(
+            categoryConfig,
+            label,
+            params.phase === "intermediate" ? "knockout" : "final",
+          ),
         params.exclude?.categoryId === categoryConfig.categoryId
           ? params.exclude.officialId
           : null,
@@ -171,6 +227,12 @@ export function buildKnockoutSlotRules(params: {
       categoryConfig.categoryId,
       abbreviationById.get(categoryConfig.categoryId),
       otherPhaseKey,
+      (label) =>
+        slotMinutesForOfficialLabel(
+          categoryConfig,
+          label,
+          otherPhase === "intermediate" ? "knockout" : "final",
+        ),
     ),
   );
 
@@ -197,6 +259,9 @@ export function buildKnockoutSlotRules(params: {
               pair1Label: match.pair1Id ?? "Pareja 1",
               pair2Label: match.pair2Id ?? "Pareja 2",
               projectedPhase: "zones" as const,
+              durationMinutes:
+                categoryConfig.phases.zones.matchDurationMin +
+                categoryConfig.intervalMin,
             })),
           ),
         );

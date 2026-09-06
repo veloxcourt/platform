@@ -17,7 +17,12 @@ import type { CalendarCategoryValues } from "@/modules/herramientas/domain/calen
 import type { UpdateCategorySimulationValues } from "../domain/category-simulation-schema";
 import { normalizeCategoryLabel } from "../domain/category-level";
 import type { TournamentConfigValues } from "../domain/config-schema";
-import { defaultPhaseConfigs, defaultPlayDays, syncPlayDaysToRange } from "../domain/config-defaults";
+import {
+  defaultPhaseConfigs,
+  defaultPlayDays,
+  defaultRoundConfigs,
+  syncPlayDaysToRange,
+} from "../domain/config-defaults";
 import {
   buildCloneTournamentName,
   type CreateTournamentValues,
@@ -60,6 +65,10 @@ import {
   buildFinalFixture,
   buildIntermediateFixture,
 } from "../domain/build-intermediate-fixture";
+import {
+  fixtureCellMinutes,
+  slotMinutesForOfficialLabel,
+} from "../domain/instance-slot-config";
 import {
   carryKnockoutScores,
   knockoutFixtureStamps,
@@ -323,6 +332,11 @@ function demoConfigs(): Map<string, TournamentConfig> {
             categoryId: "demo-cat-f5",
             categoryName: "Femenina 5ta",
             phases: defaults,
+            rounds: defaultRoundConfigs(
+              defaults.final.startsAtRound,
+              defaults.knockout,
+              defaults.final,
+            ),
             intervalMin: 0,
             pairsPerZone: 3,
             zone4Advancers: 3,
@@ -335,6 +349,11 @@ function demoConfigs(): Map<string, TournamentConfig> {
             categoryId: "demo-cat-m4",
             categoryName: "Masculina 4ta",
             phases: defaults,
+            rounds: defaultRoundConfigs(
+              defaults.final.startsAtRound,
+              defaults.knockout,
+              defaults.final,
+            ),
             intervalMin: 0,
             pairsPerZone: 3,
             zone4Advancers: 3,
@@ -376,6 +395,11 @@ function buildTournamentConfig(
           categoryId: category.id,
           categoryName: category.name,
           phases: defaults,
+          rounds: defaultRoundConfigs(
+            defaults.final.startsAtRound,
+            defaults.knockout,
+            defaults.final,
+          ),
           intervalMin: 0,
           pairsPerZone: 3,
           zone4Advancers: 3,
@@ -1606,17 +1630,16 @@ export class MockTournamentRepository implements TournamentRepository {
             ])
         : [];
 
-      const slotMinutes = Math.max(
+      const slotMinutes = fixtureCellMinutes(
+        builderCategories.map((category) => ({
+          config:
+            config.categories.find(
+              (item) => item.categoryId === category.categoryId,
+            ) ?? config.categories[0]!,
+          pairCount: category.pairCount,
+          phase: "knockout" as const,
+        })),
         60,
-        ...builderCategories.map((category) => {
-          const categoryConfig = config.categories.find(
-            (item) => item.categoryId === category.categoryId,
-          );
-          return (
-            (categoryConfig?.phases.knockout.matchDurationMin ?? 90) +
-            (categoryConfig?.intervalMin ?? 0)
-          );
-        }),
       );
 
       const result = buildIntermediateFixture({
@@ -1625,6 +1648,13 @@ export class MockTournamentRepository implements TournamentRepository {
         slotMinutes,
         categories: builderCategories,
         reservedMatches,
+        roundSlotMinutes: (id, label) => {
+          const categoryConfig = config.categories.find(
+            (item) => item.categoryId === id,
+          );
+          if (!categoryConfig) return slotMinutes;
+          return slotMinutesForOfficialLabel(categoryConfig, label, "knockout");
+        },
       });
 
       if (
@@ -1770,17 +1800,16 @@ export class MockTournamentRepository implements TournamentRepository {
             ])
         : [];
 
-      const slotMinutes = Math.max(
+      const slotMinutes = fixtureCellMinutes(
+        builderCategories.map((category) => ({
+          config:
+            config.categories.find(
+              (item) => item.categoryId === category.categoryId,
+            ) ?? config.categories[0]!,
+          pairCount: category.pairCount,
+          phase: "final" as const,
+        })),
         60,
-        ...builderCategories.map((category) => {
-          const categoryConfig = config.categories.find(
-            (item) => item.categoryId === category.categoryId,
-          );
-          return (
-            (categoryConfig?.phases.final.matchDurationMin ?? 120) +
-            (categoryConfig?.intervalMin ?? 0)
-          );
-        }),
       );
 
       const result = buildFinalFixture({
@@ -1789,6 +1818,13 @@ export class MockTournamentRepository implements TournamentRepository {
         slotMinutes,
         categories: builderCategories,
         reservedMatches,
+        roundSlotMinutes: (id, label) => {
+          const categoryConfig = config.categories.find(
+            (item) => item.categoryId === id,
+          );
+          if (!categoryConfig) return slotMinutes;
+          return slotMinutesForOfficialLabel(categoryConfig, label, "final");
+        },
       });
 
       if (
@@ -2084,6 +2120,7 @@ export class MockTournamentRepository implements TournamentRepository {
           categoryId: category.categoryId,
           categoryName: meta?.name ?? "Categoría",
           phases: category.phases,
+          rounds: category.rounds,
           intervalMin: category.intervalMin,
           pairsPerZone: category.pairsPerZone,
           zone4Advancers: category.zone4Advancers,
@@ -2163,6 +2200,12 @@ export class MockTournamentRepository implements TournamentRepository {
             playDates: [...source.phases.final.playDates],
           },
         },
+        rounds: defaultRoundConfigs(
+          source.phases.final.startsAtRound,
+          source.phases.knockout,
+          source.phases.final,
+          source.rounds,
+        ),
         intervalMin: source.intervalMin,
         pairsPerZone: source.pairsPerZone,
         zone4Advancers: source.zone4Advancers,
