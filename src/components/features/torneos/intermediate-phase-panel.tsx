@@ -127,6 +127,7 @@ export function IntermediatePhasePanel({
     canReorder,
     canEditSchedule,
     orderedCrossings,
+    sortCrossingsBySchedule,
     moveCrossing,
     updateScore,
     updateSchedule,
@@ -463,6 +464,11 @@ export function IntermediatePhasePanel({
               canPickSlot={canEditSchedule}
               onMove={(officialId, direction) =>
                 moveCrossing(round.crossings, officialId, direction)
+              }
+              onSortBySchedule={
+                canEditSchedule
+                  ? () => sortCrossingsBySchedule(round.crossings)
+                  : undefined
               }
               onPickSchedule={setChangeScheduleOfficialId}
             />

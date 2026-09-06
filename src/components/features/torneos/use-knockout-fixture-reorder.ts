@@ -42,6 +42,9 @@ export function useKnockoutFixtureReorder({
   const readOnly = useTournamentReadOnly();
   const { isManual } = useFixtureEditMode(categoryId, phase);
   const [draft, setDraft] = useState(fixture ?? null);
+  const [manualOrderByKey, setManualOrderByKey] = useState<
+    Record<string, number[]>
+  >({});
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<IntermediateFixturePersisted | null>(null);
   const dirtyRef = useRef(false);
@@ -53,6 +56,7 @@ export function useKnockoutFixtureReorder({
   useEffect(() => {
     dirtyRef.current = false;
     setDraft(fixture ?? null);
+    setManualOrderByKey({});
   }, [categoryId, phase]);
 
   useEffect(() => {
@@ -178,17 +182,51 @@ export function useKnockoutFixtureReorder({
     queueSave(next, true);
   }
 
+  function compareCrossingSchedule(left: FapCrossing, right: FapCrossing) {
+    const bySchedule = comparePlayDaySchedule(
+      scheduleByOfficialId.get(left.id) ?? {},
+      scheduleByOfficialId.get(right.id) ?? {},
+      dayOpenByDate,
+    );
+    if (bySchedule !== 0) return bySchedule;
+    const leftCourt = scheduleByOfficialId.get(left.id)?.courtIndex ?? 999;
+    const rightCourt = scheduleByOfficialId.get(right.id)?.courtIndex ?? 999;
+    if (leftCourt !== rightCourt) return leftCourt - rightCourt;
+    return left.id - right.id;
+  }
+
+  function crossingsKey(crossings: FapCrossing[]) {
+    return [...crossings]
+      .map((crossing) => crossing.id)
+      .sort((left, right) => left - right)
+      .join(",");
+  }
+
+  function applyManualOrder(crossings: FapCrossing[]) {
+    const override = manualOrderByKey[crossingsKey(crossings)];
+    if (!override?.length) return [...crossings];
+    const byId = new Map(crossings.map((crossing) => [crossing.id, crossing]));
+    const ordered = override
+      .map((id) => byId.get(id))
+      .filter((crossing): crossing is FapCrossing => Boolean(crossing));
+    for (const crossing of crossings) {
+      if (!override.includes(crossing.id)) ordered.push(crossing);
+    }
+    return ordered;
+  }
+
   function orderedCrossings(crossings: FapCrossing[]): FapCrossing[] {
-    if (isManual) return [...crossings];
-    return [...crossings].sort((left, right) => {
-      const bySchedule = comparePlayDaySchedule(
-        scheduleByOfficialId.get(left.id) ?? {},
-        scheduleByOfficialId.get(right.id) ?? {},
-        dayOpenByDate,
-      );
-      if (bySchedule !== 0) return bySchedule;
-      return left.id - right.id;
-    });
+    if (isManual) return applyManualOrder(crossings);
+    return [...crossings].sort(compareCrossingSchedule);
+  }
+
+  function sortCrossingsBySchedule(crossings: FapCrossing[]) {
+    if (!isManual) return;
+    const sorted = [...crossings].sort(compareCrossingSchedule);
+    setManualOrderByKey((current) => ({
+      ...current,
+      [crossingsKey(crossings)]: sorted.map((crossing) => crossing.id),
+    }));
   }
 
   function moveCrossing(
@@ -218,6 +256,7 @@ export function useKnockoutFixtureReorder({
     canReorder,
     canEditSchedule: isManual && !readOnly,
     orderedCrossings,
+    sortCrossingsBySchedule,
     moveCrossing,
     updateScore,
     updateSchedule,

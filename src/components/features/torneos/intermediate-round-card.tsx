@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowDownWideNarrow, ChevronDown, ChevronUp } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { MatchFormat } from "@/modules/tournaments/domain/config-schema";
@@ -108,6 +108,7 @@ export function IntermediateRoundCard({
   canReorder = false,
   canPickSlot = false,
   onMove,
+  onSortBySchedule,
   onPickSchedule,
   scoresByOfficialId,
   onScoreChange,
@@ -123,6 +124,7 @@ export function IntermediateRoundCard({
   canReorder?: boolean;
   canPickSlot?: boolean;
   onMove?: (officialId: number, direction: "up" | "down") => void;
+  onSortBySchedule?: () => void;
   onPickSchedule?: (officialId: number) => void;
   scoresByOfficialId?: Map<number, Record<string, string>>;
   onScoreChange?: (officialId: number, key: string, value: string) => void;
@@ -177,7 +179,7 @@ export function IntermediateRoundCard({
           <colgroup>
             <col className="w-11" />
             <col className="w-[6.5rem]" />
-            <col className="w-16" />
+            <col className="w-[4.75rem]" />
             <col className="w-[5rem]" />
             <col />
             <col />
@@ -187,7 +189,22 @@ export function IntermediateRoundCard({
             <tr className="border-b text-[11px] text-muted-foreground">
               <th className="py-1.5 pr-1.5 font-medium">#</th>
               <th className="py-1.5 pr-1.5 font-medium">Día</th>
-              <th className="py-1.5 pr-1.5 font-medium">Horario</th>
+              <th className="py-1.5 pr-1.5 font-medium">
+                <span className="inline-flex items-center gap-0.5">
+                  Horario
+                  {onSortBySchedule ? (
+                    <button
+                      type="button"
+                      className="inline-flex size-4 items-center justify-center rounded text-muted-foreground/80 hover:bg-muted hover:text-foreground"
+                      onClick={onSortBySchedule}
+                      aria-label="Ordenar filas por horario"
+                      title="Ordenar filas por horario"
+                    >
+                      <ArrowDownWideNarrow className="size-3" />
+                    </button>
+                  ) : null}
+                </span>
+              </th>
               <th className="py-1.5 pr-1.5 font-medium">Cancha</th>
               <th className="py-1.5 pr-1.5 font-medium">Pareja 1</th>
               <th className="py-1.5 pr-1.5 font-medium">Pareja 2</th>
