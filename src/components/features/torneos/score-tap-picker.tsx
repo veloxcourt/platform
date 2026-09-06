@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
 import type { MatchFormat } from "@/modules/tournaments/domain/config-schema";
@@ -8,6 +9,9 @@ import {
   scoreChoicesForColumn,
   type ZoneResultColumn,
 } from "@/modules/tournaments/domain/zone-bracket";
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function ScoreTapPicker({
   open,
@@ -31,6 +35,13 @@ export function ScoreTapPicker({
   onClose: () => void;
 }) {
   const [currentKey, setCurrentKey] = useState(startKey);
+  const [mounted, setMounted] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (open) setCurrentKey(startKey);
@@ -38,19 +49,61 @@ export function ScoreTapPicker({
 
   useEffect(() => {
     if (!open) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+
+    restoreFocusRef.current = document.activeElement as HTMLElement | null;
+
+    const html = document.documentElement;
+    const { body } = document;
+    const previousHtmlOverflow = html.style.overflow;
+    const previousBodyOverflow = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+
+    const dialog = dialogRef.current;
+    dialog?.focus({ preventScroll: true });
+
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === dialog)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
     }
+
+    function onTouchMove(event: TouchEvent) {
+      if (dialog?.contains(event.target as Node)) return;
+      event.preventDefault();
+    }
+
     document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
     return () => {
-      document.body.style.overflow = previous;
+      html.style.overflow = previousHtmlOverflow;
+      body.style.overflow = previousBodyOverflow;
       document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("touchmove", onTouchMove);
+      restoreFocusRef.current?.focus({ preventScroll: true });
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
   const column =
     columns.find((item) => item.key === currentKey) ?? columns[0];
@@ -70,8 +123,8 @@ export function ScoreTapPicker({
     onClose();
   }
 
-  return (
-    <div className="fixed inset-0 z-[80]">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-end justify-center overscroll-none pt-[env(safe-area-inset-top)] sm:items-center sm:p-4 sm:pt-[max(1rem,env(safe-area-inset-top))] sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
       <button
         type="button"
         className="absolute inset-0 bg-black/45"
@@ -79,10 +132,12 @@ export function ScoreTapPicker({
         onClick={onClose}
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Cargar resultado"
-        className="absolute inset-x-0 bottom-0 z-[81] rounded-t-2xl border bg-popover p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-popover-foreground shadow-lg sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-sm sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl"
+        tabIndex={-1}
+        className="relative z-[101] w-full max-h-[calc(100dvh-env(safe-area-inset-top))] overflow-y-auto overscroll-contain rounded-t-2xl border bg-popover p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-popover-foreground shadow-lg outline-none sm:max-h-[min(90dvh,calc(100dvh-2rem))] sm:max-w-sm sm:rounded-2xl"
       >
         <p className="text-xs text-muted-foreground">
           {column.group ?? "Set"} · {column.label}
@@ -154,6 +209,7 @@ export function ScoreTapPicker({
           Tocá un número; sigue solo al siguiente casillero
         </p>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

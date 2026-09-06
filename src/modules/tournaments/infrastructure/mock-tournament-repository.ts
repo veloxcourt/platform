@@ -1972,6 +1972,7 @@ export class MockTournamentRepository implements TournamentRepository {
   async calculateAndSaveZoneQualification(
     clubId: string,
     tournamentId: string,
+    categoryId?: string,
   ): Promise<
     | {
         ok: true;
@@ -1989,14 +1990,23 @@ export class MockTournamentRepository implements TournamentRepository {
       }
       const config = record.configs.get(tournamentId);
       if (!config) return { ok: false, error: "Configuración no encontrada" };
+      if (
+        categoryId &&
+        !config.categories.some((category) => category.categoryId === categoryId)
+      ) {
+        return { ok: false, error: "Categoría no encontrada" };
+      }
       const warnings: string[] = [];
       let seedCount = 0;
+      let categoryCount = 0;
       const nextCategories = config.categories.map((category) => {
+        if (categoryId && category.categoryId !== categoryId) return category;
         const qualification = buildZoneQualification({
           fixture: category.zonesFixture,
           format: category.phases.zones.matchFormat,
           zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
         });
+        categoryCount += 1;
         seedCount += qualification.seeds.length;
         for (const warning of qualification.warnings) {
           warnings.push(`${category.categoryName}: ${warning}`);
@@ -2009,7 +2019,7 @@ export class MockTournamentRepository implements TournamentRepository {
       });
       return {
         ok: true,
-        categoryCount: nextCategories.length,
+        categoryCount,
         seedCount,
         warnings,
       };

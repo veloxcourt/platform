@@ -175,6 +175,21 @@ async function loadLogoImage(url: string): Promise<HTMLImageElement | null> {
   }
 }
 
+function drawContainedImage(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  x: number,
+  y: number,
+  box: number,
+) {
+  const ratio = image.naturalWidth / image.naturalHeight || 1;
+  let width = box;
+  let height = box;
+  if (ratio > 1) height = box / ratio;
+  else width = box * ratio;
+  ctx.drawImage(image, x + (box - width) / 2, y + (box - height) / 2, width, height);
+}
+
 function drawClubOnCanvas(
   ctx: CanvasRenderingContext2D,
   club: DailyMatchesClub,
@@ -266,11 +281,28 @@ async function buildDailyMatchesPdf(
     doc.setLineWidth(0.4);
     doc.roundedRect(x, y, cardW, cardH, 2, 2, "FD");
 
+    const logoSize = logo ? 7 : 0;
+    if (logo) {
+      try {
+        doc.addImage(
+          logo.data,
+          logo.format,
+          x + (cardW - logoSize) / 2,
+          y + 1.6,
+          logoSize,
+          logoSize,
+        );
+      } catch {
+        // Si el logo no entra, la tarjeta sigue igual.
+      }
+    }
+
+    const headerTextW = logo ? cardW / 2 - logoSize / 2 - 4 : cardW - 28;
     doc.setTextColor(24, 24, 27);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
     doc.text(
-      ellipsize(doc, `${timeLabel(card)} · ${courtLabel(card)}`, cardW - 28),
+      ellipsize(doc, `${timeLabel(card)} · ${courtLabel(card)}`, headerTextW),
       x + 3,
       y + 6,
     );
@@ -290,7 +322,7 @@ async function buildDailyMatchesPdf(
       ellipsize(
         doc,
         `${card.categoryLabel} · ${card.groupLabel}${card.matchNumber ? ` · n° ${card.matchNumber}` : ""}`,
-        cardW - 6,
+        logo ? headerTextW : cardW - 6,
       ),
       x + 3,
       y + 11.5,
@@ -304,7 +336,9 @@ async function buildDailyMatchesPdf(
     doc.setTextColor(24, 24, 27);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text(ellipsize(doc, card.pair1 || "—", cardW - 10), x + 5, y + 20.2);
+    doc.text(ellipsize(doc, card.pair1 || "—", cardW - 10), x + cardW / 2, y + 20.2, {
+      align: "center",
+    });
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.5);
     doc.setTextColor(113, 113, 122);
@@ -312,7 +346,9 @@ async function buildDailyMatchesPdf(
     doc.setTextColor(24, 24, 27);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text(ellipsize(doc, card.pair2 || "—", cardW - 10), x + 5, y + 32.7);
+    doc.text(ellipsize(doc, card.pair2 || "—", cardW - 10), x + cardW / 2, y + 32.7, {
+      align: "center",
+    });
 
     if (card.observation) {
       doc.setFont("helvetica", "normal");
@@ -342,39 +378,46 @@ function canvasEllipsize(
   return `${value}…`;
 }
 
+const PNG_MIN_COLUMNS = 1;
+const PNG_MAX_COLUMNS = 4;
+
+export function clampDailyMatchesPngColumns(columns: number): number {
+  if (!Number.isFinite(columns)) return 2;
+  return Math.min(PNG_MAX_COLUMNS, Math.max(PNG_MIN_COLUMNS, Math.round(columns)));
+}
+
 async function buildDailyMatchesPng(
   tournamentName: string,
   dayLabel: string,
   cards: DailyMatchCard[],
   club?: DailyMatchesClub,
+  columns = 2,
 ): Promise<{ blob: Blob; filename: string }> {
-  /// Misma hoja A4 vertical y 2 columnas que el PDF.
-  const pageW = 794;
-  const pageH = 1123;
-  const margin = 45;
-  const gap = 13;
-  const cols = 2;
-  const cardW = (pageW - margin * 2 - gap) / cols;
-  const cardH = 159;
-  const headerY = 90;
-  const footerY = pageH - 26;
-  const rowsPerPage = Math.max(
-    1,
-    Math.floor((footerY - 16 - headerY + gap) / (cardH + gap)),
-  );
-  const cardsPerPage = rowsPerPage * cols;
-  const pages = Math.max(1, Math.ceil(cards.length / cardsPerPage));
+  /// Lienzo al tamaño de las tarjetas, con ancho máximo cómodo para WhatsApp.
+  const whatsappMaxW = 1080;
+  const margin = 36;
+  const gap = 14;
+  const headerH = 100;
+  const bottom = 28;
+  const preferredCardW = 500;
+  const cardH = 210;
+  const cols = clampDailyMatchesPngColumns(columns);
+  const rows = Math.max(1, Math.ceil(cards.length / cols));
+  const maxCardW = (whatsappMaxW - margin * 2 - gap * (cols - 1)) / cols;
+  const cardW = Math.min(preferredCardW, maxCardW);
+  const pageW = margin * 2 + cols * cardW + (cols - 1) * gap;
+  const pageH = headerH + rows * cardH + Math.max(0, rows - 1) * gap + bottom;
   const logo = club?.logoUrl ? await loadLogoImage(club.logoUrl) : null;
-  const scale = 2;
+  const scale = pageW > 720 ? 1 : 2;
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(pageW * scale);
-  canvas.height = Math.round(pageH * pages * scale);
+  canvas.height = Math.round(pageH * scale);
   const rawCtx = canvas.getContext("2d");
   if (!rawCtx) return Promise.reject(new Error("No se pudo crear la imagen"));
   const ctx: CanvasRenderingContext2D = rawCtx;
   ctx.scale(scale, scale);
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, pageW, pageH * pages);
+  ctx.fillRect(0, 0, pageW, pageH);
 
   const fill: Record<DailyMatchPhase, string> = {
     zonas: "#f0fdfa",
@@ -392,49 +435,28 @@ async function buildDailyMatchesPng(
     final: "#ddd6fe",
   };
 
-  function drawChrome(pageTop: number, page: number) {
-    ctx.fillStyle = "#18181b";
-    ctx.font = "bold 22px Helvetica, Arial, sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText(
-      canvasEllipsize(ctx, tournamentName || "Partidos del día", pageW - margin * 2 - 260),
-      margin,
-      pageTop + 36,
-    );
-    ctx.fillStyle = "#71717a";
-    ctx.font = "13px Helvetica, Arial, sans-serif";
-    ctx.fillText(
-      `Partidos del día · ${dayLabel} · ${cards.length} enfrentamiento${cards.length === 1 ? "" : "s"}`,
-      margin,
-      pageTop + 56,
-    );
-    if (club) drawClubOnCanvas(ctx, club, logo, pageW, margin, pageTop);
-    ctx.fillStyle = "#71717a";
-    ctx.font = "12px Helvetica, Arial, sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText(dayLabel, margin, pageTop + footerY);
-    ctx.textAlign = "right";
-    ctx.fillText(String(page), pageW - margin, pageTop + footerY);
-    ctx.textAlign = "left";
-    if (page > 1) {
-      ctx.strokeStyle = "#e4e4e7";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, pageTop);
-      ctx.lineTo(pageW, pageTop);
-      ctx.stroke();
-    }
-  }
+  ctx.fillStyle = "#18181b";
+  ctx.font = "bold 24px Helvetica, Arial, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(
+    canvasEllipsize(ctx, tournamentName || "Partidos del día", pageW - margin * 2 - 220),
+    margin,
+    40,
+  );
+  ctx.fillStyle = "#71717a";
+  ctx.font = "15px Helvetica, Arial, sans-serif";
+  ctx.fillText(
+    `Partidos del día · ${dayLabel} · ${cards.length} enfrentamiento${cards.length === 1 ? "" : "s"}`,
+    margin,
+    64,
+  );
+  if (club) drawClubOnCanvas(ctx, club, logo, pageW, margin);
 
-  for (let page = 0; page < pages; page += 1) {
-    const pageTop = page * pageH;
-    drawChrome(pageTop, page + 1);
-    const pageCards = cards.slice(page * cardsPerPage, (page + 1) * cardsPerPage);
-    pageCards.forEach((card, index) => {
+  cards.forEach((card, index) => {
       const col = index % cols;
       const row = Math.floor(index / cols);
       const x = margin + col * (cardW + gap);
-      const y = pageTop + headerY + row * (cardH + gap);
+      const y = headerH + row * (cardH + gap);
       ctx.fillStyle = fill[card.phase];
       ctx.strokeStyle = border[card.phase];
       ctx.lineWidth = 1.5;
@@ -443,73 +465,89 @@ async function buildDailyMatchesPng(
       ctx.fill();
       ctx.stroke();
 
+      const logoBox = logo ? Math.min(36, Math.max(26, cardW * 0.1)) : 0;
+      if (logo) {
+        drawContainedImage(ctx, logo, x + (cardW - logoBox) / 2, y + 8, logoBox);
+      }
+
       ctx.fillStyle = "#18181b";
-      ctx.font = "bold 15px Helvetica, Arial, sans-serif";
+      ctx.font = "bold 19px Helvetica, Arial, sans-serif";
       ctx.fillText(
-        canvasEllipsize(ctx, `${timeLabel(card)} · ${courtLabel(card)}`, cardW - 96),
+        canvasEllipsize(
+          ctx,
+          `${timeLabel(card)} · ${courtLabel(card)}`,
+          cardW / 2 - logoBox / 2 - 18,
+        ),
         x + 12,
-        y + 24,
+        y + 30,
       );
 
       const badge = DAILY_PHASE_LABELS[card.phase].toUpperCase();
-      ctx.font = "bold 10px Helvetica, Arial, sans-serif";
-      const badgeW = ctx.measureText(badge).width + 14;
+      ctx.font = "bold 12px Helvetica, Arial, sans-serif";
+      const badgeW = ctx.measureText(badge).width + 16;
       ctx.fillStyle = badgeFill[card.phase];
       ctx.beginPath();
-      ctx.roundRect(x + cardW - badgeW - 10, y + 10, badgeW, 18, 4);
+      ctx.roundRect(x + cardW - badgeW - 10, y + 10, badgeW, 22, 4);
       ctx.fill();
       ctx.fillStyle = "#18181b";
       ctx.textAlign = "center";
-      ctx.fillText(badge, x + cardW - badgeW / 2 - 10, y + 23);
+      ctx.fillText(badge, x + cardW - badgeW / 2 - 10, y + 25);
       ctx.textAlign = "left";
 
       ctx.fillStyle = "#71717a";
-      ctx.font = "12px Helvetica, Arial, sans-serif";
+      ctx.font = "14px Helvetica, Arial, sans-serif";
       ctx.fillText(
         canvasEllipsize(
           ctx,
           `${card.categoryLabel} · ${card.groupLabel}${card.matchNumber ? ` · n° ${card.matchNumber}` : ""}`,
-          cardW - 24,
+          cardW / 2 - logoBox / 2 - 18,
         ),
         x + 12,
-        y + 44,
+        y + 50,
       );
 
       ctx.fillStyle = "#ffffff";
       ctx.strokeStyle = border[card.phase];
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.roundRect(x + 12, y + 56, cardW - 24, 30, 5);
+      ctx.roundRect(x + 12, y + 62, cardW - 24, 48, 5);
       ctx.fill();
       ctx.stroke();
       ctx.beginPath();
-      ctx.roundRect(x + 12, y + 104, cardW - 24, 30, 5);
+      ctx.roundRect(x + 12, y + 134, cardW - 24, 48, 5);
       ctx.fill();
       ctx.stroke();
 
       ctx.fillStyle = "#18181b";
-      ctx.font = "bold 13px Helvetica, Arial, sans-serif";
-      ctx.fillText(canvasEllipsize(ctx, card.pair1 || "—", cardW - 40), x + 20, y + 76);
-      ctx.fillStyle = "#71717a";
-      ctx.font = "11px Helvetica, Arial, sans-serif";
+      ctx.font = "bold 18px Helvetica, Arial, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("vs", x + cardW / 2, y + 96);
-      ctx.textAlign = "left";
+      ctx.fillText(
+        canvasEllipsize(ctx, card.pair1 || "—", cardW - 40),
+        x + cardW / 2,
+        y + 93,
+      );
+      ctx.fillStyle = "#71717a";
+      ctx.font = "14px Helvetica, Arial, sans-serif";
+      ctx.fillText("vs", x + cardW / 2, y + 124);
       ctx.fillStyle = "#18181b";
-      ctx.font = "bold 13px Helvetica, Arial, sans-serif";
-      ctx.fillText(canvasEllipsize(ctx, card.pair2 || "—", cardW - 40), x + 20, y + 124);
+      ctx.font = "bold 18px Helvetica, Arial, sans-serif";
+      ctx.fillText(
+        canvasEllipsize(ctx, card.pair2 || "—", cardW - 40),
+        x + cardW / 2,
+        y + 165,
+      );
+      ctx.textAlign = "left";
 
       if (card.observation) {
         ctx.fillStyle = "#71717a";
-        ctx.font = "11px Helvetica, Arial, sans-serif";
+        ctx.font = "13px Helvetica, Arial, sans-serif";
         ctx.fillText(
           canvasEllipsize(ctx, card.observation, cardW - 24),
           x + 12,
-          y + 148,
+          y + 198,
         );
       }
     });
-  }
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -547,7 +585,7 @@ export async function runDailyMatchesPdfAction({
     openPdfBlob(pdf.blob);
     return;
   }
-  await copyPdfToClipboard(pdf.blob, pdf.filename);
+  return copyPdfToClipboard(pdf.blob, pdf.filename);
 }
 
 export async function runDailyMatchesPngAction({
@@ -556,15 +594,23 @@ export async function runDailyMatchesPngAction({
   dayLabel,
   cards,
   club,
+  columns = 2,
 }: {
   action: GrillaPdfAction;
   tournamentName: string;
   dayLabel: string;
   cards: DailyMatchCard[];
   club?: DailyMatchesClub;
+  columns?: number;
 }) {
   if (cards.length === 0) throw new Error("No hay partidos para exportar");
-  const png = await buildDailyMatchesPng(tournamentName, dayLabel, cards, club);
+  const png = await buildDailyMatchesPng(
+    tournamentName,
+    dayLabel,
+    cards,
+    club,
+    columns,
+  );
   if (action === "open") {
     openPngBlob(png.blob);
     return;

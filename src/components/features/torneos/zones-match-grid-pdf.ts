@@ -317,7 +317,7 @@ export async function runGrillaPdfAction({
     return;
   }
 
-  await copyPdfToClipboard(pdf.blob, pdf.filename);
+  return copyPdfToClipboard(pdf.blob, pdf.filename);
 }
 
 export async function runGrillaPngAction({

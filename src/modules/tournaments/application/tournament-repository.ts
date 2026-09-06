@@ -208,6 +208,7 @@ export interface TournamentRepository {
   calculateAndSaveZoneQualification(
     clubId: string,
     tournamentId: string,
+    categoryId?: string,
   ): Promise<
     | {
         ok: true;

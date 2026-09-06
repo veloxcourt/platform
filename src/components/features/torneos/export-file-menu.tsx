@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import type { PdfCopyResult } from "@/lib/clipboard-pdf";
 import type { GrillaPdfAction } from "./zones-match-grid-pdf";
 
 export function ExportFileMenu({
@@ -23,7 +24,7 @@ export function ExportFileMenu({
   format: "pdf" | "png";
   disabled?: boolean;
   align?: "start" | "end";
-  onAction: (action: GrillaPdfAction) => Promise<void>;
+  onAction: (action: GrillaPdfAction) => Promise<void | PdfCopyResult>;
 }) {
   const [busy, setBusy] = useState(false);
   const label = format.toUpperCase();
@@ -32,11 +33,20 @@ export function ExportFileMenu({
     if (busy) return;
     setBusy(true);
     try {
-      await onAction(action);
+      const result = await onAction(action);
       if (action === "copy") {
-        toast.success(`${label} copiado`, {
-          description: "Pegaló en WhatsApp con Ctrl+V.",
-        });
+        if (format === "pdf") {
+          toast.success("PDF listo", {
+            description:
+              result === "shared"
+                ? "Elegí WhatsApp para enviar el archivo."
+                : "Se descargó el PDF. Adjuntá ese archivo en WhatsApp.",
+          });
+        } else {
+          toast.success(`${label} copiado`, {
+            description: "Pegaló en WhatsApp con Ctrl+V.",
+          });
+        }
       }
     } catch (error) {
       toast.error(

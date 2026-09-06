@@ -653,13 +653,13 @@ export function ZonasTournamentDetail({
                 {!readOnly && intermediateCategories.length > 0 ? (
                   <>
                     <ActualizarHoverHint
-                      heading="Calcula quién clasifica de cada zona"
+                      heading="Calcula quién clasifica en todas las categorías"
                       effects={[
                         "Recalcula 1.ª, 2.ª y quién queda afuera con los resultados guardados",
-                        "Completa los nombres en intermedia, llaves y grillas",
+                        "Completa los nombres en intermedia, llaves y grillas de todas las categorías",
                         "No cambia día, horario ni cancha",
                       ]}
-                      note="Si hay empate para definir el puesto, ese cruce queda pendiente hasta el desempate en cancha."
+                      note="El Calcular de cada categoría, más abajo, solo toca esa categoría."
                     >
                       <Button
                         type="button"

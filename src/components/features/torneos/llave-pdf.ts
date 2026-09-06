@@ -429,7 +429,7 @@ export async function runLlavePdfAction({
     return;
   }
 
-  await copyPdfToClipboard(pdf.blob, pdf.filename);
+  return copyPdfToClipboard(pdf.blob, pdf.filename);
 }
 
 function rgb(color: [number, number, number]): string {

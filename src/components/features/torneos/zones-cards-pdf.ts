@@ -462,7 +462,7 @@ export async function runZonesCardsPdfAction({
     openPdfBlob(pdf.blob);
     return;
   }
-  await copyPdfToClipboard(pdf.blob, pdf.filename);
+  return copyPdfToClipboard(pdf.blob, pdf.filename);
 }
 
 function buildZonesCardsPng(input: ZonesCardsPdfInput): Promise<{

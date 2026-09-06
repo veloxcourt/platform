@@ -1,29 +1,43 @@
-/// Copia el archivo PDF al portapapeles para pegarlo en WhatsApp (Ctrl+V).
-export async function copyPdfToClipboard(blob: Blob, filename: string) {
-  if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
-    throw new Error("Este navegador no permite copiar el PDF al portapapeles.");
+/// Entrega el PDF como archivo. El portapapeles del navegador no puede
+/// dejar un .pdf real: Chrome lo termina pegando como imagen.
+
+export type PdfCopyResult = "shared" | "downloaded";
+
+export async function copyPdfToClipboard(
+  blob: Blob,
+  filename: string,
+): Promise<PdfCopyResult> {
+  const pdfFile = new File([await blob.arrayBuffer()], filename, {
+    type: "application/pdf",
+  });
+
+  if (navigator.canShare?.({ files: [pdfFile] })) {
+    try {
+      await navigator.share({
+        files: [pdfFile],
+        title: filename,
+      });
+      return "shared";
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        downloadPdfFile(pdfFile);
+        return "downloaded";
+      }
+    }
   }
 
-  const pdfFile = new File([blob], filename, { type: "application/pdf" });
+  downloadPdfFile(pdfFile);
+  return "downloaded";
+}
 
-  try {
-    await navigator.clipboard.write([
-      new ClipboardItem({ "application/pdf": pdfFile }),
-    ]);
-    return;
-  } catch {
-    // Chrome a veces exige una Promise para tipos que no son imagen.
-  }
-
-  try {
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        "application/pdf": Promise.resolve(pdfFile),
-      }),
-    ]);
-  } catch {
-    throw new Error(
-      "No se pudo copiar el PDF. Usá Crear y Abrir y adjuntá el archivo en WhatsApp.",
-    );
-  }
+function downloadPdfFile(file: File) {
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60 * 1000);
 }

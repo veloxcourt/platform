@@ -554,6 +554,7 @@ export async function saveKnockoutFixtureDraftAction(
 export async function calculateZoneQualificationAction(
   clubSlug: string,
   tournamentId: string,
+  categoryId?: string,
 ): Promise<
   | {
       ok: true;
@@ -568,6 +569,7 @@ export async function calculateZoneQualificationAction(
   const result = await repo.calculateAndSaveZoneQualification(
     clubId,
     tournamentId,
+    categoryId,
   );
   if (result.ok) revalidate(clubSlug, tournamentId);
   return result;

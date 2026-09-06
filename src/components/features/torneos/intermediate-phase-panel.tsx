@@ -2,9 +2,10 @@
 
 import { useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { GitBranch } from "lucide-react";
+import { Calculator, GitBranch } from "lucide-react";
 import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
@@ -13,9 +14,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AyudaButton } from "./ayuda-button";
+import { ActualizarHoverHint } from "./actualizar-hover-hint";
 import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
 import { formatWeekday } from "@/lib/date";
-import { buildIntermediateFixtureAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
+import {
+  buildIntermediateFixtureAction,
+  calculateZoneQualificationAction,
+} from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 import {
   buildIntermediateOfficialRounds,
   eligiblePairCount,
@@ -61,6 +66,7 @@ export function IntermediatePhasePanel({
   const readOnly = useTournamentReadOnly();
   const { isManual, modes } = useFixtureEditMode(categoryId, "intermediate");
   const [isPending, startTransition] = useTransition();
+  const [isCalculating, startCalculate] = useTransition();
   const category = categories.find((item) => item.id === categoryId) ?? null;
   const settings = intermediatePhaseSettings(config, categoryId);
   const pairCount = eligiblePairCount(pairs, categoryId);
@@ -151,6 +157,38 @@ export function IntermediatePhasePanel({
     );
   }, [category, config, pairs]);
 
+  function handleCalcular() {
+    startCalculate(async () => {
+      await flushPersist();
+      const result = await calculateZoneQualificationAction(
+        clubSlug,
+        tournamentId,
+        categoryId,
+      );
+      if (!result.ok) {
+        toast.error("No se pudo calcular la clasificación", {
+          description: result.error,
+        });
+        return;
+      }
+      router.refresh();
+      toast.success("Clasificación calculada", {
+        description: [
+          category?.name ?? "Esta categoría",
+          `${result.seedCount} puesto${result.seedCount === 1 ? "" : "s"} definido${result.seedCount === 1 ? "" : "s"}`,
+          result.warnings[0],
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
+      if (result.warnings.length > 1) {
+        for (const warning of result.warnings.slice(1, 4)) {
+          toast.message(warning);
+        }
+      }
+    });
+  }
+
   function handleActualizar() {
     startTransition(async () => {
       await flushPersist();
@@ -200,6 +238,30 @@ export function IntermediatePhasePanel({
                 categoryName={category?.name}
                 phase="intermediate"
               />
+              <ActualizarHoverHint
+                heading={`Calcula quién clasifica en ${category?.name ?? "esta categoría"}`}
+                effects={[
+                  "Recalcula 1.ª, 2.ª y quién queda afuera con los resultados de estas zonas",
+                  "Completa los nombres en la intermedia de esta categoría",
+                  "No cambia día, horario ni cancha",
+                  "No toca las otras categorías",
+                ]}
+                note="El Calcular de arriba recorre todas las categorías."
+              >
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={handleCalcular}
+                  disabled={isCalculating}
+                >
+                  <Calculator
+                    className={`size-4 ${isCalculating ? "animate-pulse" : ""}`}
+                  />
+                  Calcular
+                </Button>
+              </ActualizarHoverHint>
               <ActualizarConfirmButton
                 pending={isPending}
                 disabled={isManual}
@@ -260,6 +322,11 @@ export function IntermediatePhasePanel({
             <p>
               Llave oficial {regulation}. Los cruces usan los puestos de zona
               (1° A, 2° B).
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Calcular</span>{" "}
+              trae los nombres de quienes clasificaron en las zonas de esta
+              categoría. El de arriba hace lo mismo en todas.
             </p>
             <p>
               <span className="font-medium text-foreground">Actualizar</span>{" "}

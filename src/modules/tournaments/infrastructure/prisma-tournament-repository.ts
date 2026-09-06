@@ -2446,6 +2446,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
   async calculateAndSaveZoneQualification(
     clubId: string,
     tournamentId: string,
+    categoryId?: string,
   ): Promise<
     | {
         ok: true;
@@ -2458,12 +2459,19 @@ export class PrismaTournamentRepository implements TournamentRepository {
     const config = await this.getTournamentConfig(clubId, tournamentId);
     if (!config) return { ok: false, error: "Torneo no encontrado" };
 
+    const categories = categoryId
+      ? config.categories.filter((category) => category.categoryId === categoryId)
+      : config.categories;
+    if (categoryId && categories.length === 0) {
+      return { ok: false, error: "Categoría no encontrada" };
+    }
+
     await ensureZoneQualificationColumn();
     const warnings: string[] = [];
     let seedCount = 0;
     let categoryCount = 0;
 
-    for (const category of config.categories) {
+    for (const category of categories) {
       const qualification = buildZoneQualification({
         fixture: category.zonesFixture,
         format: category.phases.zones.matchFormat,
