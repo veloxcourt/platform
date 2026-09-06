@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AyudaButton } from "./ayuda-button";
+import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
 import { formatWeekday } from "@/lib/date";
 import { buildIntermediateFixtureAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 import {
@@ -58,7 +59,7 @@ export function IntermediatePhasePanel({
 }) {
   const router = useRouter();
   const readOnly = useTournamentReadOnly();
-  const { isManual, modes } = useFixtureEditMode(categoryId);
+  const { isManual, modes } = useFixtureEditMode(categoryId, "intermediate");
   const [isPending, startTransition] = useTransition();
   const category = categories.find((item) => item.id === categoryId) ?? null;
   const settings = intermediatePhaseSettings(config, categoryId);
@@ -182,8 +183,8 @@ export function IntermediatePhasePanel({
   }
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className={STICKY_PANEL_CARD}>
+      <CardHeader className={STICKY_PANEL_HEADER}>
         <CardTitle className="flex items-center gap-2">
           <GitBranch className="size-4 text-muted-foreground" />
           Fase Intermedia{category ? ` · ${category.name}` : ""}
@@ -197,6 +198,7 @@ export function IntermediatePhasePanel({
                 tournamentId={tournamentId}
                 categoryId={categoryId}
                 categoryName={category?.name}
+                phase="intermediate"
               />
               <ActualizarConfirmButton
                 pending={isPending}

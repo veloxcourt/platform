@@ -11,10 +11,12 @@ import {
 
 import {
   DEFAULT_FIXTURE_EDIT_MODES,
-  fixtureEditModeForCategory,
+  fixtureEditModeFor,
   parseFixtureEditModes,
+  setCategoryPhaseMode,
   type FixtureEditMode,
   type FixtureEditModes,
+  type FixtureEditPhase,
 } from "@/modules/tournaments/domain/fixture-edit-mode";
 
 type FlushFn = () => Promise<unknown>;
@@ -23,7 +25,11 @@ type FixtureEditModeContextValue = {
   modes: FixtureEditModes;
   readOnly: boolean;
   setModes: (modes: FixtureEditModes) => void;
-  setCategoryMode: (categoryId: string, mode: FixtureEditMode) => void;
+  setCategoryPhaseMode: (
+    categoryId: string,
+    phase: FixtureEditPhase,
+    mode: FixtureEditMode,
+  ) => void;
   registerPersistFlush: (fn: FlushFn) => () => void;
   flushPendingPersists: () => Promise<void>;
 };
@@ -32,7 +38,7 @@ const FixtureEditModeContext = createContext<FixtureEditModeContextValue>({
   modes: DEFAULT_FIXTURE_EDIT_MODES,
   readOnly: false,
   setModes: () => {},
-  setCategoryMode: () => {},
+  setCategoryPhaseMode: () => {},
   registerPersistFlush: () => () => {},
   flushPendingPersists: async () => {},
 });
@@ -62,9 +68,9 @@ export function FixtureEditModeProvider({
     await Promise.all([...flushesRef.current].map((fn) => fn()));
   }, []);
 
-  const setCategoryMode = useCallback(
-    (categoryId: string, mode: FixtureEditMode) => {
-      setModes({ ...parsed, [categoryId]: mode });
+  const setCategoryPhase = useCallback(
+    (categoryId: string, phase: FixtureEditPhase, mode: FixtureEditMode) => {
+      setModes(setCategoryPhaseMode(parsed, categoryId, phase, mode));
     },
     [parsed, setModes],
   );
@@ -75,7 +81,7 @@ export function FixtureEditModeProvider({
         modes: parsed,
         readOnly,
         setModes,
-        setCategoryMode,
+        setCategoryPhaseMode: setCategoryPhase,
         registerPersistFlush,
         flushPendingPersists,
       }}
@@ -89,9 +95,12 @@ export function useFixtureEditModes() {
   return useContext(FixtureEditModeContext);
 }
 
-export function useFixtureEditMode(categoryId: string | undefined) {
-  const { modes, readOnly, setCategoryMode } = useFixtureEditModes();
-  const mode = fixtureEditModeForCategory(modes, categoryId);
+export function useFixtureEditMode(
+  categoryId: string | undefined,
+  phase: FixtureEditPhase,
+) {
+  const { modes, readOnly, setCategoryPhaseMode } = useFixtureEditModes();
+  const mode = fixtureEditModeFor(modes, categoryId, phase);
   const isManual = mode === "MANUAL";
   return {
     mode,
@@ -100,7 +109,7 @@ export function useFixtureEditMode(categoryId: string | undefined) {
     scheduleLocked: readOnly || !isManual,
     setMode: (next: FixtureEditMode) => {
       if (!categoryId) return;
-      setCategoryMode(categoryId, next);
+      setCategoryPhaseMode(categoryId, phase, next);
     },
   };
 }

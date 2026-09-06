@@ -30,7 +30,7 @@ export default async function TorneoDetailPage({
   const courtCount = config?.courtCount || clubCourtCount || 1;
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col">
+    <div className="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-5xl flex-1 flex-col overflow-hidden">
       <ZonasTournamentDetail
         clubSlug={clubSlug}
         currency={data.club.currency}

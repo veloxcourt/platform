@@ -144,8 +144,8 @@ export function TournamentConfigTabs({
     : [];
 
   return (
-    <div className="flex w-full min-w-0 flex-col">
-      <div className="sticky top-0 z-20 -mx-4 -mt-4 border-b bg-background px-4 pt-4 pb-3">
+    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="relative z-30 shrink-0 -mx-4 -mt-4 border-b bg-background px-4 pt-4 pb-3">
         {header}
         <div
           className={header ? "mt-3" : undefined}
@@ -199,7 +199,7 @@ export function TournamentConfigTabs({
         </div>
       </div>
 
-      <div className="w-full min-w-0 overflow-x-clip pt-4">
+      <div className="min-h-0 w-full min-w-0 flex-1 overflow-x-clip overflow-y-auto pt-4">
       {subTab === PARAMETERS_TAB ? (
         config ? (
           <TournamentConfigForm

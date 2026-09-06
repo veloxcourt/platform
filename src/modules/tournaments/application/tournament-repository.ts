@@ -20,6 +20,7 @@ import type {
 import type {
   FixtureEditMode,
   FixtureEditModes,
+  FixtureEditPhase,
 } from "../domain/fixture-edit-mode";
 import type {
   IntermediateFixturePersisted,
@@ -189,6 +190,7 @@ export interface TournamentRepository {
     tournamentId: string,
     categoryId: string,
     mode: FixtureEditMode,
+    phase: FixtureEditPhase,
   ): Promise<MutationResult>;
   saveZonesFixtureDraft(
     clubId: string,

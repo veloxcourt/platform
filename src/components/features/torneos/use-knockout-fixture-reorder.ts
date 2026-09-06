@@ -39,7 +39,7 @@ export function useKnockoutFixtureReorder({
   officialRounds: OfficialRound[];
 }) {
   const readOnly = useTournamentReadOnly();
-  const { isManual } = useFixtureEditMode(categoryId);
+  const { isManual } = useFixtureEditMode(categoryId, phase);
   const [draft, setDraft] = useState(fixture ?? null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<IntermediateFixturePersisted | null>(null);

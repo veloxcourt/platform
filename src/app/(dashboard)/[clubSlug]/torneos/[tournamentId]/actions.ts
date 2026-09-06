@@ -23,8 +23,9 @@ import type {
 import { intermediateFixtureSchema } from "@/modules/tournaments/domain/intermediate-fixture-schema";
 import { zonesFixtureDraftSchema } from "@/modules/tournaments/domain/zones-fixture-schema";
 import {
-  isCategoryManual,
+  isPhaseManual,
   type FixtureEditMode,
+  type FixtureEditPhase,
 } from "@/modules/tournaments/domain/fixture-edit-mode";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
 import type { TournamentRepository } from "@/modules/tournaments/application/tournament-repository";
@@ -313,7 +314,7 @@ export async function buildZonesFixtureAction(
 
   const warnings = [...result.fixture.warnings];
   const modes = await repo.getFixtureEditModes(clubId, tournamentId);
-  if (!isCategoryManual(modes, categoryId)) {
+  if (!isPhaseManual(modes, categoryId, "zones")) {
     await rebuildDownstreamFixtures(repo, clubId, tournamentId, warnings, {
       includeIntermediate: true,
       categoryId,
@@ -362,7 +363,7 @@ export async function buildAllZonesFixturesAction(
   let okCategories = 0;
 
   for (const category of config.categories) {
-    if (isCategoryManual(modes, category.categoryId)) {
+    if (isPhaseManual(modes, category.categoryId, "zones")) {
       warnings.push(`${category.categoryName}: no se rearmó (Modo Manual)`);
       continue;
     }
@@ -477,12 +478,16 @@ export async function setFixtureEditModeAction(
   tournamentId: string,
   categoryId: string,
   mode: FixtureEditMode,
+  phase: FixtureEditPhase,
 ): Promise<Result> {
   if (!categoryId) {
     return { ok: false, error: "Categoría inválida" };
   }
   if (mode !== "AUTO" && mode !== "MANUAL") {
     return { ok: false, error: "Modo inválido" };
+  }
+  if (phase !== "zones" && phase !== "intermediate" && phase !== "final") {
+    return { ok: false, error: "Fase inválida" };
   }
   const { repo, clubId } = await resolveClubId(clubSlug);
   if (!clubId) return { ok: false, error: "Club no encontrado" };
@@ -491,6 +496,7 @@ export async function setFixtureEditModeAction(
     tournamentId,
     categoryId,
     mode,
+    phase,
   );
   if (result.ok) revalidate(clubSlug, tournamentId);
   return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };

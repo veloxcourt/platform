@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AyudaButton } from "./ayuda-button";
+import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
 import { Checkbox } from "@/components/ui/checkbox";
 import type {
   PairListItem,
@@ -96,8 +97,8 @@ export function ZonesMatchRulePanel({
   }
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className={STICKY_PANEL_CARD}>
+      <CardHeader className={STICKY_PANEL_HEADER}>
         <CardTitle>Regla de partidos</CardTitle>
         <CardAction>
           <AyudaButton

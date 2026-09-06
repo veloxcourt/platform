@@ -6,12 +6,20 @@ export const FIXTURE_EDIT_PHASES = ["zones", "intermediate", "final"] as const;
 
 export type FixtureEditPhase = (typeof FIXTURE_EDIT_PHASES)[number];
 
-/// AUTO/MANUAL por categoría. La misma variable vale en Zonas, Intermedia y Final.
-export type FixtureEditModes = Record<string, FixtureEditMode>;
+export type CategoryFixtureEditModes = Record<FixtureEditPhase, FixtureEditMode>;
+
+/// AUTO/MANUAL por categoría y por fase (Zonas, Intermedia y Final son independientes).
+export type FixtureEditModes = Record<string, CategoryFixtureEditModes>;
 
 export const FIXTURE_EDIT_MODE_LABELS: Record<FixtureEditMode, string> = {
   AUTO: "Modo Automático",
   MANUAL: "Modo Manual",
+};
+
+export const FIXTURE_EDIT_PHASE_LABELS: Record<FixtureEditPhase, string> = {
+  zones: "Zonas",
+  intermediate: "Fase Intermedia",
+  final: "Fase Final",
 };
 
 export const DEFAULT_FIXTURE_EDIT_MODES: FixtureEditModes = {};
@@ -22,19 +30,44 @@ export function parseFixtureEditMode(value: unknown): FixtureEditMode {
   return value === "MANUAL" ? "MANUAL" : "AUTO";
 }
 
-export function fixtureEditModeForCategory(
-  modes: FixtureEditModes | null | undefined,
-  categoryId: string | null | undefined,
-): FixtureEditMode {
-  if (!categoryId) return "AUTO";
-  return parseFixtureEditMode(modes?.[categoryId]);
+export function emptyPhaseModes(
+  fallback: FixtureEditMode = "AUTO",
+): CategoryFixtureEditModes {
+  return {
+    zones: fallback,
+    intermediate: fallback,
+    final: fallback,
+  };
 }
 
-export function isCategoryManual(
+export function fixtureEditModeFor(
   modes: FixtureEditModes | null | undefined,
   categoryId: string | null | undefined,
+  phase: FixtureEditPhase,
+): FixtureEditMode {
+  if (!categoryId) return "AUTO";
+  return parseFixtureEditMode(modes?.[categoryId]?.[phase]);
+}
+
+export function isPhaseManual(
+  modes: FixtureEditModes | null | undefined,
+  categoryId: string | null | undefined,
+  phase: FixtureEditPhase,
 ): boolean {
-  return fixtureEditModeForCategory(modes, categoryId) === "MANUAL";
+  return fixtureEditModeFor(modes, categoryId, phase) === "MANUAL";
+}
+
+export function setCategoryPhaseMode(
+  modes: FixtureEditModes,
+  categoryId: string,
+  phase: FixtureEditPhase,
+  mode: FixtureEditMode,
+): FixtureEditModes {
+  const current = modes[categoryId] ?? emptyPhaseModes();
+  return {
+    ...modes,
+    [categoryId]: { ...current, [phase]: mode },
+  };
 }
 
 function isPhaseShapedMap(value: unknown): boolean {
@@ -43,15 +76,28 @@ function isPhaseShapedMap(value: unknown): boolean {
   return keys.length > 0 && keys.every((key) => PHASE_KEYS.has(key));
 }
 
-function legacyModeFrom(value: unknown, legacy?: unknown): FixtureEditMode {
-  if (value === "AUTO" || value === "MANUAL") return value;
-  if (isPhaseShapedMap(value)) {
-    return parseFixtureEditMode(
-      (value as Record<string, unknown>).zones ??
-        (value as Record<string, unknown>).intermediate ??
-        (value as Record<string, unknown>).final,
-    );
+function phaseModesFromUnknown(
+  value: unknown,
+  fallback: FixtureEditMode,
+): CategoryFixtureEditModes {
+  if (value === "AUTO" || value === "MANUAL") {
+    return emptyPhaseModes(value);
   }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const rec = value as Record<string, unknown>;
+    if ("zones" in rec || "intermediate" in rec || "final" in rec) {
+      return {
+        zones: parseFixtureEditMode(rec.zones ?? fallback),
+        intermediate: parseFixtureEditMode(rec.intermediate ?? fallback),
+        final: parseFixtureEditMode(rec.final ?? fallback),
+      };
+    }
+  }
+  return emptyPhaseModes(fallback);
+}
+
+function legacyFallback(value: unknown, legacy?: unknown): FixtureEditMode {
+  if (value === "AUTO" || value === "MANUAL") return value;
   return parseFixtureEditMode(legacy);
 }
 
@@ -60,18 +106,24 @@ export function parseFixtureEditModes(
   categoryIds: string[] = [],
   legacy?: unknown,
 ): FixtureEditModes {
-  const fallback = legacyModeFrom(value, legacy);
+  const fallback = legacyFallback(value, legacy);
+  if (isPhaseShapedMap(value)) {
+    const phases = phaseModesFromUnknown(value, fallback);
+    const result: FixtureEditModes = {};
+    for (const id of categoryIds) result[id] = { ...phases };
+    return result;
+  }
   const source =
-    value && typeof value === "object" && !Array.isArray(value) && !isPhaseShapedMap(value)
+    value && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {};
-  const result: FixtureEditModes = {};
   const ids =
     categoryIds.length > 0
       ? categoryIds
       : Object.keys(source).filter((key) => !PHASE_KEYS.has(key));
+  const result: FixtureEditModes = {};
   for (const id of ids) {
-    result[id] = parseFixtureEditMode(source[id] ?? fallback);
+    result[id] = phaseModesFromUnknown(source[id], fallback);
   }
   return result;
 }
@@ -96,11 +148,12 @@ function joinNames(names: string[]): string {
 function splitByMode(
   categories: ActualizarConfirmCategory[],
   modes: FixtureEditModes,
+  phase: FixtureEditPhase,
 ) {
   const auto: ActualizarConfirmCategory[] = [];
   const manual: ActualizarConfirmCategory[] = [];
   for (const category of categories) {
-    if (isCategoryManual(modes, category.id)) manual.push(category);
+    if (isPhaseManual(modes, category.id, phase)) manual.push(category);
     else auto.push(category);
   }
   return { auto, manual };
@@ -115,7 +168,7 @@ export function buildActualizarConfirmCopy(params: {
 }): ActualizarConfirmCopy {
   const { phase, scope, modes, categories, categoryId } = params;
   const current = categories.find((item) => item.id === categoryId);
-  const { auto, manual } = splitByMode(categories, modes);
+  const { auto, manual } = splitByMode(categories, modes, phase);
   const autoNames = joinNames(auto.map((item) => item.name));
   const manualNames = joinNames(manual.map((item) => item.name));
   const affects: string[] = [];
@@ -123,7 +176,7 @@ export function buildActualizarConfirmCopy(params: {
 
   if (scope === "category") {
     const name = current?.name ?? "esta categoría";
-    const categoryManual = isCategoryManual(modes, categoryId);
+    const categoryManual = isPhaseManual(modes, categoryId, phase);
     if (phase === "zones") {
       if (categoryManual) {
         affects.push(
@@ -136,7 +189,7 @@ export function buildActualizarConfirmCopy(params: {
           "Solo mueve lo necesario para pasar de 3 a 4 o de 4 a 3.",
         );
         doesNotAffect.push("No cambia día, horario ni cancha.");
-        doesNotAffect.push("Seguís en Modo Manual para seguir editando.");
+        doesNotAffect.push("Seguís en Modo Manual en Zonas para seguir editando.");
         doesNotAffect.push(
           `No toca la fase intermedia ni la fase final de ${name}.`,
         );
@@ -145,12 +198,12 @@ export function buildActualizarConfirmCopy(params: {
           `Rearma las zonas de ${name}: parejas, día, horario y cancha.`,
         );
         affects.push(
-          `También rearma la fase intermedia y la fase final de ${name}.`,
+          `También rearma la fase intermedia y la fase final de ${name} si esas fases están en Automático.`,
         );
       }
     } else if (phase === "intermediate") {
       affects.push(`Rearma la intermedia de ${name}: día, horario y cancha.`);
-      affects.push(`También rearma la fase final de ${name}.`);
+      affects.push(`También rearma la fase final de ${name} si está en Automático.`);
       doesNotAffect.push(`No toca las zonas de ${name}.`);
     } else {
       affects.push(`Rearma la fase final de ${name}: día, horario y cancha.`);
@@ -159,6 +212,7 @@ export function buildActualizarConfirmCopy(params: {
     }
     doesNotAffect.push("No toca las otras categorías.");
     doesNotAffect.push("No borra los resultados ya cargados.");
+    doesNotAffect.push("No cambia el modo de las otras pestañas.");
     return {
       title: `¿Actualizar ${name}?`,
       affects,
@@ -174,7 +228,7 @@ export function buildActualizarConfirmCopy(params: {
     );
     if (auto.length > 0) {
       affects.push(
-        `También rearma la intermedia y la final de ${autoNames}.`,
+        `También rearma la intermedia y la final de ${autoNames} si esas fases están en Automático.`,
       );
     }
   } else if (phase === "intermediate") {
@@ -184,7 +238,9 @@ export function buildActualizarConfirmCopy(params: {
         : "No hay categorías en Modo Automático para rearmar.",
     );
     if (auto.length > 0) {
-      affects.push(`También rearma la fase final de ${autoNames}.`);
+      affects.push(
+        `También rearma la fase final de ${autoNames} si está en Automático.`,
+      );
     }
     doesNotAffect.push("No toca las zonas.");
   } else {
@@ -198,11 +254,11 @@ export function buildActualizarConfirmCopy(params: {
   }
   if (manual.length > 0) {
     doesNotAffect.push(
-      `No toca ${manualNames}: ${manual.length === 1 ? "está" : "están"} en Modo Manual.`,
+      `No toca ${manualNames}: ${manual.length === 1 ? "está" : "están"} en Modo Manual en esta pestaña.`,
     );
   }
   doesNotAffect.push("No borra los resultados ya cargados.");
-  doesNotAffect.push("No cambia el modo de cada categoría.");
+  doesNotAffect.push("No cambia el modo de cada pestaña.");
 
   const phaseTitle =
     phase === "zones"

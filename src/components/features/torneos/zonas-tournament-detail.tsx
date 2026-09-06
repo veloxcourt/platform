@@ -38,6 +38,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AyudaButton } from "./ayuda-button";
+import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
 import { formatMoney } from "@/lib/money";
 import { formatShortDate } from "@/lib/date";
 import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
@@ -79,7 +80,7 @@ import {
 import { useTournamentReadOnly } from "./tournament-mode-context";
 import {
   buildActualizarConfirmCopy,
-  isCategoryManual,
+  isPhaseManual,
   parseFixtureEditModes,
 } from "@/modules/tournaments/domain/fixture-edit-mode";
 
@@ -495,13 +496,13 @@ export function ZonasTournamentDetail({
     name: category.name,
   }));
   const hasAutoZones = tournament.categories.some(
-    (category) => !isCategoryManual(fixtureEditModes, category.id),
+    (category) => !isPhaseManual(fixtureEditModes, category.id, "zones"),
   );
   const hasAutoIntermediate = intermediateCategories.some(
-    (category) => !isCategoryManual(fixtureEditModes, category.id),
+    (category) => !isPhaseManual(fixtureEditModes, category.id, "intermediate"),
   );
   const hasAutoFinal = tournament.categories.some(
-    (category) => !isCategoryManual(fixtureEditModes, category.id),
+    (category) => !isPhaseManual(fixtureEditModes, category.id, "final"),
   );
   const zonesConfirm = buildActualizarConfirmCopy({
     phase: "zones",
@@ -529,7 +530,7 @@ export function ZonasTournamentDetail({
       setModes={setFixtureEditModes}
     >
     <FixturePersistFlushBinder flushRef={flushPendingPersistsRef} />
-    <div className="flex w-full min-w-0 flex-col">
+    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
       {activeTab === "configuracion" ? (
         <TournamentConfigTabs
           clubSlug={clubSlug}
@@ -542,7 +543,7 @@ export function ZonasTournamentDetail({
         />
       ) : (
         <>
-          <div className="sticky top-0 z-20 -mx-4 -mt-4 border-b bg-background px-4 pt-4 pb-3">
+          <div className="relative z-30 shrink-0 -mx-4 -mt-4 border-b bg-background px-4 pt-4 pb-3">
             {chrome}
             {activeTab === "zonas" ? (
               <div className="mt-3 flex w-full min-w-0 items-center gap-2">
@@ -817,12 +818,12 @@ export function ZonasTournamentDetail({
               </div>
             ) : null}
           </div>
-          <div className="w-full min-w-0 overflow-x-clip pt-4">
+          <div className="min-h-0 w-full min-w-0 flex-1 overflow-x-clip overflow-y-auto pt-4">
       {activeTab === "soporte" ? <TorneosSoporteView /> : null}
 
       {activeTab === "info" ? (
-        <Card>
-          <CardHeader>
+        <Card className={STICKY_PANEL_CARD}>
+          <CardHeader className={STICKY_PANEL_HEADER}>
             <CardTitle>Info del torneo</CardTitle>
             <CardAction>
               <AyudaButton
@@ -850,8 +851,8 @@ export function ZonasTournamentDetail({
       ) : null}
 
       {activeTab === "inscripciones" ? (
-        <Card id="inscripciones">
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <Card id="inscripciones" className={STICKY_PANEL_CARD}>
+          <CardHeader className={`${STICKY_PANEL_HEADER} flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between`}>
             <div className="space-y-1.5">
               <CardTitle>
                 {selectedCategory

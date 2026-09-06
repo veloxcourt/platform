@@ -42,10 +42,12 @@ import {
 import { reshapeZonesForManualUpdate } from "../domain/reshape-zones-manual";
 import {
   DEFAULT_FIXTURE_EDIT_MODES,
-  fixtureEditModeForCategory,
+  fixtureEditModeFor,
+  setCategoryPhaseMode,
   parseFixtureEditModes,
   type FixtureEditMode,
   type FixtureEditModes,
+  type FixtureEditPhase,
 } from "../domain/fixture-edit-mode";
 import {
   carryZoneScores,
@@ -1400,9 +1402,10 @@ export class MockTournamentRepository implements TournamentRepository {
       if (!categoryConfig) {
         return { ok: false, error: "Configuración de categoría no encontrada" };
       }
-      const zoneMode = fixtureEditModeForCategory(
+      const zoneMode = fixtureEditModeFor(
         config.fixtureEditModes,
         categoryId,
+        "zones",
       );
       if (
         zoneMode === "AUTO" &&
@@ -1526,7 +1529,7 @@ export class MockTournamentRepository implements TournamentRepository {
         buildTournamentConfig(tournament, categories);
       if (
         categoryId &&
-        fixtureEditModeForCategory(config.fixtureEditModes, categoryId) ===
+        fixtureEditModeFor(config.fixtureEditModes, categoryId, "intermediate") ===
           "MANUAL"
       ) {
         return {
@@ -1565,8 +1568,11 @@ export class MockTournamentRepository implements TournamentRepository {
         if (categoryId && item.categoryId !== categoryId) return false;
         if (
           !categoryId &&
-          fixtureEditModeForCategory(config.fixtureEditModes, item.categoryId) ===
-            "MANUAL"
+          fixtureEditModeFor(
+            config.fixtureEditModes,
+            item.categoryId,
+            "intermediate",
+          ) === "MANUAL"
         ) {
           return false;
         }
@@ -1688,7 +1694,7 @@ export class MockTournamentRepository implements TournamentRepository {
         );
       if (
         categoryId &&
-        fixtureEditModeForCategory(config.fixtureEditModes, categoryId) ===
+        fixtureEditModeFor(config.fixtureEditModes, categoryId, "final") ===
           "MANUAL"
       ) {
         return {
@@ -1728,7 +1734,7 @@ export class MockTournamentRepository implements TournamentRepository {
         if (categoryId && item.categoryId !== categoryId) return false;
         if (
           !categoryId &&
-          fixtureEditModeForCategory(config.fixtureEditModes, item.categoryId) ===
+          fixtureEditModeFor(config.fixtureEditModes, item.categoryId, "final") ===
             "MANUAL"
         ) {
           return false;
@@ -1844,6 +1850,7 @@ export class MockTournamentRepository implements TournamentRepository {
     tournamentId: string,
     categoryId: string,
     mode: FixtureEditMode,
+    phase: FixtureEditPhase,
   ): Promise<MutationResult> {
     for (const record of store.values()) {
       if (record.club.id !== clubId) continue;
@@ -1857,7 +1864,12 @@ export class MockTournamentRepository implements TournamentRepository {
         buildTournamentConfig(tournament, categories);
       record.configs.set(tournamentId, {
         ...stored,
-        fixtureEditModes: { ...stored.fixtureEditModes, [categoryId]: mode },
+        fixtureEditModes: setCategoryPhaseMode(
+          parseFixtureEditModes(stored.fixtureEditModes),
+          categoryId,
+          phase,
+          mode,
+        ),
       });
       return { ok: true };
     }
@@ -1882,7 +1894,7 @@ export class MockTournamentRepository implements TournamentRepository {
         (item) => item.categoryId === categoryId,
       );
       if (!category) return { ok: false, error: "Categoría no encontrada" };
-      const mode = fixtureEditModeForCategory(config.fixtureEditModes, categoryId);
+      const mode = fixtureEditModeFor(config.fixtureEditModes, categoryId, "zones");
       const persisted =
         mode === "MANUAL"
           ? zonesDraftToPersisted(draft, category.zonesFixture)
@@ -1935,7 +1947,7 @@ export class MockTournamentRepository implements TournamentRepository {
         (item) => item.categoryId === categoryId,
       );
       if (!category) return { ok: false, error: "Categoría no encontrada" };
-      const mode = fixtureEditModeForCategory(config.fixtureEditModes, categoryId);
+      const mode = fixtureEditModeFor(config.fixtureEditModes, categoryId, phase);
       const previous =
         phase === "final" ? category.finalFixture : category.intermediateFixture;
       const nextFixture =

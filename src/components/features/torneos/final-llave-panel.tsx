@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AyudaButton } from "./ayuda-button";
+import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
 import { StableTabButton } from "@/components/ui/stable-tab-button";
 import { FINAL_PHASE_START_ROUND_LABELS } from "@/modules/tournaments/domain/config-schema";
 import {
@@ -115,8 +116,8 @@ export function FinalLlavePanel({
   const startsAtLabel = FINAL_PHASE_START_ROUND_LABELS[settings.startsAtRound];
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className={STICKY_PANEL_CARD}>
+      <CardHeader className={STICKY_PANEL_HEADER}>
         <CardTitle className="flex items-center gap-2">
           <Workflow className="size-4 text-muted-foreground" />
           Llaves{selected ? ` · ${selected.name}` : ""}

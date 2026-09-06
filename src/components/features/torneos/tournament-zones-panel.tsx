@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AyudaButton } from "./ayuda-button";
+import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
 import { formatShortDate, formatWeekday } from "@/lib/date";
 import { formatAbbreviatedPairLabel } from "@/lib/person-name";
 import {
@@ -328,7 +329,10 @@ export function TournamentZonesPanel({
     initialCategoryId && categories.some((c) => c.id === initialCategoryId)
       ? initialCategoryId
       : (categories[0]?.id ?? "");
-  const { isManual, scheduleLocked, modes } = useFixtureEditMode(activeCategoryId);
+  const { isManual, scheduleLocked, modes } = useFixtureEditMode(
+    activeCategoryId,
+    "zones",
+  );
 
   const categoryConfig = config?.categories.find(
     (c) => c.categoryId === activeCategoryId,
@@ -896,8 +900,8 @@ export function TournamentZonesPanel({
   });
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className={STICKY_PANEL_CARD}>
+      <CardHeader className={STICKY_PANEL_HEADER}>
         <CardTitle className="flex items-center gap-2">
           <Grid3x3 className="size-4 text-muted-foreground" />
           Zonas{categoryMeta ? ` · ${categoryMeta.name}` : ""}
@@ -915,6 +919,7 @@ export function TournamentZonesPanel({
                 tournamentId={tournamentId}
                 categoryId={activeCategoryId}
                 categoryName={categoryMeta?.name}
+                phase="zones"
               />
               <ActualizarConfirmButton
                 pending={isPending}

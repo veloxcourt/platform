@@ -540,7 +540,7 @@ export function ZoneCard({
             <col style={{ width: `${Math.max(1, columns.length) * 2.75}rem` }} />
           </colgroup>
           <thead>
-            <tr className="border-b text-[11px] text-muted-foreground">
+            <tr className="border-b bg-card text-[11px] text-muted-foreground">
               <th className="py-1.5 pr-1.5 font-medium">#</th>
               <th className="py-1.5 pr-1.5 font-medium">Día</th>
               <th className="py-1.5 pr-1.5 font-medium">Horario</th>

@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AyudaButton } from "./ayuda-button";
+import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
 import { cn } from "@/lib/utils";
 import type {
   PairListItem,
@@ -128,8 +129,8 @@ export function DailyMatchesPanel({
   );
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className={STICKY_PANEL_CARD}>
+      <CardHeader className={STICKY_PANEL_HEADER}>
         <CardTitle className="flex items-center gap-2">
           <CalendarDays className="size-4 text-muted-foreground" />
           Partidos del día{dayLabel ? ` · ${dayLabel}` : ""}

@@ -55,10 +55,12 @@ import {
   type ZonesDayPreference,
 } from "../domain/zones-day-preference";
 import {
-  fixtureEditModeForCategory,
+  fixtureEditModeFor,
+  setCategoryPhaseMode,
   parseFixtureEditModes,
   type FixtureEditMode,
   type FixtureEditModes,
+  type FixtureEditPhase,
 } from "../domain/fixture-edit-mode";
 import {
   buildZonesFixture,
@@ -159,9 +161,10 @@ async function readFixtureEditModes(
 async function readFixtureEditMode(
   tournamentId: string,
   categoryId: string,
+  phase: FixtureEditPhase,
 ): Promise<FixtureEditMode> {
   const modes = await readFixtureEditModes(tournamentId);
-  return fixtureEditModeForCategory(modes, categoryId);
+  return fixtureEditModeFor(modes, categoryId, phase);
 }
 
 async function ensureIntermediateFixtureColumn() {
@@ -1776,7 +1779,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     if (!categoryConfig) {
       return { ok: false, error: "Configuración de categoría no encontrada" };
     }
-    const zoneMode = await readFixtureEditMode(tournamentId, categoryId);
+    const zoneMode = await readFixtureEditMode(tournamentId, categoryId, "zones");
     if (
       zoneMode === "AUTO" &&
       categoryConfig.phases.zones.playDates.length === 0
@@ -1937,7 +1940,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     const intermediateModes = await readFixtureEditModes(tournamentId);
     if (
       categoryId &&
-      fixtureEditModeForCategory(intermediateModes, categoryId) === "MANUAL"
+      fixtureEditModeFor(intermediateModes, categoryId, "intermediate") === "MANUAL"
     ) {
       return {
         ok: false,
@@ -2004,7 +2007,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
       if (categoryId && item.categoryId !== categoryId) return false;
       if (
         !categoryId &&
-        fixtureEditModeForCategory(intermediateModes, item.categoryId) ===
+        fixtureEditModeFor(intermediateModes, item.categoryId, "intermediate") ===
           "MANUAL"
       ) {
         return false;
@@ -2025,7 +2028,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
       .filter((item) =>
         categoryId
           ? item.categoryId !== categoryId
-          : fixtureEditModeForCategory(intermediateModes, item.categoryId) ===
+          : fixtureEditModeFor(intermediateModes, item.categoryId, "intermediate") ===
             "MANUAL",
       )
       .flatMap((item) => [
@@ -2128,7 +2131,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     const finalModes = await readFixtureEditModes(tournamentId);
     if (
       categoryId &&
-      fixtureEditModeForCategory(finalModes, categoryId) === "MANUAL"
+      fixtureEditModeFor(finalModes, categoryId, "final") === "MANUAL"
     ) {
       return {
         ok: false,
@@ -2195,7 +2198,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
       if (categoryId && item.categoryId !== categoryId) return false;
       if (
         !categoryId &&
-        fixtureEditModeForCategory(finalModes, item.categoryId) === "MANUAL"
+        fixtureEditModeFor(finalModes, item.categoryId, "final") === "MANUAL"
       ) {
         return false;
       }
@@ -2215,7 +2218,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
       .filter((item) =>
         categoryId
           ? item.categoryId !== categoryId
-          : fixtureEditModeForCategory(finalModes, item.categoryId) ===
+          : fixtureEditModeFor(finalModes, item.categoryId, "final") ===
             "MANUAL",
       )
       .flatMap((item) => [
@@ -2315,6 +2318,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     tournamentId: string,
     categoryId: string,
     mode: FixtureEditMode,
+    phase: FixtureEditPhase,
   ): Promise<MutationResult> {
     const tournament = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId, type: "ZONAS" },
@@ -2322,7 +2326,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     });
     if (!tournament) return { ok: false, error: "Torneo no encontrado" };
     const current = await readFixtureEditModes(tournament.id);
-    const next = { ...current, [categoryId]: mode };
+    const next = setCategoryPhaseMode(current, categoryId, phase, mode);
     await prisma.$executeRawUnsafe(
       `UPDATE "tournaments" SET "fixtureEditModes" = $1::jsonb WHERE "id" = $2`,
       JSON.stringify(next),
@@ -2339,7 +2343,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
   ): Promise<MutationResult> {
     const modes = await this.getFixtureEditModes(clubId, tournamentId);
     if (!modes) return { ok: false, error: "Torneo no encontrado" };
-    const mode = fixtureEditModeForCategory(modes, categoryId);
+    const mode = fixtureEditModeFor(modes, categoryId, "zones");
 
     const config = await this.getTournamentConfig(clubId, tournamentId);
     const category = config?.categories.find(
@@ -2401,7 +2405,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
   ): Promise<MutationResult> {
     const modes = await this.getFixtureEditModes(clubId, tournamentId);
     if (!modes) return { ok: false, error: "Torneo no encontrado" };
-    const mode = fixtureEditModeForCategory(modes, categoryId);
+    const mode = fixtureEditModeFor(modes, categoryId, phase);
     const config = await this.getTournamentConfig(clubId, tournamentId);
     const category = config?.categories.find(
       (item) => item.categoryId === categoryId,

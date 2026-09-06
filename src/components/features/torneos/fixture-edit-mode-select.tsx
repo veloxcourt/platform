@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import { setFixtureEditModeAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 import {
   FIXTURE_EDIT_MODE_LABELS,
+  FIXTURE_EDIT_PHASE_LABELS,
   type FixtureEditMode,
+  type FixtureEditPhase,
 } from "@/modules/tournaments/domain/fixture-edit-mode";
 import { useFixtureEditMode } from "./fixture-edit-mode-context";
 
@@ -15,17 +17,20 @@ export function FixtureEditModeSelect({
   tournamentId,
   categoryId,
   categoryName,
+  phase,
   disabled = false,
 }: {
   clubSlug: string;
   tournamentId: string;
   categoryId: string;
   categoryName?: string;
+  phase: FixtureEditPhase;
   disabled?: boolean;
 }) {
-  const { mode, setMode } = useFixtureEditMode(categoryId);
+  const { mode, setMode } = useFixtureEditMode(categoryId, phase);
   const [isPending, startTransition] = useTransition();
   const label = categoryName ?? "esta categoría";
+  const phaseLabel = FIXTURE_EDIT_PHASE_LABELS[phase];
 
   function handleChange(next: FixtureEditMode) {
     if (next === mode) return;
@@ -37,6 +42,7 @@ export function FixtureEditModeSelect({
         tournamentId,
         categoryId,
         next,
+        phase,
       );
       if (!result.ok) {
         setMode(previous);
@@ -47,8 +53,8 @@ export function FixtureEditModeSelect({
       }
       toast.success(
         next === "MANUAL"
-          ? `Modo Manual en ${label}: ahora podés ajustar a mano`
-          : `Modo Automático en ${label}: Actualizar vuelve a generar el armado`,
+          ? `Modo Manual en ${phaseLabel} · ${label}`
+          : `Modo Automático en ${phaseLabel} · ${label}`,
       );
     });
   }
@@ -61,11 +67,11 @@ export function FixtureEditModeSelect({
       onChange={(event) =>
         handleChange(event.target.value as FixtureEditMode)
       }
-      aria-label={`Modo de armado de ${label}`}
+      aria-label={`Modo de armado de ${phaseLabel} de ${label}`}
       title={
         mode === "MANUAL"
-          ? `Modo Manual solo en ${label}. Vale en Zonas, Intermedia y Final. Las otras categorías no cambian.`
-          : `Modo Automático solo en ${label}. Vale en Zonas, Intermedia y Final. Las otras categorías no cambian.`
+          ? `Modo Manual solo en ${phaseLabel} de ${label}. Las otras pestañas no cambian.`
+          : `Modo Automático solo en ${phaseLabel} de ${label}. Las otras pestañas no cambian.`
       }
     >
       <option value="AUTO">{FIXTURE_EDIT_MODE_LABELS.AUTO}</option>
