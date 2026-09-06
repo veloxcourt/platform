@@ -19,6 +19,7 @@ import {
 export type IntermediateMatchGridRow = {
   id: string;
   playDate: string | null;
+  categoryId: string;
   categoryLabel: string;
   categoryColor: string;
   roundLabel: string;
@@ -39,6 +40,7 @@ export function toGrillaPdfRows(
     playDate: row.playDate ?? "",
     startTime: row.startTime ?? "",
     courtIndex: row.courtIndex,
+    categoryId: row.categoryId,
     categoryLabel: row.categoryLabel,
     categoryColor: row.categoryColor,
     zoneLetter: row.roundLabel,
@@ -53,6 +55,7 @@ function fromZoneRow(row: ZonesMatchGridRow): IntermediateMatchGridRow {
   return {
     id: `zone-${row.id}`,
     playDate: row.playDate || null,
+    categoryId: row.categoryId,
     categoryLabel: row.categoryLabel,
     categoryColor: row.categoryColor,
     roundLabel: row.zoneLetter,
@@ -119,6 +122,7 @@ export function buildIntermediateMatchGridRows({
         rows.push({
           id: `${category.id}-${round.label}-${crossing.id}-${index}`,
           playDate: scheduled?.playDate ?? null,
+          categoryId: category.id,
           categoryLabel,
           categoryColor,
           roundLabel: round.label,

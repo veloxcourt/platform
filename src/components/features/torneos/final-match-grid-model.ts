@@ -28,6 +28,7 @@ function fromZoneRow(
   return {
     id: `zone-${row.id}`,
     playDate: row.playDate || null,
+    categoryId: row.categoryId,
     categoryLabel: row.categoryLabel,
     categoryColor: row.categoryColor,
     roundLabel: row.zoneLetter,
@@ -96,6 +97,7 @@ export function buildFinalMatchGridRows({
         rows.push({
           id: `${category.id}-${round.label}-${crossing.id}-${index}`,
           playDate: scheduled?.playDate ?? null,
+          categoryId: category.id,
           categoryLabel,
           categoryColor,
           roundLabel: round.label,

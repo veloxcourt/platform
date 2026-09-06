@@ -8,7 +8,6 @@ import {
 } from "@/lib/clipboard-png";
 import {
   categoryCardTone,
-  DAILY_PHASE_LABELS,
   type DailyMatchCard,
   type DailyMatchPhase,
 } from "./daily-matches-model";
@@ -227,16 +226,18 @@ function drawClubOnCanvas(
 async function buildDailyMatchesPdf(
   tournamentName: string,
   dayLabel: string,
+  headline: string,
   cards: DailyMatchCard[],
   club?: DailyMatchesClub,
+  columns = 2,
 ) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const margin = 12;
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const gap = 3.5;
-  const cols = 2;
-  const cardW = (pageW - margin * 2 - gap) / cols;
+  const cols = clampDailyMatchesPngColumns(columns);
+  const cardW = (pageW - margin * 2 - gap * Math.max(0, cols - 1)) / cols;
   const cardH = 42;
   const footerY = pageH - 7;
   const logo = club?.logoUrl ? await loadLogoData(club.logoUrl) : null;
@@ -244,24 +245,28 @@ async function buildDailyMatchesPdf(
   const drawChrome = (page: number) => {
     doc.setTextColor(24, 24, 27);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.text(tournamentName || "Partidos del día", margin, 12, {
+    doc.setFontSize(13);
+    doc.text(headline || "Partidos del día", margin, 12, {
       maxWidth: pageW - margin * 2 - 82,
     });
     doc.setTextColor(113, 113, 122);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.text(
-      `Partidos del día · ${dayLabel} · ${cards.length} enfrentamiento${cards.length === 1 ? "" : "s"}`,
+      `${cards.length} enfrentamiento${cards.length === 1 ? "" : "s"}`,
       margin,
       17.5,
       { maxWidth: pageW - margin * 2 - 82 },
     );
     if (club) drawClubBlock(doc, club, logo, pageW, margin);
-    doc.setFontSize(8);
+    doc.setFontSize(7);
     doc.setTextColor(113, 113, 122);
     doc.setFont("helvetica", "normal");
-    doc.text(dayLabel, margin, footerY);
+    doc.text(
+      ellipsize(doc, tournamentName || "Partidos del día", pageW - margin * 2 - 20),
+      margin,
+      footerY,
+    );
     doc.text(String(page), pageW - margin, footerY, { align: "right" });
   };
 
@@ -309,23 +314,27 @@ async function buildDailyMatchesPdf(
       y + 6,
     );
 
-    const badge = DAILY_PHASE_LABELS[card.phase].toUpperCase();
+    const badge = (card.instanceLabel || card.groupLabel).toUpperCase();
     doc.setFontSize(6);
     const badgeW = doc.getTextWidth(badge) + 3.2;
     doc.setFillColor(...tone.badge);
     doc.roundedRect(x + cardW - badgeW - 2.5, y + 2.4, badgeW, 4.4, 1, 1, "FD");
     doc.setTextColor(24, 24, 27);
     doc.text(badge, x + cardW - badgeW / 2 - 2.5, y + 5.5, { align: "center" });
+    if (card.matchNumber) {
+      doc.setTextColor(113, 113, 122);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(6.5);
+      doc.text(`nº ${card.matchNumber}`, x + cardW - 2.5, y + 11.4, {
+        align: "right",
+      });
+    }
 
     doc.setTextColor(113, 113, 122);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     doc.text(
-      ellipsize(
-        doc,
-        `${card.categoryLabel} · ${card.groupLabel}${card.matchNumber ? ` · n° ${card.matchNumber}` : ""}`,
-        logo ? headerTextW : cardW - 6,
-      ),
+      ellipsize(doc, card.categoryLabel, logo ? headerTextW : cardW - 28),
       x + 3,
       y + 11.5,
     );
@@ -391,6 +400,7 @@ export function clampDailyMatchesPngColumns(columns: number): number {
 async function buildDailyMatchesPng(
   tournamentName: string,
   dayLabel: string,
+  headline: string,
   cards: DailyMatchCard[],
   club?: DailyMatchesClub,
   columns = 2,
@@ -400,7 +410,7 @@ async function buildDailyMatchesPng(
   const margin = 36;
   const gap = 14;
   const headerH = 100;
-  const bottom = 28;
+  const bottom = 44;
   const preferredCardW = 500;
   const cardH = 210;
   const cols = clampDailyMatchesPngColumns(columns);
@@ -431,14 +441,14 @@ async function buildDailyMatchesPng(
   ctx.font = "bold 24px Helvetica, Arial, sans-serif";
   ctx.textAlign = "left";
   ctx.fillText(
-    canvasEllipsize(ctx, tournamentName || "Partidos del día", pageW - margin * 2 - 220),
+    canvasEllipsize(ctx, headline || "Partidos del día", pageW - margin * 2 - 220),
     margin,
     40,
   );
   ctx.fillStyle = "#71717a";
   ctx.font = "15px Helvetica, Arial, sans-serif";
   ctx.fillText(
-    `Partidos del día · ${dayLabel} · ${cards.length} enfrentamiento${cards.length === 1 ? "" : "s"}`,
+    `${cards.length} enfrentamiento${cards.length === 1 ? "" : "s"}`,
     margin,
     64,
   );
@@ -475,7 +485,7 @@ async function buildDailyMatchesPng(
         y + 30,
       );
 
-      const badge = DAILY_PHASE_LABELS[card.phase].toUpperCase();
+      const badge = (card.instanceLabel || card.groupLabel).toUpperCase();
       ctx.font = "bold 12px Helvetica, Arial, sans-serif";
       const badgeW = ctx.measureText(badge).width + 16;
       ctx.fillStyle = badgeFill[card.phase];
@@ -485,6 +495,12 @@ async function buildDailyMatchesPng(
       ctx.fillStyle = "#18181b";
       ctx.textAlign = "center";
       ctx.fillText(badge, x + cardW - badgeW / 2 - 10, y + 25);
+      if (card.matchNumber) {
+        ctx.fillStyle = "#71717a";
+        ctx.font = "14px Helvetica, Arial, sans-serif";
+        ctx.textAlign = "right";
+        ctx.fillText(`nº ${card.matchNumber}`, x + cardW - 10, y + 50);
+      }
       ctx.textAlign = "left";
 
       ctx.fillStyle = "#71717a";
@@ -492,7 +508,7 @@ async function buildDailyMatchesPng(
       ctx.fillText(
         canvasEllipsize(
           ctx,
-          `${card.categoryLabel} · ${card.groupLabel}${card.matchNumber ? ` · n° ${card.matchNumber}` : ""}`,
+          card.categoryLabel,
           cardW / 2 - logoBox / 2 - 18,
         ),
         x + 12,
@@ -542,6 +558,15 @@ async function buildDailyMatchesPng(
       }
     });
 
+  ctx.fillStyle = "#71717a";
+  ctx.font = "12px Helvetica, Arial, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(
+    canvasEllipsize(ctx, tournamentName || "Partidos del día", pageW - margin * 2),
+    margin,
+    pageH - 16,
+  );
+
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       blob
@@ -558,17 +583,28 @@ export async function runDailyMatchesPdfAction({
   action,
   tournamentName,
   dayLabel,
+  headline,
   cards,
   club,
+  columns = 2,
 }: {
   action: GrillaPdfAction;
   tournamentName: string;
   dayLabel: string;
+  headline: string;
   cards: DailyMatchCard[];
   club?: DailyMatchesClub;
+  columns?: number;
 }) {
   if (cards.length === 0) throw new Error("No hay partidos para exportar");
-  const pdf = await buildDailyMatchesPdf(tournamentName, dayLabel, cards, club);
+  const pdf = await buildDailyMatchesPdf(
+    tournamentName,
+    dayLabel,
+    headline,
+    cards,
+    club,
+    columns,
+  );
   if (action === "open") {
     openPdfBlob(pdf.blob);
     return;
@@ -585,6 +621,7 @@ export async function runDailyMatchesPngAction({
   action,
   tournamentName,
   dayLabel,
+  headline,
   cards,
   club,
   columns = 2,
@@ -592,6 +629,7 @@ export async function runDailyMatchesPngAction({
   action: GrillaPdfAction;
   tournamentName: string;
   dayLabel: string;
+  headline: string;
   cards: DailyMatchCard[];
   club?: DailyMatchesClub;
   columns?: number;
@@ -600,6 +638,7 @@ export async function runDailyMatchesPngAction({
   const png = await buildDailyMatchesPng(
     tournamentName,
     dayLabel,
+    headline,
     cards,
     club,
     columns,

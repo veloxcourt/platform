@@ -1,10 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CalendarDays } from "lucide-react";
-import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
@@ -12,15 +10,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { AyudaButton } from "./ayuda-button";
 import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
 import { cn } from "@/lib/utils";
@@ -38,13 +27,26 @@ import {
 import {
   buildDailyMatchCards,
   categoryCardTone,
-  DAILY_PHASE_LABELS,
+  dailyMatchesExportHeadline,
+  DAILY_EXPORT_COLUMN_OPTIONS,
+  DAILY_FILTER_ALL,
+  filterDailyMatchCards,
+  listDailyInstanceOptions,
+  type DailyInstanceOption,
   type DailyMatchCard,
   type DailyMatchPhase,
 } from "./daily-matches-model";
 import { ExportFileMenu } from "./export-file-menu";
 
-const PNG_COLUMN_OPTIONS = [1, 2, 3, 4] as const;
+const FILTER_SELECT_CLASS =
+  "h-8 max-w-[18rem] shrink-0 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
+function gridColsClass(columns: number) {
+  if (columns === 1) return "grid-cols-1";
+  if (columns === 3) return "grid-cols-3";
+  if (columns === 4) return "grid-cols-4";
+  return "grid-cols-2";
+}
 
 const PHASE_BADGE: Record<DailyMatchPhase, string> = {
   zonas:
@@ -69,8 +71,8 @@ function MatchCard({ card }: { card: DailyMatchCard }) {
         borderColor: tone.borderCss,
       }}
     >
-      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-        <div>
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
           <p className="text-base font-semibold tabular-nums">
             {time}
             <span className="font-normal text-muted-foreground"> · {court}</span>
@@ -81,18 +83,24 @@ function MatchCard({ card }: { card: DailyMatchCard }) {
               style={{ backgroundColor: card.categoryColor }}
               aria-hidden
             />
-            {card.categoryLabel} · {card.groupLabel}
-            {card.matchNumber ? ` · n° ${card.matchNumber}` : ""}
+            {card.categoryLabel}
           </p>
         </div>
-        <span
-          className={cn(
-            "rounded-md border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide",
-            PHASE_BADGE[card.phase],
-          )}
-        >
-          {DAILY_PHASE_LABELS[card.phase]}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-0.5">
+          <span
+            className={cn(
+              "rounded-md border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide",
+              PHASE_BADGE[card.phase],
+            )}
+          >
+            {card.instanceLabel || card.groupLabel}
+          </span>
+          {card.matchNumber ? (
+            <p className="text-[13px] text-muted-foreground">
+              nº {card.matchNumber}
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-auto flex flex-col gap-2">
@@ -114,61 +122,173 @@ function MatchCard({ card }: { card: DailyMatchCard }) {
   );
 }
 
-export function DailyMatchesPanel({
-  tournamentName,
-  dayLabel,
+export function useDailyMatchesFilters({
   categories,
   pairs,
   config,
   playDate,
+}: {
+  categories: TournamentCategoryItem[];
+  pairs: PairListItem[];
+  config: TournamentConfig | null;
+  playDate: string;
+}) {
+  const [categoryId, setCategoryId] = useState(DAILY_FILTER_ALL);
+  const [instanceKey, setInstanceKey] = useState(DAILY_FILTER_ALL);
+  const [columns, setColumns] = useState(2);
+
+  const dayCards = useMemo(
+    () => buildDailyMatchCards({ categories, pairs, config, playDate }),
+    [categories, config, pairs, playDate],
+  );
+  const instanceOptions = useMemo(
+    () =>
+      listDailyInstanceOptions(
+        filterDailyMatchCards(dayCards, {
+          categoryId,
+          instanceKey: DAILY_FILTER_ALL,
+        }),
+      ),
+    [categoryId, dayCards],
+  );
+  const cards = useMemo(
+    () => filterDailyMatchCards(dayCards, { categoryId, instanceKey }),
+    [categoryId, dayCards, instanceKey],
+  );
+
+  useEffect(() => {
+    if (categoryId === DAILY_FILTER_ALL) return;
+    if (!categories.some((category) => category.id === categoryId)) {
+      setCategoryId(DAILY_FILTER_ALL);
+    }
+  }, [categories, categoryId]);
+
+  useEffect(() => {
+    if (instanceKey === DAILY_FILTER_ALL) return;
+    if (!instanceOptions.some((option) => option.key === instanceKey)) {
+      setInstanceKey(DAILY_FILTER_ALL);
+    }
+  }, [instanceKey, instanceOptions]);
+
+  return {
+    categoryId,
+    setCategoryId,
+    instanceKey,
+    setInstanceKey,
+    columns,
+    setColumns,
+    instanceOptions,
+    cards,
+    dayHasMatches: dayCards.length > 0,
+  };
+}
+
+export function DailyMatchesFilterSelects({
+  categories,
+  categoryId,
+  onCategoryIdChange,
+  instanceOptions,
+  instanceKey,
+  onInstanceKeyChange,
+  columns,
+  onColumnsChange,
+}: {
+  categories: TournamentCategoryItem[];
+  categoryId: string;
+  onCategoryIdChange: (value: string) => void;
+  instanceOptions: DailyInstanceOption[];
+  instanceKey: string;
+  onInstanceKeyChange: (value: string) => void;
+  columns: number;
+  onColumnsChange: (value: number) => void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <select
+        className={FILTER_SELECT_CLASS}
+        value={categoryId}
+        onChange={(event) => onCategoryIdChange(event.target.value)}
+        aria-label="Categorías"
+        title="Categorías"
+      >
+        <option value={DAILY_FILTER_ALL}>Todas las categorías</option>
+        {categories.map((category) => (
+          <option key={category.id} value={category.id}>
+            {category.name}
+          </option>
+        ))}
+      </select>
+      <select
+        className={FILTER_SELECT_CLASS}
+        value={instanceKey}
+        onChange={(event) => onInstanceKeyChange(event.target.value)}
+        aria-label="Instancias a publicar"
+        title="Instancias a publicar"
+      >
+        <option value={DAILY_FILTER_ALL}>Todas las instancias</option>
+        {instanceOptions.map((option) => (
+          <option key={option.key} value={option.key}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <select
+        className={FILTER_SELECT_CLASS}
+        value={String(columns)}
+        onChange={(event) =>
+          onColumnsChange(clampDailyMatchesPngColumns(Number(event.target.value)))
+        }
+        aria-label="Columnas de exportación"
+        title="Columnas de exportación"
+      >
+        {DAILY_EXPORT_COLUMN_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {option === 1 ? "1 columna" : `${option} columnas`}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+export function DailyMatchesPanel({
+  tournamentName,
+  dayLabel,
+  categories,
+  categoryId,
+  instanceOptions,
+  instanceKey,
+  cards,
+  dayHasMatches,
+  columns,
   club,
 }: {
   tournamentName: string;
   dayLabel: string;
   categories: TournamentCategoryItem[];
-  pairs: PairListItem[];
-  config: TournamentConfig | null;
-  playDate: string;
+  categoryId: string;
+  instanceOptions: DailyInstanceOption[];
+  instanceKey: string;
+  cards: DailyMatchCard[];
+  dayHasMatches: boolean;
+  columns: number;
   club?: DailyMatchesClub;
 }) {
-  const cards = useMemo(
-    () => buildDailyMatchCards({ categories, pairs, config, playDate }),
-    [categories, config, pairs, playDate],
-  );
-  const [pngColumnsOpen, setPngColumnsOpen] = useState(false);
-  const [pngColumns, setPngColumns] = useState(2);
-  const [pngBusy, setPngBusy] = useState(false);
-
-  async function createAndOpenPng() {
-    if (pngBusy) return;
-    setPngBusy(true);
-    try {
-      await runDailyMatchesPngAction({
-        action: "create-open",
-        tournamentName,
-        dayLabel,
-        cards,
-        club,
-        columns: clampDailyMatchesPngColumns(pngColumns),
-      });
-      setPngColumnsOpen(false);
-    } catch (error) {
-      toast.error("No se pudo generar el PNG", {
-        description:
-          error instanceof Error ? error.message : "Error inesperado",
-      });
-    } finally {
-      setPngBusy(false);
-    }
-  }
+  const exportColumns = clampDailyMatchesPngColumns(columns);
+  const headline = dailyMatchesExportHeadline({
+    dayLabel,
+    categories,
+    categoryId,
+    instanceOptions,
+    instanceKey,
+  });
 
   return (
-    <>
-      <Card className={STICKY_PANEL_CARD}>
+    <Card className={STICKY_PANEL_CARD}>
       <CardHeader className={STICKY_PANEL_HEADER}>
         <CardTitle className="flex items-center gap-2">
           <CalendarDays className="size-4 text-muted-foreground" />
-          Partidos del día{dayLabel ? ` · ${dayLabel}` : ""}
+          {headline}
         </CardTitle>
         <CardAction>
           <div className="flex shrink-0 items-center gap-2">
@@ -181,8 +301,10 @@ export function DailyMatchesPanel({
                   action,
                   tournamentName,
                   dayLabel,
+                  headline,
                   cards,
                   club,
+                  columns: exportColumns,
                 })
               }
             />
@@ -190,19 +312,17 @@ export function DailyMatchesPanel({
               format="png"
               align="end"
               disabled={cards.length === 0}
-              onAction={(action) => {
-                if (action === "create-open") {
-                  setPngColumnsOpen(true);
-                  return Promise.resolve();
-                }
-                return runDailyMatchesPngAction({
+              onAction={(action) =>
+                runDailyMatchesPngAction({
                   action,
                   tournamentName,
                   dayLabel,
+                  headline,
                   cards,
                   club,
-                });
-              }}
+                  columns: exportColumns,
+                })
+              }
             />
             <AyudaButton
               title="Ayuda de partidos del día"
@@ -212,6 +332,10 @@ export function DailyMatchesPanel({
                 Enfrentamientos de zonas, intermedia y final programados para
                 este día, en orden de horario y cancha.
               </p>
+              <p>
+                Filtrá por categoría e instancia. Las columnas cambian la
+                grilla en pantalla y también el PDF y el PNG.
+              </p>
             </AyudaButton>
           </div>
         </CardAction>
@@ -219,15 +343,16 @@ export function DailyMatchesPanel({
       <CardContent>
         {cards.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Todavía no hay partidos armados para este día. Actualizá las fases
-            para asignar horarios.
+            {dayHasMatches
+              ? "Ningún enfrentamiento coincide con los filtros."
+              : "Todavía no hay partidos armados para este día. Actualizá las fases para asignar horarios."}
           </p>
         ) : (
           <>
             <p className="mb-3 text-xs text-muted-foreground">
               {cards.length} enfrentamiento{cards.length === 1 ? "" : "s"}
             </p>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className={cn("grid gap-3", gridColsClass(exportColumns))}>
               {cards.map((card) => (
                 <MatchCard key={card.id} card={card} />
               ))}
@@ -235,54 +360,6 @@ export function DailyMatchesPanel({
           </>
         )}
       </CardContent>
-      </Card>
-      <Dialog
-        open={pngColumnsOpen}
-        onOpenChange={(open) => {
-          if (pngBusy) return;
-          setPngColumnsOpen(open);
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Exportar PNG</DialogTitle>
-            <DialogDescription>
-              Indicá cuántas columnas de tarjetas querés. La imagen se recorta
-              al tamaño de las tarjetas, lista para WhatsApp.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            <Label>Columnas</Label>
-            <div className="flex flex-wrap gap-2">
-              {PNG_COLUMN_OPTIONS.map((option) => (
-                <Button
-                  key={option}
-                  type="button"
-                  variant={pngColumns === option ? "default" : "outline"}
-                  size="sm"
-                  aria-pressed={pngColumns === option}
-                  onClick={() => setPngColumns(option)}
-                >
-                  {option}
-                </Button>
-              ))}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={pngBusy}
-              onClick={() => setPngColumnsOpen(false)}
-            >
-              Cancelar
-            </Button>
-            <Button type="button" disabled={pngBusy} onClick={() => void createAndOpenPng()}>
-              {pngBusy ? "Creando…" : "Crear y Abrir"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+    </Card>
   );
 }

@@ -67,7 +67,11 @@ import { StableTabButton } from "@/components/ui/stable-tab-button";
 import { TournamentConfigTabs } from "./tournament-config-tabs";
 import { TorneosSoporteView } from "./torneos-soporte-view";
 import { TournamentEditForm } from "./tournament-form-dialog";
-import { DailyMatchesPanel } from "./daily-matches-panel";
+import {
+  DailyMatchesFilterSelects,
+  DailyMatchesPanel,
+  useDailyMatchesFilters,
+} from "./daily-matches-panel";
 import { tournamentPlayDayOptions } from "./daily-matches-model";
 import { TournamentZonesPanel } from "./tournament-zones-panel";
 import { ZonesMatchGridPanel } from "./zones-match-grid-panel";
@@ -195,6 +199,12 @@ export function ZonasTournamentDetail({
   const [dailySubTab, setDailySubTab] = useState<string>(
     () => tournamentPlayDayOptions(config)[0]?.date ?? "",
   );
+  const dailyFilters = useDailyMatchesFilters({
+    categories: tournament.categories,
+    pairs: tournament.pairs,
+    config,
+    playDate: dailySubTab,
+  });
 
   const intermediateCategories = useMemo(
     () =>
@@ -821,26 +831,40 @@ export function ZonasTournamentDetail({
               </div>
             ) : null}
             {activeTab === "partidos-del-dia" ? (
-              <div
-                className="mt-3 flex min-w-0 items-center gap-2 overflow-x-auto"
-                role="tablist"
-                aria-label="Días del torneo"
-              >
-                {playDayOptions.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Definí los días de juego en Configuración.
-                  </p>
-                ) : (
-                  playDayOptions.map((day) => (
-                    <StableTabButton
-                      key={day.date}
-                      active={dailySubTab === day.date}
-                      onSelect={() => setDailySubTab(day.date)}
-                    >
-                      {day.label}
-                    </StableTabButton>
-                  ))
-                )}
+              <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
+                <div
+                  className="flex min-w-0 items-center gap-2 overflow-x-auto"
+                  role="tablist"
+                  aria-label="Días del torneo"
+                >
+                  {playDayOptions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Definí los días de juego en Configuración.
+                    </p>
+                  ) : (
+                    playDayOptions.map((day) => (
+                      <StableTabButton
+                        key={day.date}
+                        active={dailySubTab === day.date}
+                        onSelect={() => setDailySubTab(day.date)}
+                      >
+                        {day.label}
+                      </StableTabButton>
+                    ))
+                  )}
+                </div>
+                {playDayOptions.length > 0 ? (
+                  <DailyMatchesFilterSelects
+                    categories={tournament.categories}
+                    categoryId={dailyFilters.categoryId}
+                    onCategoryIdChange={dailyFilters.setCategoryId}
+                    instanceOptions={dailyFilters.instanceOptions}
+                    instanceKey={dailyFilters.instanceKey}
+                    onInstanceKeyChange={dailyFilters.setInstanceKey}
+                    columns={dailyFilters.columns}
+                    onColumnsChange={dailyFilters.setColumns}
+                  />
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1088,9 +1112,12 @@ export function ZonasTournamentDetail({
               ""
             }
             categories={tournament.categories}
-            pairs={tournament.pairs}
-            config={config}
-            playDate={dailySubTab}
+            categoryId={dailyFilters.categoryId}
+            instanceOptions={dailyFilters.instanceOptions}
+            instanceKey={dailyFilters.instanceKey}
+            cards={dailyFilters.cards}
+            dayHasMatches={dailyFilters.dayHasMatches}
+            columns={dailyFilters.columns}
             club={club}
           />
         )

@@ -1,4 +1,5 @@
 import { formatWeekday } from "@/lib/date";
+import { OFFICIAL_ROUND_ORDER } from "@/modules/tournaments/domain/intermediate-phase";
 import { comparePlayDaySchedule } from "@/modules/tournaments/domain/play-day";
 import type {
   PairListItem,
@@ -17,19 +18,31 @@ export const DAILY_PHASE_LABELS: Record<DailyMatchPhase, string> = {
   final: "Final",
 };
 
+export const DAILY_FILTER_ALL = "all";
+export const DAILY_ZONAS_INSTANCE_KEY = "zonas";
+export const DAILY_EXPORT_COLUMN_OPTIONS = [1, 2, 3, 4] as const;
+
 export type DailyMatchCard = {
   id: string;
   playDate: string;
   startTime: string;
   courtIndex: number | null;
+  categoryId: string;
   categoryLabel: string;
   categoryColor: string;
   phase: DailyMatchPhase;
+  instanceKey: string;
+  instanceLabel: string;
   groupLabel: string;
   matchNumber: number;
   pair1: string;
   pair2: string;
   observation: string;
+};
+
+export type DailyInstanceOption = {
+  key: string;
+  label: string;
 };
 
 export type DailyPlayDayOption = {
@@ -92,6 +105,107 @@ export function tournamentPlayDayOptions(
     }));
 }
 
+export function dailyDayHeadline(dayLabel: string): string {
+  const match = /^D(\d+)/i.exec(dayLabel.trim());
+  return match ? `DÍA ${match[1]}` : dayLabel.trim() || "Día";
+}
+
+export function dailyMatchesExportHeadline({
+  dayLabel,
+  categories,
+  categoryId,
+  instanceOptions,
+  instanceKey,
+}: {
+  dayLabel: string;
+  categories: TournamentCategoryItem[];
+  categoryId: string;
+  instanceOptions: DailyInstanceOption[];
+  instanceKey: string;
+}): string {
+  const selectedCategory = categories.find((category) => category.id === categoryId);
+  const categoryLabel =
+    categoryId === DAILY_FILTER_ALL
+      ? "Todas las categorías"
+      : selectedCategory?.name || selectedCategory?.abbreviation || "Categoría";
+  const instanceLabel =
+    instanceKey === DAILY_FILTER_ALL
+      ? "Todas las instancias"
+      : instanceOptions.find((option) => option.key === instanceKey)?.label ||
+        "Instancia";
+  return [dailyDayHeadline(dayLabel), categoryLabel, instanceLabel].join(" · ");
+}
+
+function categoryWrittenName(
+  categoryId: string,
+  fallback: string,
+  categories: TournamentCategoryItem[],
+): string {
+  const category = categories.find((item) => item.id === categoryId);
+  return category?.name.trim() || fallback;
+}
+
+function instanceOf(
+  phase: DailyMatchPhase,
+  groupLabel: string,
+): DailyInstanceOption {
+  if (phase === "zonas") {
+    return {
+      key: DAILY_ZONAS_INSTANCE_KEY,
+      label: DAILY_PHASE_LABELS.zonas,
+    };
+  }
+  return { key: groupLabel, label: groupLabel };
+}
+
+function instanceSortIndex(label: string): number {
+  if (label === DAILY_PHASE_LABELS.zonas) return 0;
+  const official = OFFICIAL_ROUND_ORDER.indexOf(
+    label as (typeof OFFICIAL_ROUND_ORDER)[number],
+  );
+  return official === -1 ? OFFICIAL_ROUND_ORDER.length + 1 : official + 1;
+}
+
+export function listDailyInstanceOptions(
+  cards: DailyMatchCard[],
+): DailyInstanceOption[] {
+  const unique = new Map<string, DailyInstanceOption>();
+  for (const card of cards) {
+    if (!unique.has(card.instanceKey)) {
+      unique.set(card.instanceKey, {
+        key: card.instanceKey,
+        label: card.instanceLabel,
+      });
+    }
+  }
+  return [...unique.values()].sort((a, b) => {
+    const order = instanceSortIndex(a.label) - instanceSortIndex(b.label);
+    if (order !== 0) return order;
+    return a.label.localeCompare(b.label, "es");
+  });
+}
+
+export function filterDailyMatchCards(
+  cards: DailyMatchCard[],
+  {
+    categoryId,
+    instanceKey,
+  }: {
+    categoryId: string;
+    instanceKey: string;
+  },
+): DailyMatchCard[] {
+  return cards.filter((card) => {
+    if (categoryId !== DAILY_FILTER_ALL && card.categoryId !== categoryId) {
+      return false;
+    }
+    if (instanceKey !== DAILY_FILTER_ALL && card.instanceKey !== instanceKey) {
+      return false;
+    }
+    return true;
+  });
+}
+
 export function buildDailyMatchCards({
   categories,
   pairs,
@@ -109,20 +223,31 @@ export function buildDailyMatchCards({
   }
 
   const zones = buildZonesMatchGridRows({ categories, pairs, config }).map(
-    (row): DailyMatchCard => ({
-      id: `zonas-${row.id}`,
-      playDate: row.playDate,
-      startTime: row.startTime,
-      courtIndex: row.courtIndex,
-      categoryLabel: row.categoryLabel,
-      categoryColor: row.categoryColor,
-      phase: "zonas",
-      groupLabel: row.zoneLetter ? `Zona ${row.zoneLetter}` : "Zona",
-      matchNumber: row.matchNumber,
-      pair1: row.pair1,
-      pair2: row.pair2,
-      observation: row.observation,
-    }),
+    (row): DailyMatchCard => {
+      const groupLabel = row.zoneLetter ? `Zona ${row.zoneLetter}` : "Zona";
+      const instance = instanceOf("zonas", groupLabel);
+      return {
+        id: `zonas-${row.id}`,
+        playDate: row.playDate,
+        startTime: row.startTime,
+        courtIndex: row.courtIndex,
+        categoryId: row.categoryId,
+        categoryLabel: categoryWrittenName(
+          row.categoryId,
+          row.categoryLabel,
+          categories,
+        ),
+        categoryColor: row.categoryColor,
+        phase: "zonas",
+        instanceKey: instance.key,
+        instanceLabel: instance.label,
+        groupLabel,
+        matchNumber: row.matchNumber,
+        pair1: row.pair1,
+        pair2: row.pair2,
+        observation: row.observation,
+      };
+    },
   );
 
   const intermediate = buildIntermediateMatchGridRows({
@@ -130,44 +255,60 @@ export function buildDailyMatchCards({
     zoneCategories: categories,
     pairs,
     config,
-  }).map(
-    (row): DailyMatchCard => ({
+  }).map((row): DailyMatchCard => {
+    const instance = instanceOf("intermedia", row.roundLabel);
+    return {
       id: `intermedia-${row.id}`,
       playDate: row.playDate ?? "",
       startTime: row.startTime ?? "",
       courtIndex: row.courtIndex,
-      categoryLabel: row.categoryLabel,
+      categoryId: row.categoryId,
+      categoryLabel: categoryWrittenName(
+        row.categoryId,
+        row.categoryLabel,
+        categories,
+      ),
       categoryColor: row.categoryColor,
       phase: "intermedia",
+      instanceKey: instance.key,
+      instanceLabel: instance.label,
       groupLabel: row.roundLabel,
       matchNumber: row.officialId || row.matchNumber,
       pair1: row.pair1,
       pair2: row.pair2,
       observation: row.observation,
-    }),
-  );
+    };
+  });
 
   const finals = buildFinalMatchGridRows({
     categories,
     zoneCategories: categories,
     pairs,
     config,
-  }).map(
-    (row): DailyMatchCard => ({
+  }).map((row): DailyMatchCard => {
+    const instance = instanceOf("final", row.roundLabel);
+    return {
       id: `final-${row.id}`,
       playDate: row.playDate ?? "",
       startTime: row.startTime ?? "",
       courtIndex: row.courtIndex,
-      categoryLabel: row.categoryLabel,
+      categoryId: row.categoryId,
+      categoryLabel: categoryWrittenName(
+        row.categoryId,
+        row.categoryLabel,
+        categories,
+      ),
       categoryColor: row.categoryColor,
       phase: "final",
+      instanceKey: instance.key,
+      instanceLabel: instance.label,
       groupLabel: row.roundLabel,
       matchNumber: row.officialId || row.matchNumber,
       pair1: row.pair1,
       pair2: row.pair2,
       observation: row.observation,
-    }),
-  );
+    };
+  });
 
   return [...zones, ...intermediate, ...finals]
     .filter((card) => card.playDate === playDate)

@@ -447,7 +447,7 @@ function MatchMeta({
   return (
     <div
       className={cn(
-        "relative flex min-h-11 w-full flex-col items-center justify-center rounded-md border px-2 py-1.5 text-center shadow-sm",
+        "relative flex min-h-12 w-full flex-col items-center justify-center rounded-md border px-2 py-1.5 text-center shadow-sm",
         phase === "intermediate" &&
           "border-amber-400 bg-amber-100 text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100",
         phase === "final" &&
@@ -461,11 +461,11 @@ function MatchMeta({
           n° {officialId}
         </span>
       ) : null}
-      <p className="text-[11px] font-medium leading-tight">{label}</p>
+      <p className="text-xs font-bold leading-tight">{label}</p>
       <p
         className={cn(
-          "text-[10px] leading-tight",
-          unscheduled ? "text-muted-foreground/80" : "font-medium",
+          "text-[11px] font-bold leading-tight",
+          unscheduled && "text-muted-foreground/80",
         )}
       >
         {horario}

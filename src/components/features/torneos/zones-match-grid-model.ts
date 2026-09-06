@@ -18,6 +18,7 @@ export type ZonesMatchGridRow = {
   playDate: string;
   startTime: string;
   courtIndex: number | null;
+  categoryId: string;
   categoryLabel: string;
   categoryColor: string;
   zoneLetter: string;
@@ -113,6 +114,7 @@ export function buildZonesMatchGridRows({
           playDate: match.playDate ?? "",
           startTime: match.startTime ?? "",
           courtIndex: match.courtIndex,
+          categoryId: categoryConfig.categoryId,
           categoryLabel,
           categoryColor,
           zoneLetter: zoneLetterFromLabel(zone.label),

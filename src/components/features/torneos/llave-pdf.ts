@@ -509,14 +509,14 @@ function drawPage(
     if (number) {
       doc.text(number, x + w - 1.4, y + 3, { align: "right" });
     }
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(Math.max(5.5, 6.5 * scale));
-    doc.setTextColor(82, 82, 91);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(Math.max(6.2, 7.4 * scale));
+    doc.setTextColor(24, 24, 27);
     doc.text(fitCentered(doc, box.title, w - 2.8), x + w / 2, y + 5.6, {
       align: "center",
     });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(Math.max(5.5, 6.4 * scale));
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(Math.max(6, 7.1 * scale));
     doc.setTextColor(
       box.horario && box.horario !== "Sin horario" ? 24 : 113,
       box.horario && box.horario !== "Sin horario" ? 24 : 113,
@@ -780,10 +780,10 @@ async function buildLlavePng(
       ctx.textAlign = "right";
       if (number) ctx.fillText(number, x + w - 6, y + 14, w - 10);
       ctx.textAlign = "center";
-      ctx.font = "10px Helvetica, Arial, sans-serif";
-      ctx.fillStyle = "#52525b";
+      ctx.font = "bold 12px Helvetica, Arial, sans-serif";
+      ctx.fillStyle = "#18181b";
       ctx.fillText(box.title, x + w / 2, y + 26, w - 12);
-      ctx.font = "10px Helvetica, Arial, sans-serif";
+      ctx.font = "bold 11px Helvetica, Arial, sans-serif";
       ctx.fillStyle =
         box.horario && box.horario !== "Sin horario" ? "#18181b" : "#71717a";
       ctx.fillText(box.horario ?? "Sin horario", x + w / 2, y + 42, w - 10);
