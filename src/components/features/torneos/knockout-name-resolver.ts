@@ -25,7 +25,7 @@ export function categoryKnockoutNameResolver({
   return buildKnockoutNameResolver({
     qualification: category
       ? qualificationFromCategory(category)
-      : category?.zoneQualification,
+      : null,
     pairs: pairs.filter((pair) => pair.categoryId === categoryId),
     fixtures: [category?.intermediateFixture, category?.finalFixture],
     matchFormat,
