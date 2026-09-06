@@ -134,3 +134,27 @@
     touch-action: manipulation;
   }
 }
+
+@keyframes slot-selected-flash {
+  0%,
+  100% {
+    background-color: #0284c7 !important;
+    color: #fff !important;
+    border-color: #0369a1 !important;
+    box-shadow: 0 0 0 3px rgb(14 165 233 / 0.7);
+  }
+  50% {
+    background-color: #7dd3fc !important;
+    color: #0c4a6e !important;
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 0 3px rgb(125 211 252 / 0.95);
+  }
+}
+
+.slot-selected-flash {
+  z-index: 10;
+  animation: slot-selected-flash 0.85s ease-in-out infinite;
+  background-color: #0284c7 !important;
+  color: #fff !important;
+  border-color: #0369a1 !important;
+}

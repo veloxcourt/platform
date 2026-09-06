@@ -627,8 +627,7 @@ export function SlotRuleGrid({
                             canInspect ||
                             canPick) &&
                             "cursor-pointer",
-                          isSelected &&
-                            "z-10 border-[3px] border-zinc-950 shadow-[inset_0_0_0_2px_rgba(255,255,255,0.92)] dark:border-white dark:shadow-[inset_0_0_0_2px_rgba(0,0,0,0.55)]",
+                          isSelected && "slot-selected-flash text-white",
                           !clickable &&
                             !canSetStartMinutes &&
                             !canInspect &&
@@ -636,18 +635,6 @@ export function SlotRuleGrid({
                             "cursor-default opacity-95",
                         )}
                       >
-                        {isSelected ? (
-                          <>
-                            <span
-                              aria-hidden
-                              className="pointer-events-none absolute inset-x-0 top-0 h-1.5 bg-zinc-950 dark:bg-white"
-                            />
-                            <span
-                              aria-hidden
-                              className="pointer-events-none absolute inset-x-0 bottom-0 h-1.5 bg-zinc-950 dark:bg-white"
-                            />
-                          </>
-                        ) : null}
                         <span className="font-semibold tabular-nums">
                           {slot.startTime}
                         </span>

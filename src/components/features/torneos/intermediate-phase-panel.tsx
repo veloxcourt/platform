@@ -34,6 +34,7 @@ import type {
 import { ChangeZoneTimeDialog } from "./change-zone-time-dialog";
 import { IntermediateRoundCard } from "./intermediate-round-card";
 import { buildKnockoutSlotRules } from "./knockout-match-rule-model";
+import { useAdjustablePlayDays } from "./use-adjustable-play-days";
 import { ActualizarConfirmButton } from "./actualizar-confirm-button";
 import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import { useFixtureEditMode } from "./fixture-edit-mode-context";
@@ -118,6 +119,7 @@ export function IntermediatePhasePanel({
   const [changeScheduleOfficialId, setChangeScheduleOfficialId] = useState<
     number | null
   >(null);
+  const [hideZoneMatches, setHideZoneMatches] = useState(false);
   const {
     draft,
     scheduleByOfficialId,
@@ -189,24 +191,52 @@ export function IntermediatePhasePanel({
         courtIndex: selectedSchedule.courtIndex,
       }
     : null;
+  const knockoutSlotMinutes = useMemo(() => {
+    const categoryConfig = config?.categories.find(
+      (item) => item.categoryId === categoryId,
+    );
+    return Math.max(
+      1,
+      (categoryConfig?.phases.knockout.matchDurationMin ?? 60) +
+        (categoryConfig?.intervalMin ?? 0),
+    );
+  }, [categoryId, config]);
+  const {
+    playDays: livePlayDays,
+    adjustPlayDay,
+    canAdjustPlayDay,
+    adjustPending,
+  } = useAdjustablePlayDays({
+    clubSlug,
+    tournamentId,
+    playDays: config?.playDays ?? [],
+    slotMinutesForDate: () => knockoutSlotMinutes,
+    readOnly,
+  });
+  const liveConfig = useMemo(
+    () => (config ? { ...config, playDays: livePlayDays } : null),
+    [config, livePlayDays],
+  );
   const timePickerRules = useMemo(() => {
-    if (!config) return [];
+    if (!liveConfig) return [];
     return buildKnockoutSlotRules({
       phase: "intermediate",
       categories,
-      config,
-      courtCount: config.courtCount || courtCount,
+      config: liveConfig,
+      courtCount: liveConfig.courtCount || courtCount,
       liveFixtureByCategory: { [categoryId]: draft },
       exclude:
         changeScheduleOfficialId == null
           ? null
           : { categoryId, officialId: changeScheduleOfficialId },
+      includeZones: !hideZoneMatches,
     });
   }, [
     categories,
     categoryId,
     changeScheduleOfficialId,
-    config,
+    hideZoneMatches,
+    liveConfig,
     courtCount,
     draft,
   ]);
@@ -455,6 +485,11 @@ export function IntermediatePhasePanel({
           }
           rules={timePickerRules}
           categories={timePickerCategories}
+          onAdjustPlayDay={adjustPlayDay}
+          canAdjustPlayDay={canAdjustPlayDay}
+          adjustDisabled={readOnly || adjustPending}
+          hideZoneMatches={hideZoneMatches}
+          onHideZoneMatchesChange={setHideZoneMatches}
           selectedSlot={selectedScheduleSlot}
           onSelect={(slot) => {
             if (changeScheduleOfficialId == null) return;

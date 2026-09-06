@@ -61,6 +61,7 @@ import {
 } from "@/modules/tournaments/domain/zone-schedule-conflicts";
 import { ChangeZonePairDialog } from "./change-zone-pair-dialog";
 import { ChangeZoneTimeDialog } from "./change-zone-time-dialog";
+import { useAdjustablePlayDays } from "./use-adjustable-play-days";
 import {
   buildZonesSlotRules,
   zoneRuleGridCategories,
@@ -407,6 +408,22 @@ export function TournamentZonesPanel({
     const interval = categoryConfig?.intervalMin ?? 0;
     return Math.max(1, duration + interval);
   }, [categoryConfig]);
+  const {
+    playDays: livePlayDays,
+    adjustPlayDay,
+    canAdjustPlayDay,
+    adjustPending,
+  } = useAdjustablePlayDays({
+    clubSlug,
+    tournamentId,
+    playDays: config?.playDays ?? [],
+    slotMinutesForDate: () => slotMinutes,
+    readOnly,
+  });
+  const liveConfig = useMemo(
+    () => (config ? { ...config, playDays: livePlayDays } : null),
+    [config, livePlayDays],
+  );
 
   const zones = useMemo(() => {
     if (!activeCategoryId) return [];
@@ -607,11 +624,11 @@ export function TournamentZonesPanel({
     (match) => match.id === changeScheduleRequest?.matchId,
   );
   const timePickerRules = useMemo(() => {
-    if (!config || !activeCategoryId) return [];
+    if (!liveConfig || !activeCategoryId) return [];
     return buildZonesSlotRules({
       categories,
       pairs,
-      config,
+      config: liveConfig,
       courtCount,
       liveZonesByCategory: { [activeCategoryId]: zones },
       excludeMatchId: changeScheduleMatch?.id,
@@ -620,7 +637,7 @@ export function TournamentZonesPanel({
     activeCategoryId,
     categories,
     changeScheduleMatch?.id,
-    config,
+    liveConfig,
     courtCount,
     pairs,
     zones,
@@ -1069,6 +1086,9 @@ export function TournamentZonesPanel({
           zoneLabel={changeScheduleZone?.label ?? "esta zona"}
           rules={timePickerRules}
           categories={timePickerCategories}
+          onAdjustPlayDay={adjustPlayDay}
+          canAdjustPlayDay={canAdjustPlayDay}
+          adjustDisabled={readOnly || adjustPending}
           selectedSlot={
             changeScheduleMatch
               ? {

@@ -87,6 +87,7 @@ export function buildKnockoutSlotRules(params: {
     IntermediateFixturePersisted | null | undefined
   >;
   exclude?: { categoryId: string; officialId: number } | null;
+  includeZones?: boolean;
 }): CourtDayRule[] {
   const abbreviationById = new Map(
     params.categories.map((category) => [category.id, category.abbreviation]),
@@ -173,26 +174,32 @@ export function buildKnockoutSlotRules(params: {
     ),
   );
 
-  const zoneMatches = params.config.categories.flatMap((categoryConfig) =>
-    (categoryConfig.zonesFixture?.zones ?? []).flatMap((zone) =>
-      zone.matches.map((match) => ({
-        categoryId: categoryConfig.categoryId,
-        playDate: match.playDate ?? "",
-        startTime: match.startTime ?? "",
-        courtIndex: match.courtIndex,
-        slotIndex: match.slotIndex,
-        matchCode: formatZoneMatchSlotCode(zone.label, match.matchIndex + 1),
-        pairLabel: formatZoneMatchCode(
-          abbreviationById.get(categoryConfig.categoryId),
-          zone.label,
-          match.matchIndex + 1,
-        ),
-        pair1Label: match.pair1Id ?? "Pareja 1",
-        pair2Label: match.pair2Id ?? "Pareja 2",
-        projectedPhase: "zones" as const,
-      })),
-    ),
-  );
+  const zoneMatches =
+    params.includeZones === false
+      ? []
+      : params.config.categories.flatMap((categoryConfig) =>
+          (categoryConfig.zonesFixture?.zones ?? []).flatMap((zone) =>
+            zone.matches.map((match) => ({
+              categoryId: categoryConfig.categoryId,
+              playDate: match.playDate ?? "",
+              startTime: match.startTime ?? "",
+              courtIndex: match.courtIndex,
+              slotIndex: match.slotIndex,
+              matchCode: formatZoneMatchSlotCode(
+                zone.label,
+                match.matchIndex + 1,
+              ),
+              pairLabel: formatZoneMatchCode(
+                abbreviationById.get(categoryConfig.categoryId),
+                zone.label,
+                match.matchIndex + 1,
+              ),
+              pair1Label: match.pair1Id ?? "Pareja 1",
+              pair2Label: match.pair2Id ?? "Pareja 2",
+              projectedPhase: "zones" as const,
+            })),
+          ),
+        );
 
   return buildMatchesRuleGrid({
     playDays: params.config.playDays,

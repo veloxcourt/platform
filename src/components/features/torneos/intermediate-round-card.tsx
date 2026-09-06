@@ -169,19 +169,13 @@ export function IntermediateRoundCard({
           {crossings.length} partido
           {crossings.length === 1 ? "" : "s"} · {MATCH_FORMAT_LABELS[matchFormat]}
           {hasUnscheduled ? " · horario incompleto" : null}
-          {canReorder
-            ? " · flechas: intercambiar horario con el de arriba o abajo"
-            : null}
-          {canPickSlot
-            ? " · día, horario y cancha: regla de slots (el partido no cambia de fila)"
-            : null}
         </p>
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full table-fixed border-collapse text-left text-sm">
           <colgroup>
-            <col className="w-8" />
+            <col className="w-11" />
             <col className="w-[6.5rem]" />
             <col className="w-16" />
             <col className="w-[5rem]" />
@@ -222,31 +216,33 @@ export function IntermediateRoundCard({
               >
                 <td className="py-1.5 pr-1.5 align-middle tabular-nums text-muted-foreground">
                   <div className="flex flex-col">
-                    <span>{index + 1}</span>
-                    {canReorder && onMove ? (
-                      <span className="mt-0.5 flex flex-col">
-                        <button
-                          type="button"
-                          className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
-                          disabled={index === 0}
-                          onClick={() => onMove(crossing.id, "up")}
-                          aria-label={`Jugar antes el partido ${index + 1}`}
-                          title="Jugar antes"
-                        >
-                          <ChevronUp className="size-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
-                          disabled={index === crossings.length - 1}
-                          onClick={() => onMove(crossing.id, "down")}
-                          aria-label={`Jugar después el partido ${index + 1}`}
-                          title="Jugar después"
-                        >
-                          <ChevronDown className="size-3.5" />
-                        </button>
-                      </span>
-                    ) : null}
+                    <span className="inline-flex items-center gap-0.5">
+                      <span>{index + 1}</span>
+                      {canReorder && onMove ? (
+                        <span className="flex">
+                          <button
+                            type="button"
+                            className="inline-flex size-4 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground disabled:opacity-25"
+                            disabled={index === 0}
+                            onClick={() => onMove(crossing.id, "up")}
+                            aria-label={`Intercambiar horario con el de arriba`}
+                            title="Intercambiar horario con el de arriba"
+                          >
+                            <ChevronUp className="size-3" />
+                          </button>
+                          <button
+                            type="button"
+                            className="inline-flex size-4 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground disabled:opacity-25"
+                            disabled={index === crossings.length - 1}
+                            onClick={() => onMove(crossing.id, "down")}
+                            aria-label={`Intercambiar horario con el de abajo`}
+                            title="Intercambiar horario con el de abajo"
+                          >
+                            <ChevronDown className="size-3" />
+                          </button>
+                        </span>
+                      ) : null}
+                    </span>
                     {unscheduled ? (
                       <span className="max-w-[4.5rem] text-[9px] font-medium leading-tight text-amber-900 dark:text-amber-100">
                         Sin horario
