@@ -134,20 +134,20 @@ export function buildIntermediateMatchGridRows({
     }
   });
 
-  if (!includeZones) return rows;
-
-  const zoneRows = buildZonesMatchGridRows({
-    categories: zoneCategories ?? categories,
-    pairs,
-    config,
-  }).map(fromZoneRow);
+  const previous: IntermediateMatchGridRow[] = includeZones
+    ? buildZonesMatchGridRows({
+        categories: zoneCategories ?? categories,
+        pairs,
+        config,
+      }).map(fromZoneRow)
+    : [];
 
   const dayOpenByDate: Record<string, string> = {};
   for (const day of config?.playDays ?? []) {
     if (day.date) dayOpenByDate[day.date] = day.startTime;
   }
 
-  return [...zoneRows, ...rows].sort((a, b) => {
+  return [...previous, ...rows].sort((a, b) => {
     const schedule = comparePlayDaySchedule(
       { playDate: a.playDate, startTime: a.startTime },
       { playDate: b.playDate, startTime: b.startTime },

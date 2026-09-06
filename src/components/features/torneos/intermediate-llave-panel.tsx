@@ -24,7 +24,8 @@ import type {
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
 import { LlavePdfMenu } from "./llave-pdf-menu";
-import type { LlavePdfClub, LlavePdfDraw } from "./llave-pdf";
+import type { LlavePdfClub } from "./llave-pdf";
+import { buildLlaveExportDraws } from "./llave-export-draws";
 import { categoryKnockoutNameResolver } from "./knockout-name-resolver";
 import {
   OfficialBracketDiagram,
@@ -73,21 +74,15 @@ export function IntermediateLlavePanel({
       }),
     [categories, config, pairs],
   );
-  const pdfDraws = useMemo<LlavePdfDraw[]>(
+  const pdfDraws = useMemo(
     () =>
-      draws
-        .filter((draw) => draw.tree)
-        .map((draw) => ({
-          categoryName: draw.category.name,
-          regulation: draw.regulation,
-          pairCount: draw.pairCount,
-          tree: draw.tree!,
-          showOfficialId: draw.showOfficialId,
-          startsAtRound: draw.startsAtRound,
-          scheduleByOfficialId: draw.scheduleByOfficialId,
-          resolveLabel: draw.resolveLabel,
-        })),
-    [draws],
+      buildLlaveExportDraws({
+        categories,
+        pairs,
+        config,
+        includeFinalFixture: false,
+      }),
+    [categories, config, pairs],
   );
 
   return (

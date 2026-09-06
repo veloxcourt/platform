@@ -132,8 +132,6 @@ export function buildFinalMatchGridRows({
     );
   }
 
-  if (!includeZones && !includeIntermediate) return rows;
-
   const dayOpenByDate: Record<string, string> = {};
   for (const day of config?.playDays ?? []) {
     if (day.date) dayOpenByDate[day.date] = day.startTime;

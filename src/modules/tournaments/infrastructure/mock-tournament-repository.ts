@@ -1494,7 +1494,15 @@ export class MockTournamentRepository implements TournamentRepository {
 
       const nextCategories = config.categories.map((c) =>
         c.categoryId === categoryId
-          ? { ...c, zonesFixture: persisted, zoneQualification: null }
+          ? {
+              ...c,
+              zonesFixture: persisted,
+              zoneQualification: buildZoneQualification({
+                fixture: persisted,
+                format: categoryConfig.phases.zones.matchFormat,
+                zone4Advancers: categoryConfig.zone4Advancers === 2 ? 2 : 3,
+              }),
+            }
           : c,
       );
       record.configs.set(tournamentId, { ...config, categories: nextCategories });
@@ -1805,6 +1813,13 @@ export class MockTournamentRepository implements TournamentRepository {
         ...category,
         finalFixture:
           persistedById.get(category.categoryId) ?? category.finalFixture,
+        zoneQualification: persistedById.has(category.categoryId)
+          ? buildZoneQualification({
+              fixture: category.zonesFixture,
+              format: category.phases.zones.matchFormat,
+              zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
+            })
+          : category.zoneQualification,
       }));
       record.configs.set(tournamentId, {
         ...config,
@@ -1918,7 +1933,15 @@ export class MockTournamentRepository implements TournamentRepository {
         ...config,
         categories: config.categories.map((item) =>
           item.categoryId === categoryId
-            ? { ...item, zonesFixture: persisted }
+            ? {
+                ...item,
+                zonesFixture: persisted,
+                zoneQualification: buildZoneQualification({
+                  fixture: persisted,
+                  format: category.phases.zones.matchFormat,
+                  zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
+                }),
+              }
             : item,
         ),
       });

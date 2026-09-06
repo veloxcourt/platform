@@ -5,6 +5,7 @@ import { ListOrdered } from "lucide-react";
 import { enforceClubModulePage } from "@/lib/auth/access";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import { CatalogView } from "@/components/features/catalog/catalog-view";
+import { ExportCatalogButton } from "@/components/features/catalog/export-catalog-dialog";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -38,13 +39,16 @@ export default async function CatalogoPage({
             {club.name} · productos y tipos
           </p>
         </div>
-        <Link
-          href={`/${clubSlug}/catalogo/menu`}
-          className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-        >
-          <ListOrdered className="size-4" />
-          Menú de precios
-        </Link>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <ExportCatalogButton clubSlug={clubSlug} />
+          <Link
+            href={`/${clubSlug}/catalogo/menu`}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          >
+            <ListOrdered className="size-4" />
+            Menú de precios
+          </Link>
+        </div>
       </div>
 
       <CatalogView

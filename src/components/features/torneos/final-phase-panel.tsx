@@ -1,11 +1,15 @@
 "use client";
 
-import { useMemo, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Trophy } from "lucide-react";
+import { Calculator, Trophy } from "lucide-react";
 import { toast } from "sonner";
 
-import { buildFinalFixtureAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
+import { Button } from "@/components/ui/button";
+import {
+  buildFinalFixtureAction,
+  calculateZoneQualificationAction,
+} from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 import {
   Card,
   CardAction,
@@ -27,8 +31,11 @@ import type {
   TournamentCategoryItem,
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
+import { ChangeZoneTimeDialog } from "./change-zone-time-dialog";
 import { IntermediateRoundCard } from "./intermediate-round-card";
+import { buildKnockoutSlotRules } from "./knockout-match-rule-model";
 import { ActualizarConfirmButton } from "./actualizar-confirm-button";
+import { ActualizarHoverHint } from "./actualizar-hover-hint";
 import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import {
   buildFinalMatchGridRows,
@@ -40,6 +47,7 @@ import { GrillaPdfMenu } from "./grilla-pdf-menu";
 import { categoryKnockoutNameResolver } from "./knockout-name-resolver";
 import { useKnockoutFixtureReorder } from "./use-knockout-fixture-reorder";
 import { useTournamentReadOnly } from "./tournament-mode-context";
+import { zoneRuleGridCategories } from "./zones-match-rule-model";
 
 export function FinalPhasePanel({
   clubSlug,
@@ -60,6 +68,7 @@ export function FinalPhasePanel({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [isCalculating, startCalculate] = useTransition();
   const category = categories.find((item) => item.id === categoryId) ?? null;
   const fixture = config?.categories.find(
     (item) => item.categoryId === categoryId,
@@ -105,13 +114,19 @@ export function FinalPhasePanel({
     return map;
   }, [config?.playDays]);
 
+  const [changeScheduleOfficialId, setChangeScheduleOfficialId] = useState<
+    number | null
+  >(null);
   const {
+    draft,
     scheduleByOfficialId,
     scoresByOfficialId,
     canReorder,
+    canEditSchedule,
     orderedCrossings,
     moveCrossing,
     updateScore,
+    updateSchedule,
     flushPersist,
   } = useKnockoutFixtureReorder({
       clubSlug,
@@ -152,6 +167,91 @@ export function FinalPhasePanel({
       }),
     );
   }, [category, config, pairs]);
+
+  const changeScheduleCrossing =
+    changeScheduleOfficialId == null
+      ? null
+      : rounds
+          .flatMap((round) =>
+            round.crossings.map((crossing) => ({
+              roundLabel: round.label,
+              crossing,
+            })),
+          )
+          .find((item) => item.crossing.id === changeScheduleOfficialId) ??
+        null;
+  const selectedSchedule =
+    changeScheduleOfficialId == null
+      ? null
+      : scheduleByOfficialId.get(changeScheduleOfficialId);
+  const selectedScheduleSlot = selectedSchedule
+    ? {
+        playDate: selectedSchedule.playDate ?? "",
+        startTime: selectedSchedule.startTime ?? "",
+        courtIndex: selectedSchedule.courtIndex,
+      }
+    : null;
+  const timePickerRules = useMemo(() => {
+    if (!config) return [];
+    return buildKnockoutSlotRules({
+      phase: "final",
+      categories,
+      config,
+      courtCount: config.courtCount || courtCount,
+      liveFixtureByCategory: { [categoryId]: draft },
+      exclude:
+        changeScheduleOfficialId == null
+          ? null
+          : { categoryId, officialId: changeScheduleOfficialId },
+    });
+  }, [
+    categories,
+    categoryId,
+    changeScheduleOfficialId,
+    config,
+    courtCount,
+    draft,
+  ]);
+  const timePickerCategories = useMemo(
+    () => zoneRuleGridCategories(categories),
+    [categories],
+  );
+
+  useEffect(() => {
+    setChangeScheduleOfficialId(null);
+  }, [categoryId]);
+
+  function handleCalcular() {
+    startCalculate(async () => {
+      await flushPersist();
+      const result = await calculateZoneQualificationAction(
+        clubSlug,
+        tournamentId,
+        categoryId,
+      );
+      if (!result.ok) {
+        toast.error("No se pudo calcular la clasificación", {
+          description: result.error,
+        });
+        return;
+      }
+      router.refresh();
+      toast.success("Clasificación calculada", {
+        description: [
+          category?.name ?? "Esta categoría",
+          `${result.seedCount} puesto${result.seedCount === 1 ? "" : "s"} definido${result.seedCount === 1 ? "" : "s"}`,
+          result.warnings[0],
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
+      if (result.warnings.length > 1) {
+        for (const warning of result.warnings.slice(1, 4)) {
+          toast.message(warning);
+        }
+      }
+    });
+  }
 
   function handleActualizar() {
     startTransition(async () => {
@@ -202,6 +302,29 @@ export function FinalPhasePanel({
                 categoryName={category?.name}
                 phase="final"
               />
+              <ActualizarHoverHint
+                heading={`Calcula quién clasifica en ${category?.name ?? "esta categoría"}`}
+                effects={[
+                  "Recalcula 1.ª y 2.ª de cada zona de 3 con los resultados cargados",
+                  "Completa los nombres en los cuartos de esta categoría",
+                  "No cambia día, horario ni cancha",
+                ]}
+                note="El Calcular de arriba recorre todas las categorías."
+              >
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={handleCalcular}
+                  disabled={isCalculating}
+                >
+                  <Calculator
+                    className={`size-4 ${isCalculating ? "animate-pulse" : ""}`}
+                  />
+                  Calcular
+                </Button>
+              </ActualizarHoverHint>
               <ActualizarConfirmButton
                 pending={isPending}
                 disabled={isManual}
@@ -216,7 +339,8 @@ export function FinalPhasePanel({
                   isManual
                     ? [
                         "En Manual no se regeneran los cruces",
-                        "Podés cambiar el orden de los partidos con las flechas",
+                        "Tocá día, horario o cancha para elegir las tres cosas juntas en la regla de slots",
+                        "Las flechas intercambian el horario con el partido de arriba o abajo, sin mover la fila",
                       ]
                     : buildActualizarConfirmCopy({
                         phase: "final",
@@ -266,9 +390,12 @@ export function FinalPhasePanel({
             </p>
             <p>
               <span className="font-medium text-foreground">Actualizar</span>{" "}
-              asigna día, horario y cancha en el último día del torneo. En Modo
-              Manual podés cambiar el orden de los partidos. Los resultados se
-              guardan solos.
+              asigna día, horario y cancha en el último día del torneo. En
+              Modo Manual tocá día, horario o cancha para elegir las tres
+              cosas juntas en la regla de slots. El partido se queda en su
+              fila: no se reordena por horario. Las flechas solo intercambian
+              el horario con el de arriba o abajo. Los resultados se guardan
+              solos.
               {!hasFixture ? " Todavía no hay un armado guardado." : null}
             </p>
           </AyudaButton>
@@ -292,7 +419,6 @@ export function FinalPhasePanel({
               label={round.label}
               crossings={orderedCrossings(round.crossings)}
               matchFormat={settings.matchFormat}
-              courtCount={config?.courtCount || courtCount}
               dayOptions={dayOptions}
               showOfficialId={settings.zone4Advancers === 3}
               scheduleByOfficialId={scheduleByOfficialId}
@@ -301,12 +427,38 @@ export function FinalPhasePanel({
               scoresReadOnly={readOnly}
               resolveLabel={resolveLabel}
               canReorder={canReorder}
+              canPickSlot={canEditSchedule}
               onMove={(officialId, direction) =>
                 moveCrossing(round.crossings, officialId, direction)
               }
+              onPickSchedule={setChangeScheduleOfficialId}
             />
           ))
         )}
+        <ChangeZoneTimeDialog
+          open={Boolean(changeScheduleCrossing)}
+          onOpenChange={(open) => {
+            if (!open) setChangeScheduleOfficialId(null);
+          }}
+          zoneLabel={
+            changeScheduleCrossing
+              ? `${changeScheduleCrossing.roundLabel} · n° ${changeScheduleCrossing.crossing.id}`
+              : "este partido"
+          }
+          description={
+            changeScheduleCrossing
+              ? `Partido de ${changeScheduleCrossing.roundLabel} · n° ${changeScheduleCrossing.crossing.id}. Tocá un slot: se cargan día, horario y cancha juntas. Verde es libre; naranja está ocupado.`
+              : undefined
+          }
+          rules={timePickerRules}
+          categories={timePickerCategories}
+          selectedSlot={selectedScheduleSlot}
+          onSelect={(slot) => {
+            if (changeScheduleOfficialId == null) return;
+            updateSchedule(changeScheduleOfficialId, slot);
+            setChangeScheduleOfficialId(null);
+          }}
+        />
       </CardContent>
     </Card>
   );

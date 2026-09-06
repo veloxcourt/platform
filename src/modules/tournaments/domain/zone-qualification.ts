@@ -76,6 +76,18 @@ export function pairDisplayName(pair: PairListItem): string {
   return formatAbbreviatedPairLabel(pair.player1.name, pair.player2?.name);
 }
 
+export function qualificationFromCategory(category: {
+  zonesFixture?: ZonesFixturePersisted | null;
+  phases: { zones: { matchFormat: MatchFormat } };
+  zone4Advancers: 2 | 3;
+}): ZoneQualificationPersisted {
+  return buildZoneQualification({
+    fixture: category.zonesFixture,
+    format: category.phases.zones.matchFormat,
+    zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
+  });
+}
+
 export function buildZoneQualification({
   fixture,
   format,
@@ -109,6 +121,7 @@ export function buildZoneQualification({
       })),
       format,
       zone4Advancers,
+      tieBreaks: zone.tieBreaks,
     });
     const letter = zoneLetterFromLabel(zone.label);
     zones.push({

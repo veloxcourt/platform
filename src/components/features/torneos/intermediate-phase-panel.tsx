@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Calculator, GitBranch } from "lucide-react";
 import { toast } from "sonner";
@@ -31,7 +31,9 @@ import type {
   TournamentCategoryItem,
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
+import { ChangeZoneTimeDialog } from "./change-zone-time-dialog";
 import { IntermediateRoundCard } from "./intermediate-round-card";
+import { buildKnockoutSlotRules } from "./knockout-match-rule-model";
 import { ActualizarConfirmButton } from "./actualizar-confirm-button";
 import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import { useFixtureEditMode } from "./fixture-edit-mode-context";
@@ -44,6 +46,7 @@ import {
 import { categoryKnockoutNameResolver } from "./knockout-name-resolver";
 import { useKnockoutFixtureReorder } from "./use-knockout-fixture-reorder";
 import { useTournamentReadOnly } from "./tournament-mode-context";
+import { zoneRuleGridCategories } from "./zones-match-rule-model";
 
 export function IntermediatePhasePanel({
   clubSlug,
@@ -112,13 +115,19 @@ export function IntermediatePhasePanel({
     return map;
   }, [config?.playDays]);
 
+  const [changeScheduleOfficialId, setChangeScheduleOfficialId] = useState<
+    number | null
+  >(null);
   const {
+    draft,
     scheduleByOfficialId,
     scoresByOfficialId,
     canReorder,
+    canEditSchedule,
     orderedCrossings,
     moveCrossing,
     updateScore,
+    updateSchedule,
     flushPersist,
   } = useKnockoutFixtureReorder({
       clubSlug,
@@ -156,6 +165,59 @@ export function IntermediatePhasePanel({
       }),
     );
   }, [category, config, pairs]);
+
+  const changeScheduleCrossing =
+    changeScheduleOfficialId == null
+      ? null
+      : rounds
+          .flatMap((round) =>
+            round.crossings.map((crossing) => ({
+              roundLabel: round.label,
+              crossing,
+            })),
+          )
+          .find((item) => item.crossing.id === changeScheduleOfficialId) ??
+        null;
+  const selectedSchedule =
+    changeScheduleOfficialId == null
+      ? null
+      : scheduleByOfficialId.get(changeScheduleOfficialId);
+  const selectedScheduleSlot = selectedSchedule
+    ? {
+        playDate: selectedSchedule.playDate ?? "",
+        startTime: selectedSchedule.startTime ?? "",
+        courtIndex: selectedSchedule.courtIndex,
+      }
+    : null;
+  const timePickerRules = useMemo(() => {
+    if (!config) return [];
+    return buildKnockoutSlotRules({
+      phase: "intermediate",
+      categories,
+      config,
+      courtCount: config.courtCount || courtCount,
+      liveFixtureByCategory: { [categoryId]: draft },
+      exclude:
+        changeScheduleOfficialId == null
+          ? null
+          : { categoryId, officialId: changeScheduleOfficialId },
+    });
+  }, [
+    categories,
+    categoryId,
+    changeScheduleOfficialId,
+    config,
+    courtCount,
+    draft,
+  ]);
+  const timePickerCategories = useMemo(
+    () => zoneRuleGridCategories(categories),
+    [categories],
+  );
+
+  useEffect(() => {
+    setChangeScheduleOfficialId(null);
+  }, [categoryId]);
 
   function handleCalcular() {
     startCalculate(async () => {
@@ -276,7 +338,8 @@ export function IntermediatePhasePanel({
                   isManual
                     ? [
                         "En Manual no se regeneran los cruces",
-                        "Podés cambiar el orden de los partidos con las flechas",
+                        "Tocá día, horario o cancha para elegir las tres cosas juntas en la regla de slots",
+                        "Las flechas intercambian el horario con el partido de arriba o abajo, sin mover la fila",
                       ]
                     : buildActualizarConfirmCopy({
                         phase: "intermediate",
@@ -331,8 +394,11 @@ export function IntermediatePhasePanel({
             <p>
               <span className="font-medium text-foreground">Actualizar</span>{" "}
               asigna día, horario y cancha según las reglas de intermedia. En
-              Modo Manual podés cambiar el orden de los partidos. Los
-              resultados se guardan solos.
+              Modo Manual tocá día, horario o cancha para elegir las tres
+              cosas juntas en la regla de slots. El partido se queda en su
+              fila: no se reordena por horario. Las flechas solo intercambian
+              el horario con el de arriba o abajo. Los resultados se guardan
+              solos.
               {!hasFixture ? " Todavía no hay un armado guardado." : null}
             </p>
           </AyudaButton>
@@ -356,7 +422,6 @@ export function IntermediatePhasePanel({
               label={round.label}
               crossings={orderedCrossings(round.crossings)}
               matchFormat={settings.matchFormat}
-              courtCount={config?.courtCount || courtCount}
               dayOptions={dayOptions}
               showOfficialId={settings.zone4Advancers === 3}
               scheduleByOfficialId={scheduleByOfficialId}
@@ -365,12 +430,38 @@ export function IntermediatePhasePanel({
               scoresReadOnly={readOnly}
               resolveLabel={resolveLabel}
               canReorder={canReorder}
+              canPickSlot={canEditSchedule}
               onMove={(officialId, direction) =>
                 moveCrossing(round.crossings, officialId, direction)
               }
+              onPickSchedule={setChangeScheduleOfficialId}
             />
           ))
         )}
+        <ChangeZoneTimeDialog
+          open={Boolean(changeScheduleCrossing)}
+          onOpenChange={(open) => {
+            if (!open) setChangeScheduleOfficialId(null);
+          }}
+          zoneLabel={
+            changeScheduleCrossing
+              ? `${changeScheduleCrossing.roundLabel} · n° ${changeScheduleCrossing.crossing.id}`
+              : "este partido"
+          }
+          description={
+            changeScheduleCrossing
+              ? `Partido de ${changeScheduleCrossing.roundLabel} · n° ${changeScheduleCrossing.crossing.id}. Tocá un slot: se cargan día, horario y cancha juntas. Verde es libre; naranja está ocupado.`
+              : undefined
+          }
+          rules={timePickerRules}
+          categories={timePickerCategories}
+          selectedSlot={selectedScheduleSlot}
+          onSelect={(slot) => {
+            if (changeScheduleOfficialId == null) return;
+            updateSchedule(changeScheduleOfficialId, slot);
+            setChangeScheduleOfficialId(null);
+          }}
+        />
       </CardContent>
     </Card>
   );

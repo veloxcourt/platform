@@ -2,12 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireClubModuleAccess } from "@/lib/auth/access";
+import {
+  AuthenticationError,
+  AuthorizationError,
+  requireClubModuleAccess,
+} from "@/lib/auth/access";
+import { toModuleKeys } from "@/lib/auth/permissions";
+import { prisma } from "@/lib/prisma";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import {
   createSupabaseAdminClient,
   PRODUCT_PHOTOS_BUCKET,
 } from "@/lib/supabase/admin";
+import { exportCatalog } from "@/modules/catalog/application/export-catalog";
 import {
   productSchema,
   productTypeSchema,
@@ -222,4 +229,86 @@ export async function sellProductAction(
     revalidatePath(`/${clubSlug}/jugadores`);
   }
   return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };
+}
+
+export type ExportableClub = { slug: string; name: string };
+
+export async function listExportableClubsAction(
+  sourceClubSlug: string,
+): Promise<ExportableClub[]> {
+  const access = await requireClubModuleAccess(sourceClubSlug, "catalogo");
+  const memberships = await prisma.membership.findMany({
+    where: {
+      userId: access.user.id,
+      club: { slug: { not: sourceClubSlug } },
+      OR: [{ role: "OWNER" }, { role: "CLUB_ADMIN", staffStatus: "ACTIVE" }],
+    },
+    include: {
+      club: { select: { slug: true, name: true } },
+      userType: { select: { privileges: true, active: true } },
+    },
+    orderBy: { club: { name: "asc" } },
+  });
+
+  const bySlug = new Map<string, ExportableClub>();
+  for (const membership of memberships) {
+    const privileges =
+      membership.userType?.active === false
+        ? []
+        : membership.userType
+          ? toModuleKeys(membership.userType.privileges)
+          : toModuleKeys(membership.allowedModules);
+    const canEditCatalog =
+      membership.role === "OWNER" || privileges.includes("catalogo");
+    if (!canEditCatalog) continue;
+    if (!bySlug.has(membership.club.slug)) {
+      bySlug.set(membership.club.slug, {
+        slug: membership.club.slug,
+        name: membership.club.name,
+      });
+    }
+  }
+  return [...bySlug.values()];
+}
+
+export async function exportCatalogAction(
+  sourceClubSlug: string,
+  destClubSlug: string,
+): Promise<
+  | {
+      ok: true;
+      destName: string;
+      productsCreated: number;
+      productsSkipped: number;
+      typesCreated: number;
+      photosCopied: number;
+    }
+  | { ok: false; error: string }
+> {
+  if (!destClubSlug || destClubSlug === sourceClubSlug) {
+    return { ok: false, error: "Elegí un club distinto al actual." };
+  }
+
+  try {
+    const source = await requireClubModuleAccess(sourceClubSlug, "catalogo");
+    const dest = await requireClubModuleAccess(destClubSlug, "catalogo");
+    const result = await exportCatalog({
+      sourceClubId: source.club.id,
+      destClubId: dest.club.id,
+      createdById: source.user.id,
+    });
+    revalidate(destClubSlug);
+    return { ok: true, destName: dest.club.name, ...result };
+  } catch (error) {
+    if (error instanceof AuthenticationError) {
+      return { ok: false, error: "Debes iniciar sesión." };
+    }
+    if (error instanceof AuthorizationError) {
+      return {
+        ok: false,
+        error: "No tenés permiso para editar el catálogo de ese club.",
+      };
+    }
+    throw error;
+  }
 }

@@ -35,7 +35,7 @@ export function LlavePdfMenu({
         disabled={disabled}
         align={align}
         onAction={(action) =>
-          runLlavePngAction({ action, tournamentName, draws })
+          runLlavePngAction({ action, tournamentName, draws, club })
         }
       />
     </div>

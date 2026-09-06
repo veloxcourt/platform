@@ -159,6 +159,30 @@ function slugifyName(name: string): string {
     .slice(0, 50);
 }
 
+function fitCentered(doc: jsPDF, text: string, maxWidth: number): string {
+  if (!text) return "";
+  if (doc.getTextWidth(text) <= maxWidth) return text;
+  let value = text;
+  while (value.length > 1 && doc.getTextWidth(`${value}…`) > maxWidth) {
+    value = value.slice(0, -1);
+  }
+  return `${value}…`;
+}
+
+function fitCanvas(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string {
+  if (!text) return "";
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let value = text;
+  while (value.length > 1 && ctx.measureText(`${value}…`).width > maxWidth) {
+    value = value.slice(0, -1);
+  }
+  return `${value}…`;
+}
+
 function uniqueFilename(name: string, ext: "pdf" | "png" = "pdf"): string {
   const now = new Date();
   const stamp = [
@@ -207,46 +231,99 @@ async function loadLogoData(url: string): Promise<LogoImage | null> {
   }
 }
 
-function drawClubBlock(
-  doc: jsPDF,
-  club: LlavePdfClub,
-  logo: LogoImage | null,
-  pageW: number,
-  margin: number,
-) {
-  const right = pageW - margin;
-  const logoSize = 16;
-  let textRight = right;
-  if (logo) {
-    try {
-      doc.addImage(logo.data, logo.format, right - logoSize, 5, logoSize, logoSize);
-      textRight = right - logoSize - 2.5;
-    } catch {
-      textRight = right;
-    }
+async function loadLogoImage(url: string): Promise<HTMLImageElement | null> {
+  const logo = await loadLogoData(url);
+  if (!logo) return null;
+  const img = new Image();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("No se pudo leer el logo"));
+      img.src = logo.data;
+    });
+    return img;
+  } catch {
+    return null;
   }
+}
 
-  const name = club.name.trim();
+function drawContainedImage(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  x: number,
+  y: number,
+  box: number,
+) {
+  const ratio = image.naturalWidth / image.naturalHeight || 1;
+  let width = box;
+  let height = box;
+  if (ratio > 1) height = box / ratio;
+  else width = box * ratio;
+  ctx.drawImage(image, x + (box - width) / 2, y + (box - height) / 2, width, height);
+}
+
+function drawCenteredLogo(
+  doc: jsPDF,
+  logo: LogoImage,
+  pageW: number,
+  size: number,
+  y: number,
+) {
+  try {
+    doc.addImage(logo.data, logo.format, pageW / 2 - size / 2, y, size, size);
+  } catch {
+    /* logo opcional */
+  }
+}
+
+function clubAddressLines(club: LlavePdfClub): string[] {
   const locality = club.locality?.trim() ?? "";
   const address = club.address?.trim() ?? "";
-  if (name) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(24, 24, 27);
-    doc.text(name, textRight, 9.2, { align: "right", maxWidth: 78 });
-  }
+  if (!address && !locality) return [];
+  const lines = [`Dirección: ${address || locality}`];
+  if (address && locality) lines.push(locality);
+  return lines;
+}
+
+function drawComplejoBadge(
+  doc: jsPDF,
+  label: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+) {
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  const text = fitCentered(doc, label, maxWidth - 7);
+  const textW = doc.getTextWidth(text);
+  const w = Math.min(maxWidth, textW + 7);
+  const h = 8;
+  doc.setFillColor(13, 148, 136);
+  doc.setDrawColor(15, 118, 110);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(x, y, w, h, 1.6, 1.6, "FD");
+  doc.setTextColor(255, 255, 255);
+  doc.text(text, x + w / 2, y + 5.3, { align: "center" });
+}
+
+function drawClubMeta(
+  doc: jsPDF,
+  club: LlavePdfClub,
+  pageW: number,
+  margin: number,
+  maxWidth: number,
+) {
+  const lines = clubAddressLines(club);
+  if (lines.length === 0) return;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.setTextColor(113, 113, 122);
-  if (locality) {
-    doc.text(locality, textRight, 13.6, { align: "right", maxWidth: 78 });
-  }
-  if (address) {
-    doc.text(address, textRight, locality ? 17.4 : 13.6, {
+  doc.setFontSize(8);
+  doc.setTextColor(82, 82, 91);
+  lines.forEach((line, index) => {
+    doc.text(line, pageW - margin, 8 + index * 4, {
       align: "right",
-      maxWidth: 78,
+      maxWidth,
     });
-  }
+  });
 }
 
 function drawPage(
@@ -259,39 +336,45 @@ function drawPage(
   pageH: number,
 ) {
   const margin = 10;
-  const headerH = 24;
+  const clubName = club?.name.trim() ?? "";
+  const logoSize = logo ? 16 : 0;
+  const headerH = logo ? 36 : 24;
+  const footerH = 8;
   const laid = layout(draw.tree, 0, 0, 0, draw);
   const availW = pageW - margin * 2;
-  const availH = pageH - margin - headerH - 8;
+  const availH = pageH - margin - headerH - footerH;
   const scale = Math.min(1, availW / Math.max(laid.w, 1), availH / Math.max(laid.h, 1));
   const originX = margin + (availW - laid.w * scale) / 2;
   const originY = headerH + (availH - laid.h * scale) / 2;
+  const colW = pageW / 2 - logoSize / 2 - margin - 3;
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
-  doc.setTextColor(24, 24, 27);
-  doc.text(tournamentName || "Llave", margin, 9);
+  if (logo) {
+    drawCenteredLogo(doc, logo, pageW, logoSize, 4);
+  }
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
-  doc.setTextColor(113, 113, 122);
-  doc.text(
-    `${draw.categoryName} · ${draw.regulation} · ${draw.pairCount} pareja${draw.pairCount === 1 ? "" : "s"}`,
-    margin,
-    14.5,
-  );
-
-  doc.setFillColor(254, 243, 199);
-  doc.rect(margin, 17.4, 3.2, 3.2, "F");
-  doc.setFillColor(237, 233, 254);
-  doc.rect(margin + 28, 17.4, 3.2, 3.2, "F");
-  doc.setFontSize(7.5);
-  doc.text("Intermedia", margin + 5, 20);
-  doc.text("Final", margin + 33.2, 20);
+  if (clubName) {
+    drawComplejoBadge(doc, `Complejo: ${clubName}`, margin, 5.2, colW);
+  }
 
   if (club) {
-    drawClubBlock(doc, club, logo, pageW, margin);
+    drawClubMeta(doc, club, pageW, margin, colW);
   }
+
+  const titleY = logo ? 26 : 14;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(24, 24, 27);
+  doc.text(draw.categoryName || "Llave", pageW / 2, titleY, { align: "center" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(113, 113, 122);
+  doc.text(
+    `${draw.regulation} · ${draw.pairCount} pareja${draw.pairCount === 1 ? "" : "s"}`,
+    pageW / 2,
+    titleY + 5,
+    { align: "center" },
+  );
 
   for (const elbow of laid.elbows) {
     const xTop = originX + elbow.xTop * scale;
@@ -319,19 +402,24 @@ function drawPage(
     if (box.kind === "leaf") {
       doc.setFont("helvetica", box.bye ? "normal" : "bold");
       doc.setFontSize(Math.max(6, 8 * scale));
-      doc.text(box.title, x + 1.4, y + h / 2 + 0.8, {
-        maxWidth: w - 2.4,
+      doc.text(fitCentered(doc, box.title, w - 2.8), x + w / 2, y + h / 2 + 0.8, {
+        align: "center",
       });
       continue;
+    }
+    const number = box.subtitle ?? "";
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(Math.max(5.5, 6.4 * scale));
+    doc.setTextColor(24, 24, 27);
+    if (number) {
+      doc.text(number, x + w - 1.4, y + 3, { align: "right" });
     }
     doc.setFont("helvetica", "normal");
     doc.setFontSize(Math.max(5.5, 6.5 * scale));
     doc.setTextColor(82, 82, 91);
-    doc.text(box.title, x + 1.4, y + 3);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(Math.max(6, 7.5 * scale));
-    doc.setTextColor(24, 24, 27);
-    doc.text(box.subtitle ?? "", x + 1.4, y + 6.4);
+    doc.text(fitCentered(doc, box.title, w - 2.8), x + w / 2, y + 5.4, {
+      align: "center",
+    });
     doc.setFont("helvetica", "normal");
     doc.setFontSize(Math.max(5.5, 6.4 * scale));
     doc.setTextColor(
@@ -339,21 +427,19 @@ function drawPage(
       box.horario && box.horario !== "Sin horario" ? 24 : 113,
       box.horario && box.horario !== "Sin horario" ? 27 : 122,
     );
-    doc.text(box.horario ?? "Sin horario", x + 1.4, y + 9.6, {
-      maxWidth: w - 2.4,
+    doc.text(fitCentered(doc, box.horario ?? "Sin horario", w - 2.4), x + w / 2, y + 8.8, {
+      align: "center",
     });
   }
 
+  const footerMid = pageH - footerH / 2 + 1.1;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(113, 113, 122);
-  doc.text(`Llave  ·  ${tournamentName}`, margin, pageH - 5);
-  doc.text(
-    String(doc.getNumberOfPages()),
-    pageW - margin,
-    pageH - 5,
-    { align: "right" },
-  );
+  doc.setFontSize(7);
+  doc.setTextColor(161, 161, 170);
+  doc.text(tournamentName || "Llave", pageW / 2, footerMid, { align: "center" });
+  doc.text(String(doc.getNumberOfPages()), pageW - margin, footerMid, {
+    align: "right",
+  });
 }
 
 async function buildLlavePdf(
@@ -375,10 +461,13 @@ async function buildLlavePdf(
     drawPage(doc, tournamentName, draw, club, logo, pageW, pageH);
   });
 
-  const first = draws[0]?.categoryName ?? "";
+  const fileLabel =
+    draws.length > 1
+      ? `${tournamentName}-llaves`
+      : `${tournamentName}-${draws[0]?.categoryName ?? ""}`;
   return {
     blob: doc.output("blob"),
-    filename: uniqueFilename(`${tournamentName}-${first}`),
+    filename: uniqueFilename(fileLabel),
   };
 }
 
@@ -436,14 +525,19 @@ function rgb(color: [number, number, number]): string {
   return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
 }
 
-function buildLlavePng(
+async function buildLlavePng(
   tournamentName: string,
   draws: LlavePdfDraw[],
+  club?: LlavePdfClub,
 ): Promise<{ blob: Blob; filename: string }> {
   const px = 5;
   const pad = 28;
-  const headerH = 48;
+  const clubName = club?.name.trim() ?? "";
+  const logo = club?.logoUrl ? await loadLogoImage(club.logoUrl) : null;
+  const logoSize = logo ? 52 : 0;
+  const footerH = 22;
   const gap = 22;
+  const sectionTitleH = 44;
   const laidDraws = draws
     .filter((draw) => draw.tree)
     .map((draw) => ({
@@ -453,13 +547,16 @@ function buildLlavePng(
   if (laidDraws.length === 0) {
     return Promise.reject(new Error("No hay llave para exportar"));
   }
+  const multi = laidDraws.length > 1;
+  const headerH = multi ? (logo ? 72 : 36) : logo ? 110 : 64;
   const contentW = Math.max(...laidDraws.map((item) => item.laid.w), 40);
   const contentH = laidDraws.reduce(
-    (sum, item) => sum + item.laid.h + gap,
+    (sum, item) =>
+      sum + item.laid.h + gap + (multi ? sectionTitleH : 0),
     0,
   );
   const width = pad * 2 + contentW * px;
-  const height = pad * 2 + headerH + contentH * px;
+  const height = pad * 2 + headerH + contentH * px + footerH;
   const canvas = document.createElement("canvas");
   const scale = 2;
   canvas.width = Math.round(width * scale);
@@ -469,30 +566,73 @@ function buildLlavePng(
   ctx.scale(scale, scale);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = "#18181b";
-  ctx.font = "bold 20px Helvetica, Arial, sans-serif";
-  ctx.fillText(tournamentName || "Llave", pad, pad + 16);
-  ctx.fillStyle = "#71717a";
-  ctx.font = "12px Helvetica, Arial, sans-serif";
   const first = laidDraws[0]!.draw;
-  ctx.fillText(
-    `${first.categoryName} · ${first.regulation} · ${first.pairCount} pareja${first.pairCount === 1 ? "" : "s"}`,
-    pad,
-    pad + 34,
-  );
+  const colW = logo ? width / 2 - logoSize / 2 - 20 : width / 2 - pad;
+  if (logo) {
+    drawContainedImage(ctx, logo, width / 2 - logoSize / 2, pad, logoSize);
+  }
+  if (clubName) {
+    const label = `Complejo: ${clubName}`;
+    ctx.font = "bold 17px Helvetica, Arial, sans-serif";
+    const textW = Math.min(ctx.measureText(label).width, colW - 24);
+    const badgeW = textW + 28;
+    const badgeH = 36;
+    const badgeY = pad + 4;
+    ctx.beginPath();
+    ctx.roundRect(pad, badgeY, badgeW, badgeH, 9);
+    ctx.fillStyle = "#0d9488";
+    ctx.strokeStyle = "#0f766e";
+    ctx.lineWidth = 1.5;
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(fitCanvas(ctx, label, colW - 24), pad + badgeW / 2, badgeY + badgeH / 2);
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
+  }
+  ctx.fillStyle = "#52525b";
+  ctx.font = "13px Helvetica, Arial, sans-serif";
+  const addressLines = club ? clubAddressLines(club) : [];
+  if (addressLines.length > 0) {
+    ctx.textAlign = "right";
+    addressLines.forEach((line, index) => {
+      ctx.fillText(line, width - pad, pad + 22 + index * 16, colW);
+    });
+  }
+  ctx.textAlign = "left";
+  if (!multi) {
+    const titleY = pad + logoSize + (logo ? 28 : 20);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#18181b";
+    ctx.font = "bold 26px Helvetica, Arial, sans-serif";
+    ctx.fillText(first.categoryName || "Llave", width / 2, titleY);
+    ctx.fillStyle = "#71717a";
+    ctx.font = "13px Helvetica, Arial, sans-serif";
+    ctx.fillText(
+      `${first.regulation} · ${first.pairCount} pareja${first.pairCount === 1 ? "" : "s"}`,
+      width / 2,
+      titleY + 20,
+    );
+    ctx.textAlign = "left";
+  }
 
   let originY = pad + headerH;
   const originX = pad;
   for (const item of laidDraws) {
-    if (laidDraws.length > 1) {
+    if (multi) {
       ctx.fillStyle = "#18181b";
-      ctx.font = "bold 13px Helvetica, Arial, sans-serif";
+      ctx.font = "bold 22px Helvetica, Arial, sans-serif";
+      ctx.fillText(item.draw.categoryName || "Llave", originX, originY + 16);
+      ctx.fillStyle = "#71717a";
+      ctx.font = "12px Helvetica, Arial, sans-serif";
       ctx.fillText(
-        `${item.draw.categoryName} · ${item.draw.regulation}`,
+        `${item.draw.regulation} · ${item.draw.pairCount} pareja${item.draw.pairCount === 1 ? "" : "s"}`,
         originX,
-        originY + 4,
+        originY + 34,
       );
-      originY += 16;
+      originY += sectionTitleH;
     }
     ctx.strokeStyle = "#a1a1aa";
     ctx.lineWidth = 1;
@@ -523,31 +663,50 @@ function buildLlavePng(
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = "#18181b";
+      ctx.textAlign = "center";
       if (box.kind === "leaf") {
         ctx.font = `${box.bye ? "normal" : "bold"} 11px Helvetica, Arial, sans-serif`;
-        ctx.fillText(box.title, x + 6, y + h / 2 + 4, w - 10);
+        ctx.fillText(fitCanvas(ctx, box.title, w - 10), x + w / 2, y + h / 2 + 4);
+        ctx.textAlign = "left";
         continue;
       }
+      const number = box.subtitle ?? "";
+      ctx.font = "bold 11px Helvetica, Arial, sans-serif";
+      ctx.fillStyle = "#18181b";
+      ctx.textAlign = "right";
+      if (number) ctx.fillText(number, x + w - 6, y + 14, w - 10);
+      ctx.textAlign = "center";
       ctx.font = "10px Helvetica, Arial, sans-serif";
       ctx.fillStyle = "#52525b";
-      ctx.fillText(box.title, x + 6, y + 12, w - 10);
-      ctx.fillStyle = "#18181b";
-      ctx.font = "bold 11px Helvetica, Arial, sans-serif";
-      ctx.fillText(box.subtitle ?? "", x + 6, y + 26, w - 10);
+      ctx.fillText(box.title, x + w / 2, y + 28, w - 12);
       ctx.font = "10px Helvetica, Arial, sans-serif";
       ctx.fillStyle =
         box.horario && box.horario !== "Sin horario" ? "#18181b" : "#71717a";
-      ctx.fillText(box.horario ?? "Sin horario", x + 6, y + 40, w - 10);
+      ctx.fillText(box.horario ?? "Sin horario", x + w / 2, y + 44, w - 10);
+      ctx.textAlign = "left";
     }
     originY += item.laid.h * px + gap;
   }
+
+  ctx.fillStyle = "#a1a1aa";
+  ctx.font = "11px Helvetica, Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(tournamentName || "Llave", width / 2, height - (pad + footerH) / 2);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       blob
         ? resolve({
             blob,
-            filename: uniqueFilename(`${tournamentName}-${first.categoryName}`, "png"),
+            filename: uniqueFilename(
+              laidDraws.length > 1
+                ? `${tournamentName}-llaves`
+                : `${tournamentName}-${first.categoryName}`,
+              "png",
+            ),
           })
         : reject(new Error("No se pudo crear la imagen"));
     }, "image/png");
@@ -558,15 +717,17 @@ export async function runLlavePngAction({
   action,
   tournamentName,
   draws,
+  club,
 }: {
   action: GrillaPdfAction;
   tournamentName: string;
   draws: LlavePdfDraw[];
+  club?: LlavePdfClub;
 }) {
   if (draws.length === 0) {
     throw new Error("No hay llave para exportar");
   }
-  const png = await buildLlavePng(tournamentName, draws);
+  const png = await buildLlavePng(tournamentName, draws, club);
   if (action === "open") {
     openPngBlob(png.blob);
     return;

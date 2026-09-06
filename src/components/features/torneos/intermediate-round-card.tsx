@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { MatchFormat } from "@/modules/tournaments/domain/config-schema";
 import { MATCH_FORMAT_LABELS } from "@/modules/tournaments/domain/config-schema";
@@ -13,11 +12,6 @@ import {
   type ZoneResultColumn,
 } from "@/modules/tournaments/domain/zone-bracket";
 import { ScoreTapPicker } from "./score-tap-picker";
-
-const SELECT_CLASS =
-  "h-8 w-full min-w-0 rounded-lg border border-input bg-background px-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
-
-const COURT_SELECT_CLASS = `${SELECT_CLASS} text-center [text-align-last:center]`;
 
 const SCORE_CLASS =
   "h-8 w-10 select-none rounded-lg border border-input bg-muted/40 px-1 text-center text-xs tabular-nums outline-none disabled:opacity-60";
@@ -67,16 +61,54 @@ export type IntermediateCrossingSchedule = {
   noRestGap?: boolean;
 };
 
+function ScheduleSlotCell({
+  value,
+  align = "left",
+  disabled,
+  title,
+  ariaLabel,
+  onPick,
+}: {
+  value: string;
+  align?: "left" | "center";
+  disabled?: boolean;
+  title?: string;
+  ariaLabel: string;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "h-8 w-full min-w-0 rounded-lg border border-input bg-background px-1.5 text-xs",
+        align === "center" && "text-center tabular-nums",
+        !disabled && "cursor-pointer hover:bg-muted",
+        disabled && "cursor-default opacity-80",
+      )}
+      disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
+      onClick={() => {
+        if (disabled) return;
+        onPick();
+      }}
+    >
+      {value}
+    </button>
+  );
+}
+
 export function IntermediateRoundCard({
   label,
   crossings,
   matchFormat,
-  courtCount,
   dayOptions,
   showOfficialId,
   scheduleByOfficialId,
   canReorder = false,
+  canPickSlot = false,
   onMove,
+  onPickSchedule,
   scoresByOfficialId,
   onScoreChange,
   scoresReadOnly = false,
@@ -85,12 +117,13 @@ export function IntermediateRoundCard({
   label: string;
   crossings: FapCrossing[];
   matchFormat: MatchFormat;
-  courtCount: number;
   dayOptions: { value: string; label: string }[];
   showOfficialId: boolean;
   scheduleByOfficialId?: Map<number, IntermediateCrossingSchedule>;
   canReorder?: boolean;
+  canPickSlot?: boolean;
   onMove?: (officialId: number, direction: "up" | "down") => void;
+  onPickSchedule?: (officialId: number) => void;
   scoresByOfficialId?: Map<number, Record<string, string>>;
   onScoreChange?: (officialId: number, key: string, value: string) => void;
   scoresReadOnly?: boolean;
@@ -136,7 +169,12 @@ export function IntermediateRoundCard({
           {crossings.length} partido
           {crossings.length === 1 ? "" : "s"} · {MATCH_FORMAT_LABELS[matchFormat]}
           {hasUnscheduled ? " · horario incompleto" : null}
-          {canReorder ? " · flechas: cambiar el orden de juego" : null}
+          {canReorder
+            ? " · flechas: intercambiar horario con el de arriba o abajo"
+            : null}
+          {canPickSlot
+            ? " · día, horario y cancha: regla de slots (el partido no cambia de fila)"
+            : null}
         </p>
       </div>
 
@@ -226,48 +264,52 @@ export function IntermediateRoundCard({
                   </div>
                 </td>
                 <td className="py-1.5 pr-1.5 align-middle">
-                  <select
-                    className={SELECT_CLASS}
-                    value={schedule?.playDate ?? ""}
-                    disabled
-                    aria-label={`Día partido ${index + 1}`}
-                  >
-                    <option value="">—</option>
-                    {dayOptions.map((day) => (
-                      <option key={day.value} value={day.value}>
-                        {day.label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="py-1.5 pr-1.5 align-middle">
-                  <Input
-                    value={schedule?.startTime ?? ""}
-                    placeholder="—"
-                    className="h-8 w-full min-w-0 px-1.5 text-center text-xs tabular-nums"
-                    disabled
-                    readOnly
-                    aria-label={`Horario partido ${index + 1}`}
+                  <ScheduleSlotCell
+                    value={
+                      dayOptions.find((day) => day.value === schedule?.playDate)
+                        ?.label ?? (schedule?.playDate || "—")
+                    }
+                    disabled={!canPickSlot || !onPickSchedule}
+                    title={
+                      canPickSlot
+                        ? "Elegir día, horario y cancha en la regla de slots"
+                        : undefined
+                    }
+                    ariaLabel={`Día partido ${index + 1}`}
+                    onPick={() => onPickSchedule?.(crossing.id)}
                   />
                 </td>
                 <td className="py-1.5 pr-1.5 align-middle">
-                  <select
-                    className={COURT_SELECT_CLASS}
+                  <ScheduleSlotCell
+                    value={schedule?.startTime || "—"}
+                    align="center"
+                    disabled={!canPickSlot || !onPickSchedule}
+                    title={
+                      canPickSlot
+                        ? "Elegir día, horario y cancha en la regla de slots"
+                        : undefined
+                    }
+                    ariaLabel={`Horario partido ${index + 1}`}
+                    onPick={() => onPickSchedule?.(crossing.id)}
+                  />
+                </td>
+                <td className="py-1.5 pr-1.5 align-middle">
+                  <ScheduleSlotCell
                     value={
                       schedule?.courtIndex == null
-                        ? ""
-                        : String(schedule.courtIndex)
+                        ? "—"
+                        : String(schedule.courtIndex + 1)
                     }
-                    disabled
-                    aria-label={`Cancha partido ${index + 1}`}
-                  >
-                    <option value="">—</option>
-                    {Array.from({ length: Math.max(1, courtCount) }, (_, i) => (
-                      <option key={i} value={i}>
-                        {i + 1}
-                      </option>
-                    ))}
-                  </select>
+                    align="center"
+                    disabled={!canPickSlot || !onPickSchedule}
+                    title={
+                      canPickSlot
+                        ? "Elegir día, horario y cancha en la regla de slots"
+                        : undefined
+                    }
+                    ariaLabel={`Cancha partido ${index + 1}`}
+                    onPick={() => onPickSchedule?.(crossing.id)}
+                  />
                 </td>
                 <td className="min-w-0 py-1.5 pr-1.5 align-middle">
                   <CrossingPair

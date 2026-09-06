@@ -7,6 +7,7 @@ import { saveKnockoutFixtureDraftAction } from "@/app/(dashboard)/[clubSlug]/tor
 import type { FapCrossing } from "@/modules/tournaments/domain/fap-llaves";
 import {
   seedKnockoutFixture,
+  setFixtureMatchSchedule,
   swapFixtureMatchSchedules,
   type IntermediateFixturePersisted,
   type KnockoutFixturePhase,
@@ -154,7 +155,31 @@ export function useKnockoutFixtureReorder({
     queueSave(next);
   }
 
+  function updateSchedule(
+    officialId: number,
+    slot: {
+      playDate: string;
+      startTime: string;
+      courtIndex: number;
+      endTime?: string;
+      slotIndex?: number;
+    },
+  ) {
+    if (readOnly || !isManual) return;
+    const next = setFixtureMatchSchedule(currentOrSeededDraft(), officialId, {
+      playDate: slot.playDate,
+      startTime: slot.startTime,
+      courtIndex: slot.courtIndex,
+      endTime: slot.endTime ?? null,
+      slotIndex: slot.slotIndex ?? null,
+      noRestGap: false,
+    });
+    setDraft(next);
+    queueSave(next, true);
+  }
+
   function orderedCrossings(crossings: FapCrossing[]): FapCrossing[] {
+    if (isManual) return [...crossings];
     return [...crossings].sort((left, right) => {
       const bySchedule = comparePlayDaySchedule(
         scheduleByOfficialId.get(left.id) ?? {},
@@ -187,12 +212,15 @@ export function useKnockoutFixtureReorder({
   }
 
   return {
+    draft,
     scheduleByOfficialId,
     scoresByOfficialId,
     canReorder,
+    canEditSchedule: isManual && !readOnly,
     orderedCrossings,
     moveCrossing,
     updateScore,
+    updateSchedule,
     flushPersist,
   };
 }

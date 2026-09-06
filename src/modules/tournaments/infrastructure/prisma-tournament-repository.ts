@@ -1899,9 +1899,17 @@ export class PrismaTournamentRepository implements TournamentRepository {
       // Raw SQL: evita PrismaClientValidationError si Turbopack cachea un client
       // sin el campo zonesFixture en el DMMF.
       await ensureZoneQualificationColumn();
+      const qualification = JSON.stringify(
+        buildZoneQualification({
+          fixture: persisted,
+          format: categoryConfig.phases.zones.matchFormat,
+          zone4Advancers: categoryConfig.zone4Advancers === 2 ? 2 : 3,
+        }),
+      );
       const updated = await tx.$executeRawUnsafe(
-        `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb, "zoneQualification" = NULL WHERE "categoryId" = $2`,
+        `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb, "zoneQualification" = $2::jsonb WHERE "categoryId" = $3`,
         JSON.stringify(persisted),
+        qualification,
         categoryId,
       );
       if (updated === 0) {
@@ -1909,8 +1917,9 @@ export class PrismaTournamentRepository implements TournamentRepository {
           data: { categoryId },
         });
         await tx.$executeRawUnsafe(
-          `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb, "zoneQualification" = NULL WHERE "categoryId" = $2`,
+          `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb, "zoneQualification" = $2::jsonb WHERE "categoryId" = $3`,
           JSON.stringify(persisted),
+          qualification,
           categoryId,
         );
       }
@@ -2293,9 +2302,18 @@ export class PrismaTournamentRepository implements TournamentRepository {
       0,
     );
 
+    const qualification = await this.calculateAndSaveZoneQualification(
+      clubId,
+      tournamentId,
+      categoryId,
+    );
+
     return {
       ok: true,
-      warnings: result.warnings,
+      warnings: [
+        ...result.warnings,
+        ...(qualification.ok ? qualification.warnings : []),
+      ],
       categoryCount: result.categories.length,
       matchCount,
     };
@@ -2377,9 +2395,18 @@ export class PrismaTournamentRepository implements TournamentRepository {
           });
         }
       }
+      await ensureZoneQualificationColumn();
+      const qualification = JSON.stringify(
+        buildZoneQualification({
+          fixture: persisted,
+          format: category.phases.zones.matchFormat,
+          zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
+        }),
+      );
       const updated = await tx.$executeRawUnsafe(
-        `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb WHERE "categoryId" = $2`,
+        `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb, "zoneQualification" = $2::jsonb WHERE "categoryId" = $3`,
         JSON.stringify(persisted),
+        qualification,
         categoryId,
       );
       if (updated === 0) {
@@ -2387,8 +2414,9 @@ export class PrismaTournamentRepository implements TournamentRepository {
           data: { categoryId },
         });
         await tx.$executeRawUnsafe(
-          `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb WHERE "categoryId" = $2`,
+          `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb, "zoneQualification" = $2::jsonb WHERE "categoryId" = $3`,
           JSON.stringify(persisted),
+          qualification,
           categoryId,
         );
       }

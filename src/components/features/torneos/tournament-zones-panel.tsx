@@ -147,6 +147,7 @@ function zonesFromFixture(
       label: zone.label,
       pairIds: zone.pairIds,
       matches,
+      tieBreaks: zone.tieBreaks,
     };
   });
 }
@@ -200,6 +201,7 @@ function zonesDraftPayload(zones: ZoneDraft[]): ZonesFixtureDraftInput {
     zones: zones.map((zone) => ({
       label: zone.label,
       pairIds: zone.pairIds,
+      tieBreaks: zone.tieBreaks,
       matches: zone.matches.map((match) => ({
         kind: match.kind,
         playDate: match.playDate,

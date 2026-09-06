@@ -14,6 +14,7 @@ import {
   Grid3x3,
   Info,
   LayoutList,
+  Medal,
   Scale,
   Settings2,
   Trophy,
@@ -107,13 +108,19 @@ type TournamentTab =
 const REGLA_PARTIDOS_TAB = "regla-partidos";
 const GRILLA_TAB = "grilla";
 const LLAVE_TAB = "llave";
+const PARTIDOS_TAB = "partidos";
 const ZONAS_TOOL_TABS = new Set([REGLA_PARTIDOS_TAB, GRILLA_TAB]);
 const INTERMEDIA_TOOL_TABS = new Set([
   REGLA_PARTIDOS_TAB,
   GRILLA_TAB,
   LLAVE_TAB,
 ]);
-const FINAL_TOOL_TABS = new Set([REGLA_PARTIDOS_TAB, GRILLA_TAB, LLAVE_TAB]);
+const FINAL_TOOL_TABS = new Set([
+  PARTIDOS_TAB,
+  REGLA_PARTIDOS_TAB,
+  GRILLA_TAB,
+  LLAVE_TAB,
+]);
 
 const TABS: {
   id: TournamentTab;
@@ -177,10 +184,8 @@ export function ZonasTournamentDetail({
   const [intermediaSubTab, setIntermediaSubTab] = useState<string>(
     () => tournament.categories[0]?.id ?? REGLA_PARTIDOS_TAB,
   );
-  const [finalSubTab, setFinalSubTab] = useState<string>(
-    () => tournament.categories[0]?.id ?? REGLA_PARTIDOS_TAB,
-  );
-  const [finalLlaveCategoryId, setFinalLlaveCategoryId] = useState<string>(
+  const [finalSubTab, setFinalSubTab] = useState<string>(PARTIDOS_TAB);
+  const [finalCategoryId, setFinalCategoryId] = useState<string>(
     () => tournament.categories[0]?.id ?? "",
   );
   const playDayOptions = useMemo(
@@ -233,23 +238,19 @@ export function ZonasTournamentDetail({
   }, [intermediateCategories, intermediaSubTab]);
 
   useEffect(() => {
-    if (FINAL_TOOL_TABS.has(finalSubTab)) return;
-    const stillValid = tournament.categories.some(
-      (category) => category.id === finalSubTab,
-    );
-    if (!stillValid) {
-      setFinalSubTab(tournament.categories[0]?.id ?? REGLA_PARTIDOS_TAB);
+    if (!FINAL_TOOL_TABS.has(finalSubTab)) {
+      setFinalSubTab(PARTIDOS_TAB);
     }
-  }, [finalSubTab, tournament.categories]);
+  }, [finalSubTab]);
 
   useEffect(() => {
     const stillValid = tournament.categories.some(
-      (category) => category.id === finalLlaveCategoryId,
+      (category) => category.id === finalCategoryId,
     );
     if (!stillValid) {
-      setFinalLlaveCategoryId(tournament.categories[0]?.id ?? "");
+      setFinalCategoryId(tournament.categories[0]?.id ?? "");
     }
-  }, [finalLlaveCategoryId, tournament.categories]);
+  }, [finalCategoryId, tournament.categories]);
 
   useEffect(() => {
     setFixtureEditModes(
@@ -707,62 +708,67 @@ export function ZonasTournamentDetail({
               </div>
             ) : null}
             {activeTab === "fase-final" ? (
-              <div className="mt-3 flex w-full min-w-0 items-center gap-2">
-                <div
-                  className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto"
-                  role="tablist"
-                  aria-label="Categorías de fase final"
-                >
-                  {tournament.categories.map((category) => (
+              <div className="mt-3 flex w-full min-w-0 flex-col gap-2">
+                <div className="flex w-full min-w-0 items-center gap-2">
+                  <div
+                    className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto"
+                    role="tablist"
+                    aria-label="Secciones de fase final"
+                  >
                     <StableTabButton
-                      key={category.id}
-                      active={
-                        finalSubTab === LLAVE_TAB
-                          ? finalLlaveCategoryId === category.id
-                          : finalSubTab === category.id
-                      }
-                      onSelect={() => {
-                        setFinalLlaveCategoryId(category.id);
-                        if (finalSubTab !== LLAVE_TAB) {
-                          setFinalSubTab(category.id);
-                        }
-                      }}
+                      active={finalSubTab === PARTIDOS_TAB}
+                      onSelect={() => setFinalSubTab(PARTIDOS_TAB)}
                     >
-                      {category.name}
+                      <Medal />
+                      Partidos
                     </StableTabButton>
-                  ))}
-                  <StableTabButton
-                    active={finalSubTab === REGLA_PARTIDOS_TAB}
-                    onSelect={() => setFinalSubTab(REGLA_PARTIDOS_TAB)}
-                  >
-                    <Scale />
-                    Regla de Partidos
-                  </StableTabButton>
-                  <StableTabButton
-                    active={finalSubTab === GRILLA_TAB}
-                    onSelect={() => setFinalSubTab(GRILLA_TAB)}
-                  >
-                    <LayoutList />
-                    Grilla
-                  </StableTabButton>
-                  <StableTabButton
-                    active={finalSubTab === LLAVE_TAB}
-                    onSelect={() => {
-                      if (
-                        !FINAL_TOOL_TABS.has(finalSubTab) &&
-                        finalSubTab
-                      ) {
-                        setFinalLlaveCategoryId(finalSubTab);
-                      }
-                      setFinalSubTab(LLAVE_TAB);
-                    }}
-                  >
-                    <Workflow />
-                    Llaves
-                  </StableTabButton>
-                </div>
-                {!readOnly && tournament.categories.length > 0 ? (
-                  <>
+                    <StableTabButton
+                      active={finalSubTab === REGLA_PARTIDOS_TAB}
+                      onSelect={() => setFinalSubTab(REGLA_PARTIDOS_TAB)}
+                    >
+                      <Scale />
+                      Regla de Partidos
+                    </StableTabButton>
+                    <StableTabButton
+                      active={finalSubTab === GRILLA_TAB}
+                      onSelect={() => setFinalSubTab(GRILLA_TAB)}
+                    >
+                      <LayoutList />
+                      Grilla
+                    </StableTabButton>
+                    <StableTabButton
+                      active={finalSubTab === LLAVE_TAB}
+                      onSelect={() => setFinalSubTab(LLAVE_TAB)}
+                    >
+                      <Workflow />
+                      Llaves
+                    </StableTabButton>
+                  </div>
+                  {!readOnly && tournament.categories.length > 0 ? (
+                    <>
+                    <ActualizarHoverHint
+                      heading="Calcula quién clasifica en todas las categorías"
+                      effects={[
+                        "Recalcula 1.ª y 2.ª de cada zona con los resultados guardados",
+                        "Completa los nombres en cuartos, llaves y grillas",
+                        "No cambia día, horario ni cancha",
+                      ]}
+                      note="El Calcular de cada categoría, más abajo, solo toca esa categoría."
+                    >
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0"
+                        onClick={handleCalcularClasificacion}
+                        disabled={isCalculating}
+                      >
+                        <Calculator
+                          className={`size-4 ${isCalculating ? "animate-pulse" : ""}`}
+                        />
+                        Calcular
+                      </Button>
+                    </ActualizarHoverHint>
                     <ActualizarConfirmButton
                       className="shrink-0"
                       pending={isUpdatingFinal}
@@ -790,7 +796,27 @@ export function ZonasTournamentDetail({
                       confirm={finalConfirm}
                       onConfirm={handleActualizarFaseFinal}
                     />
-                  </>
+                    </>
+                  ) : null}
+                </div>
+                {(finalSubTab === PARTIDOS_TAB ||
+                  finalSubTab === LLAVE_TAB) &&
+                tournament.categories.length > 0 ? (
+                  <div
+                    className="flex min-w-0 items-center gap-2 overflow-x-auto"
+                    role="tablist"
+                    aria-label="Categorías de fase final"
+                  >
+                    {tournament.categories.map((category) => (
+                      <StableTabButton
+                        key={category.id}
+                        active={finalCategoryId === category.id}
+                        onSelect={() => setFinalCategoryId(category.id)}
+                      >
+                        {category.name}
+                      </StableTabButton>
+                    ))}
+                  </div>
                 ) : null}
               </div>
             ) : null}
@@ -1017,8 +1043,7 @@ export function ZonasTournamentDetail({
             categories={tournament.categories}
             pairs={tournament.pairs}
             config={config}
-            categoryId={finalLlaveCategoryId}
-            onCategoryChange={setFinalLlaveCategoryId}
+            categoryId={finalCategoryId}
             club={club}
           />
         ) : tournament.categories.length === 0 ? (
@@ -1039,7 +1064,7 @@ export function ZonasTournamentDetail({
             pairs={tournament.pairs}
             config={config}
             courtCount={courtCount}
-            categoryId={finalSubTab}
+            categoryId={finalCategoryId}
           />
         )
       ) : null}

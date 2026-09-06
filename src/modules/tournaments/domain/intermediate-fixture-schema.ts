@@ -134,6 +134,37 @@ function scheduleOf(
   };
 }
 
+/// Asigna día/horario/cancha a un cruce. El cruce (quién juega) no cambia.
+export function setFixtureMatchSchedule(
+  fixture: IntermediateFixturePersisted,
+  officialId: number,
+  schedule: Pick<
+    ScheduleFields,
+    "playDate" | "startTime" | "courtIndex"
+  > &
+    Partial<Pick<ScheduleFields, "endTime" | "slotIndex" | "noRestGap">>,
+): IntermediateFixturePersisted {
+  return {
+    ...fixture,
+    rounds: fixture.rounds.map((round) => ({
+      ...round,
+      matches: round.matches.map((match) =>
+        match.officialId === officialId
+          ? {
+              ...match,
+              playDate: schedule.playDate,
+              startTime: schedule.startTime,
+              courtIndex: schedule.courtIndex,
+              endTime: schedule.endTime ?? null,
+              slotIndex: schedule.slotIndex ?? null,
+              noRestGap: schedule.noRestGap,
+            }
+          : match,
+      ),
+    })),
+  };
+}
+
 /// Intercambia día/horario/cancha entre dos cruces. El cruce (quién juega) no cambia.
 export function swapFixtureMatchSchedules(
   fixture: IntermediateFixturePersisted,

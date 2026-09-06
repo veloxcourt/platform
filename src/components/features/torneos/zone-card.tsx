@@ -20,7 +20,11 @@ import {
   type ZoneMatchKind,
   type ZoneResultColumn,
 } from "@/modules/tournaments/domain/zone-bracket";
-import { computeZoneStandings } from "@/modules/tournaments/domain/zone-standings";
+import {
+  computeZoneStandings,
+  upsertZoneTieBreak,
+  type ZoneTieBreakDecision,
+} from "@/modules/tournaments/domain/zone-standings";
 import { ZoneStandingsDialog } from "./zone-standings-dialog";
 import {
   bindFieldMenuTrigger,
@@ -52,6 +56,7 @@ export type ZoneDraft = {
   label: string;
   pairIds: string[];
   matches: ZoneMatchDraft[];
+  tieBreaks?: ZoneTieBreakDecision[];
 };
 
 const FIELD_CONFLICT_CLASS =
@@ -808,7 +813,22 @@ export function ZoneCard({
           matches: zone.matches,
           format: matchFormat,
           zone4Advancers,
+          tieBreaks: zone.tieBreaks,
         })}
+        readOnly={readOnly}
+        onDefineTie={
+          readOnly
+            ? undefined
+            : (groupPairIds, orderedPairIds) =>
+                onChange({
+                  ...zone,
+                  tieBreaks: upsertZoneTieBreak(
+                    zone.tieBreaks,
+                    groupPairIds,
+                    orderedPairIds,
+                  ),
+                })
+        }
       />
     </div>
   );

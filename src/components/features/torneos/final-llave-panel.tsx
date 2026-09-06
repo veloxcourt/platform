@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { Workflow } from "lucide-react";
 
 import {
   Card,
@@ -12,7 +11,6 @@ import {
 } from "@/components/ui/card";
 import { AyudaButton } from "./ayuda-button";
 import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
-import { StableTabButton } from "@/components/ui/stable-tab-button";
 import { FINAL_PHASE_START_ROUND_LABELS } from "@/modules/tournaments/domain/config-schema";
 import {
   eligiblePairCount,
@@ -25,7 +23,8 @@ import type {
   TournamentConfig,
 } from "@/modules/tournaments/domain/types";
 import { LlavePdfMenu } from "./llave-pdf-menu";
-import type { LlavePdfClub, LlavePdfDraw } from "./llave-pdf";
+import type { LlavePdfClub } from "./llave-pdf";
+import { buildLlaveExportDraws } from "./llave-export-draws";
 import { categoryKnockoutNameResolver } from "./knockout-name-resolver";
 import {
   OfficialBracketDiagram,
@@ -38,7 +37,6 @@ export function FinalLlavePanel({
   pairs,
   config,
   categoryId,
-  onCategoryChange,
   club,
 }: {
   tournamentName: string;
@@ -46,7 +44,6 @@ export function FinalLlavePanel({
   pairs: PairListItem[];
   config: TournamentConfig | null;
   categoryId: string;
-  onCategoryChange: (categoryId: string) => void;
   club?: LlavePdfClub;
 }) {
   const selected =
@@ -86,31 +83,15 @@ export function FinalLlavePanel({
         : (label: string) => label,
     [config, pairs, selected, settings.matchFormat],
   );
-  const pdfDraws = useMemo<LlavePdfDraw[]>(
+  const pdfDraws = useMemo(
     () =>
-      tree && selected
-        ? [
-            {
-              categoryName: selected.name,
-              regulation: settings.zone4Advancers === 2 ? "APA" : "FAP",
-              pairCount,
-              tree,
-              showOfficialId: settings.zone4Advancers === 3,
-              startsAtRound: settings.startsAtRound,
-              scheduleByOfficialId,
-              resolveLabel,
-            },
-          ]
-        : [],
-    [
-      pairCount,
-      resolveLabel,
-      scheduleByOfficialId,
-      selected,
-      settings.startsAtRound,
-      settings.zone4Advancers,
-      tree,
-    ],
+      buildLlaveExportDraws({
+        categories: selected ? [selected] : [],
+        pairs,
+        config,
+        includeFinalFixture: true,
+      }),
+    [config, pairs, selected],
   );
   const regulation = settings.zone4Advancers === 2 ? "APA" : "FAP";
   const startsAtLabel = FINAL_PHASE_START_ROUND_LABELS[settings.startsAtRound];
@@ -118,9 +99,10 @@ export function FinalLlavePanel({
   return (
     <Card className={STICKY_PANEL_CARD}>
       <CardHeader className={STICKY_PANEL_HEADER}>
-        <CardTitle className="flex items-center gap-2">
-          <Workflow className="size-4 text-muted-foreground" />
-          Llaves{selected ? ` · ${selected.name}` : ""}
+        <CardTitle className="text-sm font-normal text-muted-foreground">
+          {categories.length === 0
+            ? "Llaves"
+            : `Llave oficial ${regulation} · ${pairCount} pareja${pairCount === 1 ? "" : "s"} con compañero.`}
         </CardTitle>
         <CardAction>
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -150,25 +132,6 @@ export function FinalLlavePanel({
           </p>
         ) : (
           <>
-            <div
-              className="flex min-w-0 flex-wrap items-center gap-2"
-              role="tablist"
-              aria-label="Categoría de la llave"
-            >
-              {categories.map((category) => (
-                <StableTabButton
-                  key={category.id}
-                  active={selected?.id === category.id}
-                  onSelect={() => onCategoryChange(category.id)}
-                >
-                  {category.name}
-                </StableTabButton>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Llave oficial {regulation} · {pairCount} pareja
-              {pairCount === 1 ? "" : "s"} con compañero.
-            </p>
             {tree ? (
               <OfficialBracketDiagram
                 root={tree}

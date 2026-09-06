@@ -48,7 +48,7 @@ const STATUS_LABEL: Record<SlotCellStatus, string> = {
 };
 
 const SLOT_BOX_CLASS =
-  "flex h-[3.25rem] w-16 shrink-0 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border px-1 text-xs leading-tight transition-colors";
+  "relative flex h-[3.25rem] w-16 shrink-0 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border px-1 text-xs leading-tight transition-colors";
 
 function pairVsLabel(
   pair1?: string | null,
@@ -561,6 +561,7 @@ export function SlotRuleGrid({
                           !canPick
                         }
                         title={titleParts.join(" · ")}
+                        aria-pressed={isSelected}
                         aria-label={`${court.courtLabel} ${slot.startTime} ${
                           occupantLines
                             .map((line) =>
@@ -575,7 +576,7 @@ export function SlotRuleGrid({
                             : slot.projectedSource === "other"
                               ? "Otra categoría"
                               : STATUS_LABEL[slot.status])
-                        }`}
+                        }${isSelected ? " · seleccionado" : ""}`}
                         onClick={(event) => {
                           if (consumedHoldClick(menuHoldRef)) return;
                           if (onSelectSlot) {
@@ -626,7 +627,8 @@ export function SlotRuleGrid({
                             canInspect ||
                             canPick) &&
                             "cursor-pointer",
-                          isSelected && "ring-2 ring-primary ring-offset-1",
+                          isSelected &&
+                            "z-10 border-[3px] border-zinc-950 shadow-[inset_0_0_0_2px_rgba(255,255,255,0.92)] dark:border-white dark:shadow-[inset_0_0_0_2px_rgba(0,0,0,0.55)]",
                           !clickable &&
                             !canSetStartMinutes &&
                             !canInspect &&
@@ -634,6 +636,18 @@ export function SlotRuleGrid({
                             "cursor-default opacity-95",
                         )}
                       >
+                        {isSelected ? (
+                          <>
+                            <span
+                              aria-hidden
+                              className="pointer-events-none absolute inset-x-0 top-0 h-1.5 bg-zinc-950 dark:bg-white"
+                            />
+                            <span
+                              aria-hidden
+                              className="pointer-events-none absolute inset-x-0 bottom-0 h-1.5 bg-zinc-950 dark:bg-white"
+                            />
+                          </>
+                        ) : null}
                         <span className="font-semibold tabular-nums">
                           {slot.startTime}
                         </span>

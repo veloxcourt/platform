@@ -17,6 +17,7 @@ export function ChangeZoneTimeDialog({
   open,
   onOpenChange,
   zoneLabel,
+  description,
   rules,
   categories,
   selectedSlot,
@@ -25,6 +26,7 @@ export function ChangeZoneTimeDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   zoneLabel: string;
+  description?: string;
   rules: CourtDayRule[];
   categories: SlotRuleGridCategory[];
   selectedSlot?: {
@@ -40,9 +42,8 @@ export function ChangeZoneTimeDialog({
         <DialogHeader>
           <DialogTitle>Elegir día, horario y cancha</DialogTitle>
           <DialogDescription>
-            Partido de {zoneLabel}. Tocá un slot: se cargan las tres cosas
-            juntas. Verde es libre; naranja está ocupado. Se puede elegir uno
-            ocupado: el choque se marca en la zona.
+            {description ??
+              `Partido de ${zoneLabel}. Tocá un slot: se cargan las tres cosas juntas. Verde es libre; naranja está ocupado. Se puede elegir uno ocupado: el choque se marca en la zona.`}
           </DialogDescription>
         </DialogHeader>
 

@@ -23,10 +23,16 @@ export const zonesFixtureMatchSchema = z.object({
   scores: matchScoresSchema.optional(),
 });
 
+export const zoneTieBreakSchema = z.object({
+  pairIds: z.array(z.string()).min(2),
+  orderedPairIds: z.array(z.string()).min(2),
+});
+
 export const zonesFixtureZoneSchema = z.object({
   label: z.string().min(1),
   pairIds: z.array(z.string()),
   matches: z.array(zonesFixtureMatchSchema),
+  tieBreaks: z.array(zoneTieBreakSchema).optional(),
 });
 
 export const zonesFixtureSchema = z.object({
@@ -48,6 +54,7 @@ export const zonesFixtureDraftSchema = z.object({
     z.object({
       label: z.string().min(1),
       pairIds: z.array(z.string()),
+      tieBreaks: z.array(zoneTieBreakSchema).optional(),
       matches: z.array(
         z.object({
           kind: z
@@ -92,6 +99,7 @@ export function zonesDraftToPersisted(
     zones: draft.zones.map((zone) => ({
       label: zone.label,
       pairIds: pairIdsFromDraftZone(zone),
+      tieBreaks: zone.tieBreaks,
       matches: zone.matches.map((match, matchIndex) => ({
         matchIndex,
         kind: match.kind ?? "round_robin",
@@ -111,18 +119,53 @@ export function zonesDraftToPersisted(
   };
 }
 
+function collectZoneTieBreaks(
+  fixture:
+    | { zones: Array<{ label: string; tieBreaks?: ZonesFixturePersisted["zones"][number]["tieBreaks"] }> }
+    | null
+    | undefined,
+) {
+  const map = new Map<
+    string,
+    NonNullable<ZonesFixturePersisted["zones"][number]["tieBreaks"]>
+  >();
+  for (const zone of fixture?.zones ?? []) {
+    if (zone.tieBreaks?.length) map.set(zone.label, zone.tieBreaks);
+  }
+  return map;
+}
+
+function applyZoneTieBreaks<
+  T extends { zones: Array<{ label: string; tieBreaks?: ZonesFixturePersisted["zones"][number]["tieBreaks"] }> },
+>(fixture: T, tieBreaksByLabel: ReturnType<typeof collectZoneTieBreaks>): T {
+  if (tieBreaksByLabel.size === 0) return fixture;
+  return {
+    ...fixture,
+    zones: fixture.zones.map((zone) => ({
+      ...zone,
+      tieBreaks: tieBreaksByLabel.get(zone.label) ?? zone.tieBreaks,
+    })),
+  };
+}
+
 export function mergeZoneDraftScores(
   previous: ZonesFixturePersisted,
   draft: ZonesFixtureDraftInput,
 ): ZonesFixturePersisted {
-  return applyZoneScores(previous, collectZoneScores(draft));
+  return applyZoneTieBreaks(
+    applyZoneScores(previous, collectZoneScores(draft)),
+    collectZoneTieBreaks(draft),
+  );
 }
 
 export function carryZoneScores(
   previous: ZonesFixturePersisted | null | undefined,
   next: ZonesFixturePersisted,
 ): ZonesFixturePersisted {
-  return applyZoneScores(next, collectZoneScores(previous));
+  return applyZoneTieBreaks(
+    applyZoneScores(next, collectZoneScores(previous)),
+    collectZoneTieBreaks(previous),
+  );
 }
 
 export function toPersistedZonesFixture(

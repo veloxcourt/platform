@@ -29,7 +29,62 @@ export type ZoneStandingRow = {
   rank: number | null;
   outcome: ZoneStandingOutcome;
   outcomeLabel: string;
+  /// Empate que se define (o ya se definió) en cancha.
+  tieGroupKey?: string;
+  tieGroupStart?: number;
+  tieGroupSize?: number;
+  courtDefined?: boolean;
 };
+
+export type ZoneTieBreakDecision = {
+  pairIds: string[];
+  orderedPairIds: string[];
+};
+
+export function samePairSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((id, index) => id === right[index]);
+}
+
+export function upsertZoneTieBreak(
+  current: ZoneTieBreakDecision[] | undefined,
+  groupPairIds: string[],
+  orderedPairIds: string[],
+): ZoneTieBreakDecision[] {
+  const next = (current ?? []).filter(
+    (item) => !samePairSet(item.pairIds, groupPairIds),
+  );
+  next.push({
+    pairIds: [...groupPairIds].sort(),
+    orderedPairIds,
+  });
+  return next;
+}
+
+export function orderAfterPickingPlace(
+  groupPairIds: string[],
+  pickedPairId: string,
+  placeInGroup: number,
+  previousOrder?: string[],
+): string[] {
+  const rest = groupPairIds.filter((id) => id !== pickedPairId);
+  const preferred = (previousOrder ?? []).filter(
+    (id) => id !== pickedPairId && rest.includes(id),
+  );
+  const fill = [
+    ...preferred,
+    ...rest.filter((id) => !preferred.includes(id)),
+  ];
+  const ordered = new Array<string>(groupPairIds.length);
+  ordered[placeInGroup] = pickedPairId;
+  let index = 0;
+  for (let slot = 0; slot < ordered.length; slot += 1) {
+    if (!ordered[slot]) ordered[slot] = fill[index++]!;
+  }
+  return ordered;
+}
 
 export type ZoneStandingsResult = {
   rows: ZoneStandingRow[];
@@ -293,23 +348,101 @@ function assignFapOutcomes(
         firstPos === 1 && lastPos === 2
           ? "1.ª / 2.ª · definir en cancha"
           : `${ordinalEs(firstPos)}–${ordinalEs(lastPos)} · pasan · definir orden`;
+      const tie = tieGroupFields(group, firstPos);
       for (const stats of group) {
-        rows.push(toRow(stats, null, "playoff", label));
+        rows.push({
+          ...toRow(stats, null, "playoff", label),
+          ...tie,
+        });
       }
     } else if (allOut) {
       for (const stats of group) {
         rows.push(toRow(stats, null, "out", `${ordinalEs(firstPos)}–${ordinalEs(lastPos)} · afuera`));
       }
     } else {
+      const tie = tieGroupFields(group, firstPos);
       for (const stats of group) {
-        rows.push(
-          toRow(stats, null, "playoff", "Empate · definir en cancha quién pasa"),
-        );
+        rows.push({
+          ...toRow(
+            stats,
+            null,
+            "playoff",
+            "Empate · definir en cancha quién pasa",
+          ),
+          ...tie,
+        });
       }
     }
     index = end;
   }
   return rows;
+}
+
+function tieGroupFields(
+  group: PairStats[],
+  firstPos: number,
+): Pick<ZoneStandingRow, "tieGroupKey" | "tieGroupStart" | "tieGroupSize"> {
+  return {
+    tieGroupKey: group.map((item) => item.pairId).sort().join("|"),
+    tieGroupStart: firstPos,
+    tieGroupSize: group.length,
+  };
+}
+
+function applyTieBreaks(
+  rows: ZoneStandingRow[],
+  advancers: number,
+  tieBreaks: ZoneTieBreakDecision[] | undefined,
+): ZoneStandingRow[] {
+  if (!tieBreaks?.length) return rows;
+  const next = [...rows];
+  const seen = new Set<string>();
+  for (let index = 0; index < next.length; index += 1) {
+    const key = next[index]?.tieGroupKey;
+    const start = next[index]?.tieGroupStart;
+    const size = next[index]?.tieGroupSize;
+    if (!key || start == null || !size || seen.has(key)) continue;
+    seen.add(key);
+    const group = next.filter((row) => row.tieGroupKey === key);
+    const groupIds = group.map((row) => row.pairId);
+    const decision = tieBreaks.find(
+      (item) =>
+        samePairSet(item.pairIds, groupIds) &&
+        samePairSet(item.orderedPairIds, groupIds),
+    );
+    if (!decision) continue;
+    const resolved = decision.orderedPairIds.map((pairId, offset) => {
+      const row = group.find((item) => item.pairId === pairId)!;
+      const rank = start + offset;
+      const assigned = outcomeForRank(rank, advancers);
+      return {
+        ...row,
+        rank,
+        outcome: assigned.outcome,
+        outcomeLabel: `${assigned.outcomeLabel} · en cancha`,
+        courtDefined: true,
+        tieGroupKey: key,
+        tieGroupStart: start,
+        tieGroupSize: size,
+      };
+    });
+    let writeAt = next.findIndex((row) => row.tieGroupKey === key);
+    for (const row of resolved) {
+      while (writeAt < next.length && next[writeAt]?.tieGroupKey !== key) {
+        writeAt += 1;
+      }
+      if (writeAt < next.length) {
+        next[writeAt] = row;
+        writeAt += 1;
+      }
+    }
+  }
+  return next.sort((a, b) => {
+    const rankA = a.rank ?? 99;
+    const rankB = b.rank ?? 99;
+    if (rankA !== rankB) return rankA - rankB;
+    return 0;
+  });
 }
 
 function inferOpeningSides(matches: ZoneStandingMatchInput[], format: MatchFormat) {
@@ -443,11 +576,13 @@ export function computeZoneStandings({
   matches,
   format,
   zone4Advancers = 3,
+  tieBreaks,
 }: {
   pairIds: string[];
   matches: ZoneStandingMatchInput[];
   format: MatchFormat;
   zone4Advancers?: 2 | 3;
+  tieBreaks?: ZoneTieBreakDecision[];
 }): ZoneStandingsResult {
   const ids = pairIds.filter(Boolean);
   const statsById = new Map(ids.map((id) => [id, emptyStats(id)]));
@@ -490,8 +625,13 @@ export function computeZoneStandings({
 
   const ordered = [...statsById.values()].sort((a, b) => compareFap(a, b));
   const pending = pendingMatches > 0 || completeMatches === 0;
+  const rows = applyTieBreaks(
+    assignFapOutcomes(ordered, advancers, pending && completeMatches === 0),
+    advancers,
+    tieBreaks,
+  );
   return {
-    rows: assignFapOutcomes(ordered, advancers, pending && completeMatches === 0),
+    rows,
     completeMatches,
     pendingMatches,
     totalMatches: matches.length,
@@ -499,7 +639,7 @@ export function computeZoneStandings({
     regulation,
     mode: "round_robin",
     note:
-      "FAP: 2 pts victoria, 1 pt derrota jugada. Desempate: diff. de sets, diff. de games, games a favor, games en contra. Si sigue el empate, se define en cancha.",
+      "FAP: 2 pts victoria, 1 pt derrota jugada. Desempate: diff. de sets, diff. de games, games a favor, games en contra. Si sigue el empate, definilo acá (1.ª / 2.ª). Esa elección queda guardada.",
     pendingReasons:
       pendingMatches > 0
         ? [`Faltan ${pendingMatches} resultado${pendingMatches === 1 ? "" : "s"}.`]

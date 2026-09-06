@@ -96,8 +96,8 @@ export function FinalMatchGridPanel({
               description="Cómo se ordenan los cruces de fase final."
             >
               <p>
-                Orden de los cruces de fase final. Día, horario y cancha salen
-                de Actualizar.
+                Larga los partidos por día y horario. A igual hora, primero la
+                cancha más baja. Día, horario y cancha salen de Actualizar.
               </p>
               <p>
                 <span className="font-medium text-foreground">

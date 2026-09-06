@@ -210,16 +210,16 @@ function LeafBox({
   return (
     <div
       className={cn(
-        "m-1 flex min-h-8 min-w-[8.5rem] max-w-[12rem] flex-col justify-center rounded-md border px-2 py-0.5 text-xs",
+        "m-1 flex min-h-8 min-w-[8.5rem] max-w-[12rem] flex-col items-center justify-center rounded-md border px-2 py-0.5 text-center text-xs",
         bye
           ? "border-dashed text-muted-foreground"
           : "border-input bg-background font-medium",
       )}
       title={seed ? `${label} · ${seed}` : label}
     >
-      <span className="leading-tight">{label}</span>
+      <span className="w-full text-center leading-tight">{label}</span>
       {seed ? (
-        <span className="text-[10px] font-normal text-muted-foreground">
+        <span className="w-full text-center text-[10px] font-normal text-muted-foreground">
           {seed}
         </span>
       ) : null}
@@ -246,7 +246,7 @@ function MatchBox({
   return (
     <div
       className={cn(
-        "m-1 flex min-h-8 min-w-[7.25rem] flex-col justify-center rounded-md border px-2 py-1",
+        "m-1 flex min-h-8 min-w-[7.25rem] flex-col items-center justify-center rounded-md border px-2 py-1 text-center",
         phase === "intermediate" &&
           "border-amber-400 bg-amber-100 text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100",
         phase === "final" &&
