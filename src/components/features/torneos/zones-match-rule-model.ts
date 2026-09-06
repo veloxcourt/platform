@@ -112,7 +112,10 @@ export function buildZonesSlotRules(params: {
     const zones = live ?? categoryConfig.zonesFixture?.zones ?? [];
     return zones.flatMap((zone) =>
       zone.matches
-        .filter((match) => match.id !== params.excludeMatchId)
+        .filter((match) => {
+          if (!params.excludeMatchId) return true;
+          return !("id" in match && match.id === params.excludeMatchId);
+        })
         .map((match, index) => ({
           categoryId: categoryConfig.categoryId,
           playDate: match.playDate ?? "",
