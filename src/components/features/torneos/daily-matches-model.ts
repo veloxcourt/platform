@@ -110,30 +110,44 @@ export function dailyDayHeadline(dayLabel: string): string {
   return match ? `DÍA ${match[1]}` : dayLabel.trim() || "Día";
 }
 
+export function isAllDailyInstances(instanceKeys: string[]): boolean {
+  return instanceKeys.length === 0;
+}
+
+export function dailyInstanceSelectionLabel(
+  instanceKeys: string[],
+  instanceOptions: DailyInstanceOption[],
+): string {
+  if (isAllDailyInstances(instanceKeys)) return "Todas las instancias";
+  const labels = instanceOptions
+    .filter((option) => instanceKeys.includes(option.key))
+    .map((option) => option.label);
+  return labels.join(", ") || "Todas las instancias";
+}
+
 export function dailyMatchesExportHeadline({
   dayLabel,
   categories,
   categoryId,
   instanceOptions,
-  instanceKey,
+  instanceKeys,
 }: {
   dayLabel: string;
   categories: TournamentCategoryItem[];
   categoryId: string;
   instanceOptions: DailyInstanceOption[];
-  instanceKey: string;
+  instanceKeys: string[];
 }): string {
   const selectedCategory = categories.find((category) => category.id === categoryId);
   const categoryLabel =
     categoryId === DAILY_FILTER_ALL
       ? "Todas las categorías"
       : selectedCategory?.name || selectedCategory?.abbreviation || "Categoría";
-  const instanceLabel =
-    instanceKey === DAILY_FILTER_ALL
-      ? "Todas las instancias"
-      : instanceOptions.find((option) => option.key === instanceKey)?.label ||
-        "Instancia";
-  return [dailyDayHeadline(dayLabel), categoryLabel, instanceLabel].join(" · ");
+  return [
+    dailyDayHeadline(dayLabel),
+    categoryLabel,
+    dailyInstanceSelectionLabel(instanceKeys, instanceOptions),
+  ].join(" · ");
 }
 
 function categoryWrittenName(
@@ -189,17 +203,20 @@ export function filterDailyMatchCards(
   cards: DailyMatchCard[],
   {
     categoryId,
-    instanceKey,
+    instanceKeys,
   }: {
     categoryId: string;
-    instanceKey: string;
+    instanceKeys: string[];
   },
 ): DailyMatchCard[] {
   return cards.filter((card) => {
     if (categoryId !== DAILY_FILTER_ALL && card.categoryId !== categoryId) {
       return false;
     }
-    if (instanceKey !== DAILY_FILTER_ALL && card.instanceKey !== instanceKey) {
+    if (
+      !isAllDailyInstances(instanceKeys) &&
+      !instanceKeys.includes(card.instanceKey)
+    ) {
       return false;
     }
     return true;

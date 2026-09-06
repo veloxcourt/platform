@@ -859,8 +859,8 @@ export function ZonasTournamentDetail({
                     categoryId={dailyFilters.categoryId}
                     onCategoryIdChange={dailyFilters.setCategoryId}
                     instanceOptions={dailyFilters.instanceOptions}
-                    instanceKey={dailyFilters.instanceKey}
-                    onInstanceKeyChange={dailyFilters.setInstanceKey}
+                    instanceKeys={dailyFilters.instanceKeys}
+                    onInstanceKeysChange={dailyFilters.setInstanceKeys}
                     columns={dailyFilters.columns}
                     onColumnsChange={dailyFilters.setColumns}
                   />
@@ -1114,7 +1114,7 @@ export function ZonasTournamentDetail({
             categories={tournament.categories}
             categoryId={dailyFilters.categoryId}
             instanceOptions={dailyFilters.instanceOptions}
-            instanceKey={dailyFilters.instanceKey}
+            instanceKeys={dailyFilters.instanceKeys}
             cards={dailyFilters.cards}
             dayHasMatches={dailyFilters.dayHasMatches}
             columns={dailyFilters.columns}

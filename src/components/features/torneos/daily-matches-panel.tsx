@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, ChevronDown } from "lucide-react";
 
 import {
   Card,
@@ -10,6 +10,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { AyudaButton } from "./ayuda-button";
 import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
 import { cn } from "@/lib/utils";
@@ -27,10 +34,12 @@ import {
 import {
   buildDailyMatchCards,
   categoryCardTone,
+  dailyInstanceSelectionLabel,
   dailyMatchesExportHeadline,
   DAILY_EXPORT_COLUMN_OPTIONS,
   DAILY_FILTER_ALL,
   filterDailyMatchCards,
+  isAllDailyInstances,
   listDailyInstanceOptions,
   type DailyInstanceOption,
   type DailyMatchCard,
@@ -134,7 +143,7 @@ export function useDailyMatchesFilters({
   playDate: string;
 }) {
   const [categoryId, setCategoryId] = useState(DAILY_FILTER_ALL);
-  const [instanceKey, setInstanceKey] = useState(DAILY_FILTER_ALL);
+  const [instanceKeys, setInstanceKeys] = useState<string[]>([]);
   const [columns, setColumns] = useState(2);
 
   const dayCards = useMemo(
@@ -146,14 +155,14 @@ export function useDailyMatchesFilters({
       listDailyInstanceOptions(
         filterDailyMatchCards(dayCards, {
           categoryId,
-          instanceKey: DAILY_FILTER_ALL,
+          instanceKeys: [],
         }),
       ),
     [categoryId, dayCards],
   );
   const cards = useMemo(
-    () => filterDailyMatchCards(dayCards, { categoryId, instanceKey }),
-    [categoryId, dayCards, instanceKey],
+    () => filterDailyMatchCards(dayCards, { categoryId, instanceKeys }),
+    [categoryId, dayCards, instanceKeys],
   );
 
   useEffect(() => {
@@ -164,17 +173,21 @@ export function useDailyMatchesFilters({
   }, [categories, categoryId]);
 
   useEffect(() => {
-    if (instanceKey === DAILY_FILTER_ALL) return;
-    if (!instanceOptions.some((option) => option.key === instanceKey)) {
-      setInstanceKey(DAILY_FILTER_ALL);
-    }
-  }, [instanceKey, instanceOptions]);
+    setInstanceKeys((current) => {
+      if (isAllDailyInstances(current)) return current;
+      const next = current.filter((key) =>
+        instanceOptions.some((option) => option.key === key),
+      );
+      if (next.length === current.length) return current;
+      return next;
+    });
+  }, [instanceOptions]);
 
   return {
     categoryId,
     setCategoryId,
-    instanceKey,
-    setInstanceKey,
+    instanceKeys,
+    setInstanceKeys,
     columns,
     setColumns,
     instanceOptions,
@@ -183,13 +196,28 @@ export function useDailyMatchesFilters({
   };
 }
 
+function toggleDailyInstance(
+  instanceKeys: string[],
+  key: string,
+  checked: boolean,
+  optionCount: number,
+): string[] {
+  if (checked) {
+    const next = isAllDailyInstances(instanceKeys)
+      ? [key]
+      : [...new Set([...instanceKeys, key])];
+    return next.length === optionCount ? [] : next;
+  }
+  return instanceKeys.filter((item) => item !== key);
+}
+
 export function DailyMatchesFilterSelects({
   categories,
   categoryId,
   onCategoryIdChange,
   instanceOptions,
-  instanceKey,
-  onInstanceKeyChange,
+  instanceKeys,
+  onInstanceKeysChange,
   columns,
   onColumnsChange,
 }: {
@@ -197,11 +225,17 @@ export function DailyMatchesFilterSelects({
   categoryId: string;
   onCategoryIdChange: (value: string) => void;
   instanceOptions: DailyInstanceOption[];
-  instanceKey: string;
-  onInstanceKeyChange: (value: string) => void;
+  instanceKeys: string[];
+  onInstanceKeysChange: (value: string[]) => void;
   columns: number;
   onColumnsChange: (value: number) => void;
 }) {
+  const allInstances = isAllDailyInstances(instanceKeys);
+  const instanceLabel = dailyInstanceSelectionLabel(
+    instanceKeys,
+    instanceOptions,
+  );
+
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
       <select
@@ -218,20 +252,49 @@ export function DailyMatchesFilterSelects({
           </option>
         ))}
       </select>
-      <select
-        className={FILTER_SELECT_CLASS}
-        value={instanceKey}
-        onChange={(event) => onInstanceKeyChange(event.target.value)}
-        aria-label="Instancias a publicar"
-        title="Instancias a publicar"
-      >
-        <option value={DAILY_FILTER_ALL}>Todas las instancias</option>
-        {instanceOptions.map((option) => (
-          <option key={option.key} value={option.key}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(FILTER_SELECT_CLASS, "inline-flex items-center gap-1.5")}
+          aria-label="Instancias a publicar"
+          title="Instancias a publicar"
+        >
+          <span className="min-w-0 flex-1 truncate text-left">
+            {instanceLabel}
+          </span>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-56">
+          <DropdownMenuCheckboxItem
+            checked={allInstances}
+            closeOnClick={false}
+            onCheckedChange={(checked) => {
+              if (checked) onInstanceKeysChange([]);
+            }}
+          >
+            Todas las instancias
+          </DropdownMenuCheckboxItem>
+          {instanceOptions.length > 0 ? <DropdownMenuSeparator /> : null}
+          {instanceOptions.map((option) => (
+            <DropdownMenuCheckboxItem
+              key={option.key}
+              checked={!allInstances && instanceKeys.includes(option.key)}
+              closeOnClick={false}
+              onCheckedChange={(checked) =>
+                onInstanceKeysChange(
+                  toggleDailyInstance(
+                    instanceKeys,
+                    option.key,
+                    checked === true,
+                    instanceOptions.length,
+                  ),
+                )
+              }
+            >
+              {option.label}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <select
         className={FILTER_SELECT_CLASS}
         value={String(columns)}
@@ -257,7 +320,7 @@ export function DailyMatchesPanel({
   categories,
   categoryId,
   instanceOptions,
-  instanceKey,
+  instanceKeys,
   cards,
   dayHasMatches,
   columns,
@@ -268,7 +331,7 @@ export function DailyMatchesPanel({
   categories: TournamentCategoryItem[];
   categoryId: string;
   instanceOptions: DailyInstanceOption[];
-  instanceKey: string;
+  instanceKeys: string[];
   cards: DailyMatchCard[];
   dayHasMatches: boolean;
   columns: number;
@@ -280,7 +343,7 @@ export function DailyMatchesPanel({
     categories,
     categoryId,
     instanceOptions,
-    instanceKey,
+    instanceKeys,
   });
 
   return (
