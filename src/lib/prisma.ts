@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 44;
+const PRISMA_SCHEMA_REVISION = 53;
 
 /** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
 const PG_POOL_MAX = 1;
@@ -39,6 +39,10 @@ function schemaFingerprint(): string {
       ? "1"
       : "0",
     "hasSlotSelection" in Prisma.TournamentPlayDayScalarFieldEnum ? "1" : "0",
+    "intermediateSlotIndexes" in Prisma.TournamentPlayDayScalarFieldEnum
+      ? "1"
+      : "0",
+    "isIntermediateDay" in Prisma.TournamentPlayDayScalarFieldEnum ? "1" : "0",
     "pairsPerZone" in settingsFields ? "1" : "0",
     "zone4Advancers" in settingsFields ? "1" : "0",
     "zonesPlayDates" in settingsFields ? "1" : "0",
@@ -66,6 +70,10 @@ function schemaFingerprint(): string {
     "TOOLS_CALENDARIO" in $Enums.AdminModule ? "1" : "0",
     "QUE_MEJORO" in $Enums.AdminModule ? "1" : "0",
     "clubImprovement" in Prisma.ModelName ? "1" : "0",
+    "playerEvent" in Prisma.ModelName ? "1" : "0",
+    "inviteSentAt" in Prisma.MembershipScalarFieldEnum ? "1" : "0",
+    "inviteNote" in Prisma.MembershipScalarFieldEnum ? "1" : "0",
+    "showInClientMenu" in Prisma.ProductScalarFieldEnum ? "1" : "0",
   ].join(":");
 }
 
@@ -94,7 +102,10 @@ function clientHasCurrentDelegates(client: PrismaClient): boolean {
       .calendarSearchLink?.findMany === "function" &&
     "clubImprovement" in client &&
     typeof (client as { clubImprovement?: { findMany?: unknown } })
-      .clubImprovement?.findMany === "function"
+      .clubImprovement?.findMany === "function" &&
+    "playerEvent" in client &&
+    typeof (client as { playerEvent?: { findMany?: unknown } }).playerEvent
+      ?.findMany === "function"
   );
 }
 
@@ -185,6 +196,8 @@ async function applyRuntimeSchema() {
     `DO $$ BEGIN CREATE TYPE "ImprovementStatus" AS ENUM ('PENDING', 'IN_PROGRESS', 'DONE'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
     `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "zoneQualification" JSONB`,
     `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "roundPhaseConfigs" JSONB`,
+    `ALTER TABLE "tournament_play_days" ADD COLUMN IF NOT EXISTS "intermediateSlotIndexes" INTEGER[] DEFAULT ARRAY[]::INTEGER[]`,
+    `ALTER TABLE "tournament_play_days" ADD COLUMN IF NOT EXISTS "isIntermediateDay" BOOLEAN NOT NULL DEFAULT false`,
     `CREATE TABLE IF NOT EXISTS "club_improvements" (
       "id" TEXT NOT NULL,
       "clubId" TEXT NOT NULL,
@@ -206,6 +219,47 @@ async function applyRuntimeSchema() {
     END $$`,
     `CREATE INDEX IF NOT EXISTS "club_improvements_clubId_sortOrder_idx" ON "club_improvements"("clubId", "sortOrder")`,
     `CREATE INDEX IF NOT EXISTS "club_improvements_clubId_createdAt_idx" ON "club_improvements"("clubId", "createdAt")`,
+    `DO $$ BEGIN CREATE TYPE "PlayerEventType" AS ENUM ('CATEGORY_CHANGE', 'TOURNAMENT'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `CREATE TABLE IF NOT EXISTS "player_events" (
+      "id" TEXT NOT NULL,
+      "clubId" TEXT NOT NULL,
+      "playerId" TEXT NOT NULL,
+      "type" "PlayerEventType" NOT NULL,
+      "occurredOn" DATE NOT NULL,
+      "note" TEXT,
+      "data" JSONB NOT NULL,
+      "createdById" TEXT,
+      "createdByName" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "player_events_pkey" PRIMARY KEY ("id")
+    )`,
+    `DO $$ BEGIN
+      ALTER TABLE "player_events"
+        ADD CONSTRAINT "player_events_clubId_fkey"
+        FOREIGN KEY ("clubId") REFERENCES "clubs"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `DO $$ BEGIN
+      ALTER TABLE "player_events"
+        ADD CONSTRAINT "player_events_playerId_fkey"
+        FOREIGN KEY ("playerId") REFERENCES "users"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `DO $$ BEGIN
+      ALTER TABLE "player_events"
+        ADD CONSTRAINT "player_events_createdById_fkey"
+        FOREIGN KEY ("createdById") REFERENCES "users"("id")
+        ON DELETE SET NULL ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `CREATE INDEX IF NOT EXISTS "player_events_clubId_playerId_occurredOn_idx" ON "player_events"("clubId", "playerId", "occurredOn")`,
+    `CREATE INDEX IF NOT EXISTS "tournament_pairs_player1Id_idx" ON "tournament_pairs"("player1Id")`,
+    `CREATE INDEX IF NOT EXISTS "tournament_pairs_player2Id_idx" ON "tournament_pairs"("player2Id")`,
+    `ALTER TABLE "memberships" ADD COLUMN IF NOT EXISTS "inviteSentAt" TIMESTAMP(3)`,
+    `ALTER TABLE "memberships" ADD COLUMN IF NOT EXISTS "inviteForTournamentId" TEXT`,
+    `ALTER TABLE "memberships" ADD COLUMN IF NOT EXISTS "inviteNote" TEXT`,
   ];
 
   const pool = new Pool({

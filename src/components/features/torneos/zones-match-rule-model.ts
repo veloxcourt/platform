@@ -142,6 +142,10 @@ export function buildZonesSlotRules(params: {
             match.kind ?? undefined,
             2,
           ),
+          projectedPhase: "zones" as const,
+          durationMinutes:
+            categoryConfig.phases.zones.matchDurationMin +
+            categoryConfig.intervalMin,
         })),
     );
   });

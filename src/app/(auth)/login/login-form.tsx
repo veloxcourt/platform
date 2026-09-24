@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -8,11 +9,15 @@ import { Label } from "@/components/ui/label";
 
 import { loginAction } from "./actions";
 
-export function LoginForm() {
+export function LoginForm({ next }: { next?: string | null }) {
   const [state, action, pending] = useActionState(loginAction, {});
+  const registerHref = next
+    ? `/registro?next=${encodeURIComponent(next)}`
+    : "/registro";
 
   return (
     <form action={action} className="space-y-4">
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
@@ -24,7 +29,15 @@ export function LoginForm() {
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="password">Contraseña</Label>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="password">Contraseña</Label>
+          <Link
+            href="/forgot-password"
+            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Olvidé mi contraseña
+          </Link>
+        </div>
         <Input
           id="password"
           name="password"
@@ -39,6 +52,12 @@ export function LoginForm() {
       <Button type="submit" className="w-full" disabled={pending}>
         {pending ? "Ingresando…" : "Ingresar"}
       </Button>
+      <p className="text-center text-sm text-muted-foreground">
+        ¿Sos jugador?{" "}
+        <Link href={registerHref} className="underline underline-offset-4">
+          Crear cuenta
+        </Link>
+      </p>
     </form>
   );
 }

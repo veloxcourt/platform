@@ -12,15 +12,17 @@ import { formatWeekdayName } from "@/lib/date";
 import type {
   CourtDayRule,
   CourtDaySlot,
-  PreferenceDensityLevel,
   SlotCellStatus,
 } from "@/modules/tournaments/domain/court-day-slots";
 import {
   formatDaySlotLabel,
   listSelectablePreferenceSlotsForDay,
   mergeRegistrationDaySlots,
-  preferenceDensityLabel,
-  preferenceDensityLevel,
+  PREFERENCE_HEAT_GRADIENT,
+  PREFERENCE_HEAT_MIN_PEAK,
+  preferenceHeatLabel,
+  preferenceHeatPeak,
+  preferenceHeatStyle,
   slotBoxWidthRem,
   slotDurationMinutes,
 } from "@/modules/tournaments/domain/court-day-slots";
@@ -91,19 +93,8 @@ function cellClass(
   }
 }
 
-const HEAT_CELL_CLASS: Record<PreferenceDensityLevel, string> = {
-  empty: "border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/70",
-  low: "border-lime-300 bg-lime-300 dark:border-lime-700 dark:bg-lime-700",
-  mid: "border-amber-400 bg-amber-400 dark:border-amber-600 dark:bg-amber-600",
-  full: "border-rose-400 bg-rose-500 dark:border-rose-700 dark:bg-rose-600",
-};
-
-function heatLevel(slot: CourtDaySlot): PreferenceDensityLevel {
-  return preferenceDensityLevel(
-    slot.preferenceCount ?? 0,
-    slot.courtCapacity ?? 1,
-  );
-}
+const HEAT_BLOCKED_CLASS =
+  "border-zinc-300 bg-zinc-200/80 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400";
 
 function isClickable(
   mode: SlotRuleGridMode,
@@ -257,6 +248,17 @@ export function SlotRuleGrid({
     );
   }
 
+  const heatPeak =
+    mode === "registration"
+      ? preferenceHeatPeak(
+          rules.flatMap((day) =>
+            mergeRegistrationDaySlots(day)
+              .filter((slot) => slot.status !== "blocked")
+              .map((slot) => slot.preferenceCount ?? 0),
+          ),
+        )
+      : PREFERENCE_HEAT_MIN_PEAK;
+
   return (
     <>
     <div className={cn("space-y-4", className)}>
@@ -304,10 +306,14 @@ export function SlotRuleGrid({
               className={cellClass("blocked")}
               label="Bloqueado (intermedia)"
             />
-            <LegendSwatch className={HEAT_CELL_CLASS.empty} label="Sin pedidos" />
-            <LegendSwatch className={HEAT_CELL_CLASS.low} label="Poco pedido" />
-            <LegendSwatch className={HEAT_CELL_CLASS.mid} label="Pedido" />
-            <LegendSwatch className={HEAT_CELL_CLASS.full} label="Saturado" />
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="inline-block h-3 w-16 rounded-sm border border-black/10"
+                style={{ backgroundImage: PREFERENCE_HEAT_GRADIENT }}
+                aria-hidden
+              />
+              Pocos → muchos
+            </span>
           </>
         )}
       </div>
@@ -367,66 +373,62 @@ export function SlotRuleGrid({
           {mode === "registration" ? (
             <div className="max-w-full overflow-x-auto">
               <div className="flex w-max flex-nowrap items-end gap-1.5">
-              <div className="flex flex-col gap-1">
-                <div className="flex flex-nowrap gap-1.5">
-                  {daySlots?.map((slot) => {
-                    const blocked = slot.status === "blocked";
-                    const count = slot.preferenceCount ?? 0;
-                    const capacity = slot.courtCapacity ?? 1;
-                    const level = blocked ? "empty" : heatLevel(slot);
-                    return (
-                      <div
-                        key={`${slot.id}-heat`}
-                        title={
-                          blocked
-                            ? "Reservado fase intermedia"
-                            : preferenceDensityLabel(count, capacity)
-                        }
-                        aria-hidden
-                        className={cn(
-                          "h-3.5 min-w-10 rounded-sm border",
-                          blocked
-                            ? "border-zinc-300 bg-zinc-200/80 dark:border-zinc-700 dark:bg-zinc-800/60"
-                            : HEAT_CELL_CLASS[level],
-                        )}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="flex flex-nowrap gap-1.5">
-                  {daySlots?.map((slot) => {
-                    const clickable = isClickable(mode, slot, interactive);
-                    const titleParts = [
-                      STATUS_LABEL[slot.status],
-                      `${slot.startTime}–${slot.endTime}`,
-                      slot.blockReason === "knockout"
-                        ? "Reservado fase intermedia"
-                        : null,
-                    ].filter(Boolean);
+              {daySlots?.map((slot) => {
+                const blocked = slot.status === "blocked";
+                const count = slot.preferenceCount ?? 0;
+                const clickable = isClickable(mode, slot, interactive);
+                const heatStyle = blocked
+                  ? undefined
+                  : preferenceHeatStyle(count, heatPeak);
+                const titleParts = [
+                  STATUS_LABEL[slot.status],
+                  `${slot.startTime}–${slot.endTime}`,
+                  blocked
+                    ? "Reservado fase intermedia"
+                    : preferenceHeatLabel(count),
+                ].filter(Boolean);
 
-                    return (
-                      <button
-                        key={slot.id}
-                        type="button"
-                        disabled={!clickable}
-                        title={titleParts.join(" · ")}
-                        aria-label={`${slot.startTime} ${STATUS_LABEL[slot.status]}`}
-                        onClick={() => clickable && onToggleSlot?.(slot)}
-                        className={cn(
-                          "flex h-10 min-w-10 flex-col items-center justify-center rounded-md border px-1.5 text-[10px] leading-tight transition-colors",
-                          cellClass(slot.status),
-                          clickable && "cursor-pointer",
-                          !clickable && "cursor-default opacity-95",
-                        )}
-                      >
-                        <span className="font-semibold tabular-nums">
-                          {slot.startTime}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+                return (
+                  <div key={slot.id} className="flex min-w-10 flex-col gap-1">
+                    <div
+                      title={
+                        blocked
+                          ? "Reservado fase intermedia"
+                          : preferenceHeatLabel(count)
+                      }
+                      aria-label={
+                        blocked
+                          ? "Reservado fase intermedia"
+                          : preferenceHeatLabel(count)
+                      }
+                      style={heatStyle}
+                      className={cn(
+                        "flex h-6 items-center justify-center rounded-sm border text-[11px] font-semibold tabular-nums leading-none",
+                        blocked && HEAT_BLOCKED_CLASS,
+                      )}
+                    >
+                      {blocked ? "—" : count}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!clickable}
+                      title={titleParts.join(" · ")}
+                      aria-label={`${slot.startTime} ${STATUS_LABEL[slot.status]}${blocked ? "" : ` · ${count} pedidos`}`}
+                      onClick={() => clickable && onToggleSlot?.(slot)}
+                      className={cn(
+                        "flex h-10 w-full flex-col items-center justify-center rounded-md border px-1.5 text-[10px] leading-tight transition-colors",
+                        cellClass(slot.status),
+                        clickable && "cursor-pointer",
+                        !clickable && "cursor-default opacity-95",
+                      )}
+                    >
+                      <span className="font-semibold tabular-nums">
+                        {slot.startTime}
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
               {showDayActions && (
                 <div className="flex gap-1.5">
                   <Button

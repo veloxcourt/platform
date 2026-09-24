@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { ReactNode } from "react";
-import { Layers, SlidersHorizontal } from "lucide-react";
+import { ChevronRight, Layers, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -39,7 +39,7 @@ type CategoryContextMenuState = {
   x: number;
   y: number;
   targetCategoryId: string;
-  submenu: "root" | "copyFrom";
+  submenu: "root" | "copyTo" | "cloneFrom";
 };
 
 export function TournamentConfigTabs({
@@ -61,7 +61,7 @@ export function TournamentConfigTabs({
   header?: ReactNode;
 }) {
   const readOnly = useTournamentReadOnly();
-  const [subTab, setSubTab] = useState<ConfigSubTab>(PARAMETERS_TAB);
+  const [subTab, setSubTab] = useState<ConfigSubTab>(CATEGORIES_TAB);
   const [menu, setMenu] = useState<CategoryContextMenuState | null>(null);
   const [isCopying, startCopy] = useTransition();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -72,16 +72,25 @@ export function TournamentConfigTabs({
       return;
     }
     const stillThere = categories.some((category) => category.id === subTab);
-    if (!stillThere) setSubTab(PARAMETERS_TAB);
+    if (!stillThere) {
+      setMenu(null);
+      setSubTab(CATEGORIES_TAB);
+    }
   }, [categories, subTab]);
 
   useEffect(() => {
     if (!menu) return;
 
     function onPointerDown(event: MouseEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) {
-        setMenu(null);
+      const target = event.target as Node | null;
+      if (menuRef.current?.contains(target)) return;
+      if (
+        target instanceof Element &&
+        target.closest("[data-category-menu-tab]")
+      ) {
+        return;
       }
+      setMenu(null);
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") setMenu(null);
@@ -110,9 +119,13 @@ export function TournamentConfigTabs({
     });
   }
 
-  function copyFrom(sourceCategoryId: string) {
-    if (!menu || isCopying) return;
-    const targetCategoryId = menu.targetCategoryId;
+  function menuPointFromTab(event: { currentTarget: HTMLElement }): MenuPoint {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { x: rect.left, y: rect.bottom + 4 };
+  }
+
+  function copyConfig(sourceCategoryId: string, targetCategoryId: string) {
+    if (isCopying) return;
     const source = categories.find((c) => c.id === sourceCategoryId);
     const target = categories.find((c) => c.id === targetCategoryId);
     setMenu(null);
@@ -139,7 +152,7 @@ export function TournamentConfigTabs({
   const menuTarget = menu
     ? categories.find((c) => c.id === menu.targetCategoryId)
     : null;
-  const copySources = menu
+  const otherCategories = menu
     ? categories.filter((c) => c.id !== menu.targetCategoryId)
     : [];
 
@@ -156,27 +169,48 @@ export function TournamentConfigTabs({
         aria-label="Secciones de configuración"
       >
         <StableTabButton
-          active={subTab === PARAMETERS_TAB}
-          onSelect={() => setSubTab(PARAMETERS_TAB)}
-        >
-          <SlidersHorizontal />
-          Parámetros
-        </StableTabButton>
-        <StableTabButton
           active={subTab === CATEGORIES_TAB}
-          onSelect={() => setSubTab(CATEGORIES_TAB)}
+          onSelect={() => {
+            setMenu(null);
+            setSubTab(CATEGORIES_TAB);
+          }}
         >
           <Layers />
           Categorías
         </StableTabButton>
+        <StableTabButton
+          active={subTab === PARAMETERS_TAB}
+          onSelect={() => {
+            setMenu(null);
+            setSubTab(PARAMETERS_TAB);
+          }}
+        >
+          <SlidersHorizontal />
+          Parámetros
+        </StableTabButton>
         {categories.map((category) => {
           const canCopy = !readOnly && categories.length >= 2;
+          const isActive = subTab === category.id;
           return (
             <StableTabButton
               key={category.id}
-              active={subTab === category.id}
-              onSelect={() => {
+              active={isActive}
+              data-category-menu-tab=""
+              aria-haspopup={canCopy ? "menu" : undefined}
+              aria-expanded={
+                canCopy ? menu?.targetCategoryId === category.id : undefined
+              }
+              onSelect={(event) => {
                 if (consumedHoldClick(menuHoldRef)) return;
+                if (isActive && canCopy) {
+                  if (menu?.targetCategoryId === category.id) {
+                    setMenu(null);
+                    return;
+                  }
+                  openCategoryMenu(menuPointFromTab(event), category.id);
+                  return;
+                }
+                setMenu(null);
                 setSubTab(category.id);
               }}
               {...bindFieldMenuTrigger(
@@ -186,7 +220,9 @@ export function TournamentConfigTabs({
               )}
               title={
                 canCopy
-                  ? "Clic derecho o mantené 2 s (tablet/celular): copiar configuración"
+                  ? isActive
+                    ? "Clic de nuevo: copiar o clonar la configuración"
+                    : "Clic derecho o mantené 2 s: copiar o clonar la configuración"
                   : undefined
               }
               className={canCopy ? "select-none" : undefined}
@@ -265,7 +301,7 @@ export function TournamentConfigTabs({
           className="fixed z-50 min-w-52 rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
           style={{
             left: Math.min(menu.x, window.innerWidth - 220),
-            top: Math.min(menu.y, window.innerHeight - 160),
+            top: Math.min(menu.y, window.innerHeight - 220),
           }}
         >
           {menu.submenu === "root" ? (
@@ -276,14 +312,50 @@ export function TournamentConfigTabs({
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-                disabled={copySources.length === 0 || isCopying}
-                onClick={() =>
-                  setMenu({ ...menu, submenu: "copyFrom" })
-                }
+                className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                disabled={otherCategories.length === 0 || isCopying}
+                onClick={() => setMenu({ ...menu, submenu: "copyTo" })}
               >
-                Copiar configuración desde…
+                Copiar
+                <ChevronRight className="size-4 shrink-0 opacity-60" />
               </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                disabled={otherCategories.length === 0 || isCopying}
+                onClick={() => setMenu({ ...menu, submenu: "cloneFrom" })}
+              >
+                Clonar
+                <ChevronRight className="size-4 shrink-0 opacity-60" />
+              </button>
+            </>
+          ) : menu.submenu === "copyTo" ? (
+            <>
+              <button
+                type="button"
+                className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                onClick={() => setMenu({ ...menu, submenu: "root" })}
+              >
+                ← Volver
+              </button>
+              <p className="px-2 py-1 text-xs text-muted-foreground">
+                Copiar {menuTarget.name} a
+              </p>
+              {otherCategories.map((destination) => (
+                <button
+                  key={destination.id}
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                  disabled={isCopying}
+                  onClick={() =>
+                    copyConfig(menu.targetCategoryId, destination.id)
+                  }
+                >
+                  {destination.name}
+                </button>
+              ))}
             </>
           ) : (
             <>
@@ -295,16 +367,18 @@ export function TournamentConfigTabs({
                 ← Volver
               </button>
               <p className="px-2 py-1 text-xs text-muted-foreground">
-                Origen para {menuTarget.name}
+                Clonar en {menuTarget.name} desde
               </p>
-              {copySources.map((source) => (
+              {otherCategories.map((source) => (
                 <button
                   key={source.id}
                   type="button"
                   role="menuitem"
                   className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
                   disabled={isCopying}
-                  onClick={() => copyFrom(source.id)}
+                  onClick={() =>
+                    copyConfig(source.id, menu.targetCategoryId)
+                  }
                 >
                   {source.name}
                 </button>

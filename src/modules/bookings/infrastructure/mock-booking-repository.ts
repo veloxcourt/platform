@@ -61,6 +61,7 @@ interface ClubRecord {
     active: boolean;
     sortOrder: number;
     showInPriceMenu: boolean;
+    showInClientMenu: boolean;
   })[];
 }
 
@@ -285,12 +286,17 @@ export class MockBookingRepository implements BookingRepository {
         id: p.id,
         fullName: p.name,
         phone: null,
+        gender: p.gender ?? null,
+        city: p.city ?? null,
         category: null,
         courtPosition: null,
         ranking: null,
         accumulatedPoints: 0,
         photoUrl: null,
         balance: balanceOf(p.id),
+        inviteSentAt: null,
+        inviteForTournamentId: null,
+        inviteNote: null,
       }))
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
   }
@@ -310,7 +316,7 @@ export class MockBookingRepository implements BookingRepository {
       email: "",
       gender: "",
       birthDate: "",
-      city: "",
+      city: p.city ?? "",
       address: "",
       country: "",
       category: "",
@@ -329,6 +335,7 @@ export class MockBookingRepository implements BookingRepository {
       id: `pl-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       name: `${input.firstName} ${input.lastName}`.trim(),
       gender: input.gender || null,
+      city: input.city ? input.city : null,
     };
     record.players.push(player);
     return player;
@@ -341,7 +348,10 @@ export class MockBookingRepository implements BookingRepository {
   ): Promise<void> {
     const record = getOrCreateRecord(clubId);
     const p = record.players.find((x) => x.id === userId);
-    if (p) p.name = `${input.firstName} ${input.lastName}`.trim();
+    if (p) {
+      p.name = `${input.firstName} ${input.lastName}`.trim();
+      p.city = input.city ? input.city : null;
+    }
   }
 
   async deletePlayer(
@@ -613,7 +623,8 @@ export class MockBookingRepository implements BookingRepository {
         photoUrl: p.photoUrl,
         active: p.active,
         sortOrder: p.sortOrder,
-        showInPriceMenu: p.showInPriceMenu,
+        showInPriceMenu: p.showInPriceMenu === true,
+        showInClientMenu: p.showInClientMenu === true,
       }))
       .sort(
         (a, b) =>
@@ -686,6 +697,7 @@ export class MockBookingRepository implements BookingRepository {
       photoUrl: null,
       sortOrder,
       showInPriceMenu: false,
+      showInClientMenu: false,
     });
     return { ok: true, id };
   }
@@ -732,6 +744,15 @@ export class MockBookingRepository implements BookingRepository {
   ): Promise<void> {
     const p = getOrCreateRecord(clubId).products.find((x) => x.id === id);
     if (p) p.showInPriceMenu = showInPriceMenu;
+  }
+
+  async setProductShowInClientMenu(
+    clubId: string,
+    id: string,
+    showInClientMenu: boolean,
+  ): Promise<void> {
+    const p = getOrCreateRecord(clubId).products.find((x) => x.id === id);
+    if (p) p.showInClientMenu = showInClientMenu;
   }
 
   async reorderProducts(clubId: string, orderedIds: string[]): Promise<void> {

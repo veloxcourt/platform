@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { firstDestinationModule } from "@/lib/auth/permissions";
+import { clearPasswordResetRequired } from "@/lib/auth/password-reset";
 import { prisma } from "@/lib/prisma";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -31,6 +32,8 @@ export async function setPasswordAction(
   const { error } = await supabase.auth.updateUser({ password });
   if (error) return { error: "No se pudo guardar la contraseña." };
 
+  await clearPasswordResetRequired();
+
   const localUser = await prisma.user.findUnique({
     where: { authUserId: user.id },
     include: {
@@ -51,7 +54,7 @@ export async function setPasswordAction(
   });
 
   const membership = localUser?.memberships[0];
-  if (!membership) redirect("/login");
+  if (!membership) redirect("/cuenta");
   const privileges =
     membership.userType?.privileges ?? membership.allowedModules;
   const destinationModule = firstDestinationModule(

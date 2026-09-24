@@ -1,3 +1,5 @@
+import { randomBytes } from "crypto";
+
 import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import type {
   TournamentRepository,
@@ -45,6 +47,7 @@ import type {
   SlotReservationItem,
   TournamentCategoryItem,
   TournamentConfig,
+  TournamentInscriptionsItem,
   TournamentListItem,
   TournamentStatus,
   ZonasTournamentDetail,
@@ -253,6 +256,8 @@ function mapStoredPlayDay(day: {
   overnightExtraSlots?: number | null;
   enabledSlotIndexes?: number[] | null;
   hasSlotSelection?: boolean | null;
+  intermediateSlotIndexes?: number[] | null;
+  isIntermediateDay?: boolean | null;
 }): PlayDayValues {
   return toPlayDayValues({
     date: fromDbDate(day.date),
@@ -261,6 +266,8 @@ function mapStoredPlayDay(day: {
     overnightExtraSlots: day.overnightExtraSlots,
     enabledSlotIndexes: day.enabledSlotIndexes,
     hasSlotSelection: day.hasSlotSelection,
+    intermediateSlotIndexes: day.intermediateSlotIndexes,
+    isIntermediateDay: day.isIntermediateDay,
   });
 }
 
@@ -276,6 +283,7 @@ function mapPair(row: {
   player2PaymentStatus: string;
   paymentStatus: string;
   createdAt: Date;
+  manageToken?: string | null;
   category: { name: string };
   player1: { id: string; fullName: string };
   player2: { id: string; fullName: string } | null;
@@ -302,6 +310,7 @@ function mapPair(row: {
       hasPlayer2,
     ),
     createdAt: row.createdAt.toISOString(),
+    manageToken: row.manageToken ?? null,
   };
 }
 
@@ -636,6 +645,60 @@ export class PrismaTournamentRepository implements TournamentRepository {
     );
   }
 
+  async listTournamentInscriptions(
+    clubId: string,
+  ): Promise<TournamentInscriptionsItem[]> {
+    const rows = await prisma.tournament.findMany({
+      where: { clubId },
+      orderBy: { startDate: "desc" },
+      select: {
+        id: true,
+        name: true,
+        startDate: true,
+        categories: {
+          orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+          select: {
+            id: true,
+            name: true,
+            catalogCategory: { select: { name: true } },
+          },
+        },
+      },
+    });
+    if (rows.length === 0) return [];
+
+    const pairs = await prisma.tournamentPair.findMany({
+      where: {
+        tournamentId: { in: rows.map((r) => r.id) },
+        status: { not: "CANCELLED" },
+      },
+      select: { categoryId: true, player1Id: true, player2Id: true },
+    });
+
+    const playersByCategory = new Map<string, Set<string>>();
+    for (const pair of pairs) {
+      let ids = playersByCategory.get(pair.categoryId);
+      if (!ids) {
+        ids = new Set<string>();
+        playersByCategory.set(pair.categoryId, ids);
+      }
+      ids.add(pair.player1Id);
+      if (pair.player2Id) ids.add(pair.player2Id);
+    }
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      startDate: fromDbDate(row.startDate),
+      categories: row.categories.map((category) => ({
+        id: category.id,
+        name:
+          category.catalogCategory?.name ?? normalizeCategoryLabel(category.name),
+        playerIds: [...(playersByCategory.get(category.id) ?? [])],
+      })),
+    }));
+  }
+
   async getZonasTournamentDetail(
     clubId: string,
     tournamentId: string,
@@ -750,6 +813,64 @@ export class PrismaTournamentRepository implements TournamentRepository {
       abbreviation: row.abbreviation,
       color: row.color,
     };
+  }
+
+  async updateCatalogCategory(
+    clubId: string,
+    id: string,
+    input: CalendarCategoryValues,
+  ): Promise<CatalogCategory | { error: string } | null> {
+    const existing = await prisma.calendarPlannerCategory.findFirst({
+      where: { id, clubId },
+      select: { id: true },
+    });
+    if (!existing) return null;
+
+    const clash = await prisma.calendarPlannerCategory.findFirst({
+      where: {
+        clubId,
+        id: { not: id },
+        abbreviation: { equals: input.abbreviation, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    if (clash) return { error: "Ya existe una categoría con esa abreviación" };
+
+    const nameClash = await prisma.calendarPlannerCategory.findFirst({
+      where: {
+        clubId,
+        id: { not: id },
+        name: { equals: input.name, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    if (nameClash) return { error: "Ya existe una categoría con ese nombre" };
+
+    try {
+      const row = await prisma.$transaction(async (tx) => {
+        const updated = await tx.calendarPlannerCategory.update({
+          where: { id },
+          data: {
+            name: input.name,
+            abbreviation: input.abbreviation,
+            color: input.color,
+          },
+        });
+        await tx.tournamentCategory.updateMany({
+          where: { catalogCategoryId: id },
+          data: { name: input.name },
+        });
+        return updated;
+      });
+      return {
+        id: row.id,
+        name: row.name,
+        abbreviation: row.abbreviation,
+        color: row.color,
+      };
+    } catch {
+      return { error: "No se pudo actualizar la categoría" };
+    }
   }
 
   async createTournamentCategory(
@@ -1151,6 +1272,8 @@ export class PrismaTournamentRepository implements TournamentRepository {
             overnightExtraSlots: true,
             enabledSlotIndexes: true,
             hasSlotSelection: true,
+            intermediateSlotIndexes: true,
+            isIntermediateDay: true,
           },
         },
       },
@@ -1200,7 +1323,10 @@ export class PrismaTournamentRepository implements TournamentRepository {
     clubId: string,
     tournamentId: string,
     input: AddPairValues,
-  ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  ): Promise<
+    | { ok: true; id: string; manageToken?: string | null }
+    | { ok: false; error: string }
+  > {
     const tournament = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId, type: "ZONAS" },
       select: { id: true },
@@ -1242,10 +1368,11 @@ export class PrismaTournamentRepository implements TournamentRepository {
         categoryId: input.categoryId,
         player1Id: input.player1Id,
         player2Id,
+        manageToken: randomBytes(24).toString("base64url"),
       },
-      select: { id: true },
+      select: { id: true, manageToken: true },
     });
-    return { ok: true, id: created.id };
+    return { ok: true, id: created.id, manageToken: created.manageToken };
   }
 
   async updatePair(

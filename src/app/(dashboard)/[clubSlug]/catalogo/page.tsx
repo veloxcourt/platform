@@ -1,13 +1,13 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ListOrdered } from "lucide-react";
 
 import { enforceClubModulePage } from "@/lib/auth/access";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import { CatalogView } from "@/components/features/catalog/catalog-view";
+import {
+  ClientMenuQrButton,
+  PriceMenuLinkButton,
+} from "@/components/features/catalog/client-menu-qr-dialog";
 import { ExportCatalogButton } from "@/components/features/catalog/export-catalog-dialog";
-import { buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 export const metadata = {
   title: "Catálogo · VeloxCourt",
@@ -31,23 +31,15 @@ export default async function CatalogoPage({
   ]);
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Catálogo</h1>
-          <p className="text-sm text-muted-foreground">
-            {club.name} · productos y tipos
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {club.name} · productos y tipos
+        </p>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <ExportCatalogButton clubSlug={clubSlug} />
-          <Link
-            href={`/${clubSlug}/catalogo/menu`}
-            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-          >
-            <ListOrdered className="size-4" />
-            Menú de precios
-          </Link>
+          <ClientMenuQrButton clubSlug={clubSlug} />
+          <PriceMenuLinkButton clubSlug={clubSlug} />
         </div>
       </div>
 

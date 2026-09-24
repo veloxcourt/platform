@@ -15,6 +15,8 @@ const nextConfig: NextConfig = {
     "192.168.18.62",
     ...extraDevOrigins,
   ],
+  /// Evita que Webpack embeba un Prisma Client viejo tras `prisma generate`.
+  serverExternalPackages: ["@prisma/client", "prisma"],
 };
 
 export default nextConfig;

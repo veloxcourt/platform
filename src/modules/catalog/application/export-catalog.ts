@@ -193,6 +193,7 @@ export async function exportCatalog(input: {
               active: product.active,
               sortOrder,
               showInPriceMenu: product.showInPriceMenu,
+              showInClientMenu: product.showInClientMenu,
               createdById: createdById ?? null,
             },
           });

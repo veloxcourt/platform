@@ -139,6 +139,11 @@ export interface BookingRepository {
     id: string,
     showInPriceMenu: boolean,
   ): Promise<void>;
+  setProductShowInClientMenu(
+    clubId: string,
+    id: string,
+    showInClientMenu: boolean,
+  ): Promise<void>;
   reorderProducts(clubId: string, orderedIds: string[]): Promise<void>;
   setProductPhoto(
     clubId: string,

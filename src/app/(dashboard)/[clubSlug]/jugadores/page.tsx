@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 
+import { getClubAccess } from "@/lib/auth/access";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import { getPlayersList } from "@/modules/bookings/application/get-players-list";
+import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
 import { PlayersTable } from "@/components/features/players/players-table";
 
 export const metadata = {
@@ -19,20 +21,23 @@ export default async function JugadoresPage({
   const data = await getPlayersList(repo, clubSlug);
   if (!data) notFound();
 
+  const access = await getClubAccess(clubSlug);
+  const tournaments = access?.allowedModules.includes("torneos")
+    ? await getTournamentRepository().listTournamentInscriptions(data.club.id)
+    : [];
+
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-4">
-      <div className="shrink-0">
-        <h1 className="text-xl font-semibold">Jugadores</h1>
-        <p className="text-sm text-muted-foreground">
-          {data.club.name} · {data.players.length} jugadores
-        </p>
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <p className="shrink-0 text-sm text-muted-foreground">
+        {data.club.name} · {data.players.length} jugadores
+      </p>
 
       <PlayersTable
         clubSlug={clubSlug}
         currency={data.club.currency}
         players={data.players}
         categories={data.categories}
+        tournaments={tournaments}
       />
     </div>
   );

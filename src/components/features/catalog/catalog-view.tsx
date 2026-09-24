@@ -47,6 +47,7 @@ import {
   getProductAction,
   reorderProductsAction,
   setProductActiveAction,
+  setProductShowInClientMenuAction,
   setProductShowInPriceMenuAction,
   updateProductTypeAction,
 } from "@/app/(dashboard)/[clubSlug]/catalogo/actions";
@@ -318,6 +319,24 @@ export function CatalogView({
     });
   }
 
+  function toggleClientMenu(id: string, showInClientMenu: boolean) {
+    setOrdered((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, showInClientMenu } : p)),
+    );
+    startTransition(async () => {
+      const r = await setProductShowInClientMenuAction(
+        clubSlug,
+        id,
+        showInClientMenu,
+      );
+      if (r.ok) router.refresh();
+      else {
+        toast.error("Error", { description: r.error });
+        router.refresh();
+      }
+    });
+  }
+
   function onDragStart(id: string, e: React.DragEvent) {
     if (!canReorder) {
       e.preventDefault();
@@ -493,6 +512,12 @@ export function CatalogView({
                   >
                     Menú
                   </th>
+                  <th
+                    className="px-3 py-2 text-center font-medium"
+                    title="Publicar en el menú que ve el cliente al escanear el QR"
+                  >
+                    Cliente
+                  </th>
                   <th className="px-3 py-2" />
                 </tr>
               </thead>
@@ -500,7 +525,7 @@ export function CatalogView({
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={11}
+                      colSpan={12}
                       className="px-3 py-6 text-center text-muted-foreground"
                     >
                       Sin productos.
@@ -621,12 +646,22 @@ export function CatalogView({
                         </td>
                         <td className="px-3 py-2 text-center align-middle">
                           <Checkbox
-                            checked={p.showInPriceMenu}
+                            checked={p.showInPriceMenu === true}
                             disabled={isPending}
                             onCheckedChange={(v) =>
                               toggleMenu(p.id, v === true)
                             }
                             aria-label={`Publicar ${p.name} en menú de precios`}
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center align-middle">
+                          <Checkbox
+                            checked={p.showInClientMenu === true}
+                            disabled={isPending}
+                            onCheckedChange={(v) =>
+                              toggleClientMenu(p.id, v === true)
+                            }
+                            aria-label={`Publicar ${p.name} en el menú de clientes`}
                           />
                         </td>
                         <td className="px-3 py-2">

@@ -21,11 +21,13 @@ import { EcoTorneoPlanilla } from "./eco-torneo-planilla";
 
 export function EcoTorneoView({
   clubSlug,
+  clubName,
   currency,
   simulations,
   active,
 }: {
   clubSlug: string;
+  clubName: string;
   currency: string;
   simulations: EcoTorneoSimulationListItem[];
   active: EcoTorneoSimulationDetail | null;
@@ -74,7 +76,9 @@ export function EcoTorneoView({
       <EcoTorneoPlanilla
         key={active.id}
         clubSlug={clubSlug}
+        clubName={clubName}
         simulationId={active.id}
+        simulationName={active.name}
         currency={currency}
         initialItems={active.items}
         initialGroups={active.groups ?? []}

@@ -74,34 +74,69 @@ export interface CourtDaySlot {
   courtCapacity?: number;
 }
 
-export type PreferenceDensityLevel = "empty" | "low" | "mid" | "full";
+/// Piso del rojo: un solo pedido no llega a saturado.
+export const PREFERENCE_HEAT_MIN_PEAK = 2;
 
-export function preferenceDensityLevel(
-  count: number,
-  capacity: number,
-): PreferenceDensityLevel {
-  if (count <= 0) return "empty";
-  const ratio = count / Math.max(1, capacity);
-  if (ratio >= 1) return "full";
-  if (ratio >= 0.5) return "mid";
-  return "low";
+const HEAT_GREEN = { r: 34, g: 197, b: 94 };
+const HEAT_YELLOW = { r: 234, g: 179, b: 8 };
+const HEAT_RED = { r: 244, g: 63, b: 94 };
+
+export const PREFERENCE_HEAT_GRADIENT =
+  "linear-gradient(to right, rgb(34 197 94), rgb(234 179 8), rgb(244 63 94))";
+
+export function preferenceHeatPeak(counts: number[]): number {
+  let maxCount = 0;
+  for (const count of counts) {
+    if (count > maxCount) maxCount = count;
+  }
+  return Math.max(PREFERENCE_HEAT_MIN_PEAK, maxCount);
 }
 
-export function preferenceDensityLabel(
+export function preferenceHeatT(count: number, peak: number): number {
+  if (count <= 0) return 0;
+  return Math.min(1, count / Math.max(1, peak));
+}
+
+function lerpChannel(from: number, to: number, t: number): number {
+  return Math.round(from + (to - from) * t);
+}
+
+export function preferenceHeatRgb(t: number): { r: number; g: number; b: number } {
+  const clamped = Math.min(1, Math.max(0, t));
+  const from = clamped <= 0.5 ? HEAT_GREEN : HEAT_YELLOW;
+  const to = clamped <= 0.5 ? HEAT_YELLOW : HEAT_RED;
+  const u = clamped <= 0.5 ? clamped / 0.5 : (clamped - 0.5) / 0.5;
+  return {
+    r: lerpChannel(from.r, to.r, u),
+    g: lerpChannel(from.g, to.g, u),
+    b: lerpChannel(from.b, to.b, u),
+  };
+}
+
+function rgbCss(rgb: { r: number; g: number; b: number }): string {
+  return `rgb(${rgb.r} ${rgb.g} ${rgb.b})`;
+}
+
+export function preferenceHeatStyle(
   count: number,
-  capacity: number,
-): string {
-  const cap = Math.max(1, capacity);
-  switch (preferenceDensityLevel(count, cap)) {
-    case "empty":
-      return "Libre";
-    case "low":
-      return `Poco pedido (${count}/${cap})`;
-    case "mid":
-      return `Pedido (${count}/${cap})`;
-    case "full":
-      return `Saturado (${count}/${cap})`;
-  }
+  peak: number,
+): { backgroundColor: string; borderColor: string; color: string } {
+  const rgb = preferenceHeatRgb(preferenceHeatT(count, peak));
+  const luminance = (0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b) / 255;
+  return {
+    backgroundColor: rgbCss(rgb),
+    borderColor: rgbCss({
+      r: Math.round(rgb.r * 0.82),
+      g: Math.round(rgb.g * 0.82),
+      b: Math.round(rgb.b * 0.82),
+    }),
+    color: luminance > 0.62 ? "rgb(20 20 20)" : "rgb(255 255 255)",
+  };
+}
+
+export function preferenceHeatLabel(count: number): string {
+  if (count <= 0) return "Sin pedidos";
+  return count === 1 ? "1 pedido" : `${count} pedidos`;
 }
 
 export interface SlotReservationRef {
@@ -283,6 +318,41 @@ export function applyTrailingBlock(
       slot.blockReason = reason;
       remaining -= 1;
     }
+  }
+}
+
+/// Bloqueo explícito: marca los slotIndex indicados como blocked.
+export function applyIntermediateSlotIndexes(
+  slots: CourtDaySlot[],
+  playDate: string,
+  slotIndexes: number[],
+  reason: SlotBlockReason,
+): void {
+  if (slotIndexes.length === 0) return;
+  const indexSet = new Set(slotIndexes);
+  for (const slot of slots) {
+    if (slot.playDate !== playDate) continue;
+    if (!indexSet.has(slot.slotIndex)) continue;
+    if (slot.status !== "free") continue;
+    slot.status = "blocked";
+    slot.blockReason = reason;
+  }
+}
+
+/// Bloqueo explícito: desde `fromSlotIndex` (inclusive) hasta el final del día.
+export function applyIntermediateFromCutoff(
+  slots: CourtDaySlot[],
+  playDate: string,
+  fromSlotIndex: number,
+  reason: SlotBlockReason,
+): void {
+  if (!Number.isFinite(fromSlotIndex) || fromSlotIndex < 0) return;
+  for (const slot of slots) {
+    if (slot.playDate !== playDate) continue;
+    if (slot.slotIndex < fromSlotIndex) continue;
+    if (slot.status !== "free") continue;
+    slot.status = "blocked";
+    slot.blockReason = reason;
   }
 }
 
@@ -478,11 +548,17 @@ function collapseRulesToMatches(
       cellMinutesByDate.get(rule.playDate) ??
       rule.slotMinutes ??
       MATCH_SLOT_UNIT_MIN;
+    // Huecos libres del tamaño del slot del día (75), no del cuadrado de 60.
+    const visualUnit = rule.slotMinutes ?? cellMinutes;
     return {
       ...rule,
       courts: rule.courts.map((court) => ({
         ...court,
-        slots: collapseCourtSlotsToMatches(court.slots, cellMinutes),
+        slots: collapseCourtSlotsToMatches(
+          court.slots,
+          cellMinutes,
+          visualUnit,
+        ),
       })),
     };
   });
@@ -580,7 +656,15 @@ export function buildZonesRegistrationGrid(
   input: BuildZonesRegistrationGridInput,
 ): CourtDayRule[] {
   const zonesDates = new Set(input.zonesPlayDates.filter(Boolean));
-  const knockoutDates = new Set(input.knockoutPlayDates.filter(Boolean));
+  const flaggedIntermediateDates = input.playDays
+    .filter((d) => d.date && d.isIntermediateDay)
+    .map((d) => d.date);
+  const knockoutDates = new Set(
+    (flaggedIntermediateDates.length > 0
+      ? flaggedIntermediateDates
+      : input.knockoutPlayDates
+    ).filter(Boolean),
+  );
   const zonesDays = input.playDays.filter((d) => d.date && zonesDates.has(d.date));
   const sharedDates = [...zonesDates].filter((d) => knockoutDates.has(d));
 
@@ -602,7 +686,19 @@ export function buildZonesRegistrationGrid(
     sharedDates.length,
   );
 
+  const playDayByDate = new Map(
+    input.playDays.filter((d) => d.date).map((d) => [d.date, d]),
+  );
+
   for (const date of sharedDates) {
+    const marked =
+      playDayByDate.get(date)?.intermediateSlotIndexes?.filter((value) =>
+        Number.isFinite(value),
+      ) ?? [];
+    if (marked.length > 0) {
+      applyIntermediateSlotIndexes(slots, date, marked, "knockout");
+      continue;
+    }
     applyTrailingBlock(
       slots,
       date,
@@ -863,11 +959,8 @@ export function buildMatchesRuleGrid(input: {
     const dayDurations = input.matches
       .filter((match) => match.playDate === day.date && match.durationMinutes)
       .map((match) => match.durationMinutes as number);
-    const packMinutes = gcdOf([
-      ...dayDurations,
-      visualMinutes,
-      MATCH_SLOT_UNIT_MIN,
-    ]);
+    // Solo duraciones reales. Meter 60 junto a 75 da MCD 15 y cajas de 15 min.
+    const packMinutes = gcdOf([...dayDurations, visualMinutes]);
     slotMinutesByDate.set(day.date, visualMinutes);
     packMinutesByDate.set(day.date, packMinutes);
     slots.push(
@@ -901,7 +994,7 @@ export function buildMatchesRuleGrid(input: {
     if (!slot && match.startTime) {
       const minutes =
         match.durationMinutes ??
-        packMinutesByDate.get(match.playDate) ??
+        slotMinutesByDate.get(match.playDate) ??
         fallback;
       const startMin = timeToMinutes(match.startTime);
       slot = {
@@ -924,7 +1017,11 @@ export function buildMatchesRuleGrid(input: {
     }
     if (!slot) continue;
     const cellMinutes = packMinutesByDate.get(match.playDate) ?? fallback;
-    const duration = match.durationMinutes ?? cellMinutes;
+    const dayMinutes = slotMinutesByDate.get(match.playDate) ?? fallback;
+    const duration =
+      match.durationMinutes && match.durationMinutes > 0
+        ? match.durationMinutes
+        : dayMinutes;
     const cellsNeeded = Math.max(1, Math.ceil(duration / cellMinutes));
     const block =
       consecutiveSlotsOnCourt(slots, slot, cellsNeeded) ?? [slot];
@@ -1108,10 +1205,10 @@ export function buildSimulationRuleGrid(
       input.zonesSlotMinutes,
     );
     const visualMinutes = slotStepMinutes(sizes, input.zonesSlotMinutes);
-    const packMinutes = gcdOf([...sizes, MATCH_SLOT_UNIT_MIN]);
+    const packMinutes = gcdOf(sizes.length > 0 ? sizes : [visualMinutes]);
     slotMinutesByDate.set(day.date, visualMinutes);
     packMinutesByDate.set(day.date, packMinutes);
-    // Empaqueta en el MCD (60 y 90 → 30) y después cada partido es una caja.
+    // Empaqueta en el MCD de las duraciones reales (60 y 90 → 30).
     slots.push(
       ...buildEmptyCourtDaySlots(
         { ...day, hasSlotSelection: false },

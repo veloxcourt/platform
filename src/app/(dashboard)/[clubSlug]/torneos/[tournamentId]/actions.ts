@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { requireClubModuleAccess } from "@/lib/auth/access";
 import { getZonasTournamentDetail } from "@/modules/tournaments/application/get-zonas-tournament-detail";
+import { ensurePairManagePath } from "@/modules/tournaments/application/find-public-pair";
 import { addPairSchema, updatePairSchema } from "@/modules/tournaments/domain/pair-schema";
 import type { AddPairValues, UpdatePairValues } from "@/modules/tournaments/domain/pair-schema";
 import {
@@ -581,4 +582,14 @@ export async function getZonasTournamentDetailAction(
 ) {
   const repo = getTournamentRepository();
   return getZonasTournamentDetail(repo, clubSlug, tournamentId);
+}
+
+export async function getPairManageLinkAction(
+  clubSlug: string,
+  tournamentId: string,
+  pairId: string,
+): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  const { clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+  return ensurePairManagePath(clubId, tournamentId, pairId);
 }

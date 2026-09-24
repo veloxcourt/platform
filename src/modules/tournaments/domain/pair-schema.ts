@@ -26,5 +26,6 @@ export type UpdatePairValues = z.infer<typeof updatePairSchema>;
 export const REGISTRATION_STATUS_LABELS = {
   PENDING: "Pendiente",
   CONFIRMED: "Confirmado",
+  CANCEL_REQUESTED: "Pedido de baja",
   CANCELLED: "Cancelada",
 } as const;

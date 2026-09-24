@@ -65,6 +65,7 @@ export default async function EcoTorneoPage({
 
       <EcoTorneoView
         clubSlug={clubSlug}
+        clubName={club.name}
         currency={club.currency}
         simulations={simulations}
         active={active}

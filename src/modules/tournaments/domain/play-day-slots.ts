@@ -48,6 +48,8 @@ export function playDayPersistFields(day: PlayDayValues): {
   overnightExtraSlots: number;
   enabledSlotIndexes: number[];
   hasSlotSelection: boolean;
+  intermediateSlotIndexes: number[];
+  isIntermediateDay: boolean;
 } {
   return {
     startTime: day.startTime,
@@ -55,6 +57,8 @@ export function playDayPersistFields(day: PlayDayValues): {
     overnightExtraSlots: day.overnightExtraSlots ?? 0,
     enabledSlotIndexes: day.enabledSlotIndexes ?? [],
     hasSlotSelection: day.hasSlotSelection ?? false,
+    intermediateSlotIndexes: [...(day.intermediateSlotIndexes ?? [])],
+    isIntermediateDay: day.isIntermediateDay === true,
   };
 }
 
@@ -65,7 +69,26 @@ export function toPlayDayValues(day: {
   overnightExtraSlots?: number | null;
   enabledSlotIndexes?: number[] | null;
   hasSlotSelection?: boolean | null;
+  intermediateSlotIndexes?: number[] | null;
+  /** @deprecated legado: se convierte a intermediateSlotIndexes */
+  intermediateFromSlotIndex?: number | null;
+  isIntermediateDay?: boolean | null;
 }): PlayDayValues {
+  const fromLegacy =
+    day.intermediateFromSlotIndex == null
+      ? []
+      : [Math.max(0, Math.trunc(day.intermediateFromSlotIndex))];
+  const intermediateSlotIndexes = [
+    ...new Set(
+      (day.intermediateSlotIndexes?.length
+        ? day.intermediateSlotIndexes
+        : fromLegacy
+      )
+        .filter((value) => Number.isFinite(value) && value >= 0)
+        .map((value) => Math.trunc(value)),
+    ),
+  ].sort((a, b) => a - b);
+
   return {
     date: day.date,
     startTime: day.startTime,
@@ -73,6 +96,8 @@ export function toPlayDayValues(day: {
     overnightExtraSlots: day.overnightExtraSlots ?? 0,
     enabledSlotIndexes: [...(day.enabledSlotIndexes ?? [])],
     hasSlotSelection: day.hasSlotSelection ?? false,
+    intermediateSlotIndexes,
+    isIntermediateDay: day.isIntermediateDay === true,
   };
 }
 
@@ -239,6 +264,19 @@ export function remapEnabledSlotIndexes(
     .map((slot) => slot.slotIndex);
 }
 
+/// Remapea un índice de corte por hora de inicio al cambiar la regla.
+export function remapSlotIndexByStartTime(
+  previous: PlayDayRulerSlot[],
+  previousIndex: number | null | undefined,
+  next: PlayDayRulerSlot[],
+): number | null {
+  if (previousIndex == null) return null;
+  const startTime = previous[previousIndex]?.startTime;
+  if (!startTime) return null;
+  const match = next.find((slot) => slot.startTime === startTime);
+  return match ? match.slotIndex : null;
+}
+
 export function materializePlayDaySelection(
   day: PlayDayValues,
   slotMinutes: number,
@@ -345,6 +383,11 @@ export function adjustPlayDayWindow(
       overnightExtraSlots: overnight,
       enabledSlotIndexes: nextEnabled,
       hasSlotSelection: true,
+      intermediateSlotIndexes: remapEnabledSlotIndexes(
+        ruler,
+        current.intermediateSlotIndexes ?? [],
+        nextRuler,
+      ),
       endTime: derivePlayDayEndTime(nextStart, nextRuler, nextEnabled),
     };
   }
@@ -369,6 +412,11 @@ export function adjustPlayDayWindow(
     overnightExtraSlots: nextOvernight,
     enabledSlotIndexes: nextEnabled,
     hasSlotSelection: true,
+    intermediateSlotIndexes: remapEnabledSlotIndexes(
+      ruler,
+      current.intermediateSlotIndexes ?? [],
+      nextRuler,
+    ),
     endTime: derivePlayDayEndTime(current.startTime, nextRuler, nextEnabled),
   };
 }

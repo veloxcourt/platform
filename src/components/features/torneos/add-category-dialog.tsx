@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 import { CatalogCategoryCreateForm } from "@/components/features/categorias/catalog-category-create-form";
@@ -12,11 +13,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
 import type { TournamentCategoryItem } from "@/modules/tournaments/domain/types";
 import {
   createCatalogAndAddCategoryAction,
   createCategoryAction,
+  updateCatalogCategoryAction,
 } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/categorias/actions";
 
 function isAlreadyInTournament(
@@ -48,6 +51,10 @@ export function AddCategoryDialog({
   onAdded: () => void;
 }) {
   const [showCreate, setShowCreate] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editAbbreviation, setEditAbbreviation] = useState("");
+  const [editColor, setEditColor] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const sortedCatalog = useMemo(
@@ -61,10 +68,19 @@ export function AddCategoryDialog({
   useEffect(() => {
     if (!open) {
       setShowCreate(false);
+      setEditingId(null);
       return;
     }
     setShowCreate(catalogCategories.length === 0);
   }, [open, catalogCategories.length]);
+
+  function startEdit(catalog: CatalogCategory) {
+    setShowCreate(false);
+    setEditingId(catalog.id);
+    setEditName(catalog.name);
+    setEditAbbreviation(catalog.abbreviation);
+    setEditColor(catalog.color);
+  }
 
   function addFromCatalog(catalog: CatalogCategory) {
     startTransition(async () => {
@@ -80,6 +96,61 @@ export function AddCategoryDialog({
           description: result.error,
         });
       }
+    });
+  }
+
+  function saveEdit(catalog: CatalogCategory) {
+    const trimmedName = editName.trim();
+    const trimmedAbbr = editAbbreviation.trim().toUpperCase();
+    if (!trimmedName) {
+      toast.error("Escribí el nombre de la categoría");
+      return;
+    }
+    if (!trimmedAbbr) {
+      toast.error("Escribí la abreviación");
+      return;
+    }
+    if (
+      catalogCategories.some(
+        (item) =>
+          item.id !== catalog.id &&
+          item.name.toLowerCase() === trimmedName.toLowerCase(),
+      )
+    ) {
+      toast.error("Ya existe una categoría con ese nombre");
+      return;
+    }
+    if (
+      catalogCategories.some(
+        (item) =>
+          item.id !== catalog.id &&
+          item.abbreviation.toLowerCase() === trimmedAbbr.toLowerCase(),
+      )
+    ) {
+      toast.error("Ya existe una categoría con esa abreviación");
+      return;
+    }
+
+    startTransition(async () => {
+      const result = await updateCatalogCategoryAction(
+        clubSlug,
+        tournamentId,
+        catalog.id,
+        {
+          name: trimmedName,
+          abbreviation: trimmedAbbr,
+          color: editColor,
+        },
+      );
+      if (!result.ok) {
+        toast.error("No se pudo actualizar la categoría", {
+          description: result.error,
+        });
+        return;
+      }
+      toast.success("Categoría actualizada");
+      setEditingId(null);
+      onAdded();
     });
   }
 
@@ -106,37 +177,98 @@ export function AddCategoryDialog({
                   catalog,
                   tournamentCategories,
                 );
+                const editing = editingId === catalog.id;
                 return (
                   <li
                     key={catalog.id}
-                    className="flex items-center justify-between gap-3 px-3 py-2.5"
+                    className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5"
                   >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span
-                        className="size-3 shrink-0 rounded-full"
-                        style={{ backgroundColor: catalog.color }}
-                      />
-                      <span className="truncate text-sm font-medium">
-                        {catalog.name}
-                      </span>
-                      <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
-                        {catalog.abbreviation}
-                      </span>
-                    </div>
-                    {alreadyIn ? (
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        Ya está en el torneo
-                      </span>
+                    {editing ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="h-8 w-44"
+                          placeholder="Nombre"
+                          disabled={isPending}
+                        />
+                        <Input
+                          value={editAbbreviation}
+                          onChange={(e) => setEditAbbreviation(e.target.value)}
+                          className="h-8 w-20"
+                          placeholder="Abr."
+                          maxLength={6}
+                          disabled={isPending}
+                        />
+                        <Input
+                          type="color"
+                          value={editColor}
+                          onChange={(e) => setEditColor(e.target.value)}
+                          className="h-8 w-14 cursor-pointer p-1"
+                          disabled={isPending}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={isPending}
+                          onClick={() => saveEdit(catalog)}
+                        >
+                          Guardar
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={isPending}
+                          onClick={() => setEditingId(null)}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
                     ) : (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={isPending}
-                        onClick={() => addFromCatalog(catalog)}
-                      >
-                        Agregar
-                      </Button>
+                      <>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className="size-3 shrink-0 rounded-full"
+                            style={{ backgroundColor: catalog.color }}
+                          />
+                          <span className="truncate text-sm font-medium">
+                            {catalog.name}
+                          </span>
+                          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
+                            {catalog.abbreviation}
+                          </span>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-muted-foreground"
+                            disabled={isPending}
+                            onClick={() => startEdit(catalog)}
+                            title={`Editar ${catalog.name}`}
+                            aria-label={`Editar ${catalog.name}`}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                          {alreadyIn ? (
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              Ya está en el torneo
+                            </span>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={isPending}
+                              onClick={() => addFromCatalog(catalog)}
+                            >
+                              Agregar
+                            </Button>
+                          )}
+                        </div>
+                      </>
                     )}
                   </li>
                 );
@@ -173,7 +305,10 @@ export function AddCategoryDialog({
               type="button"
               variant="outline"
               className="self-start"
-              onClick={() => setShowCreate(true)}
+              onClick={() => {
+                setEditingId(null);
+                setShowCreate(true);
+              }}
             >
               Nueva categoría
             </Button>

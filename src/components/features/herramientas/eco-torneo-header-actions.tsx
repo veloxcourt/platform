@@ -10,7 +10,10 @@ import {
   createSimulationAction,
   deleteSimulationAction,
 } from "@/app/(dashboard)/[clubSlug]/herramientas/eco-torneo/actions";
+import { ExportFileMenu } from "@/components/features/torneos/export-file-menu";
 import { Button } from "@/components/ui/button";
+
+import { runEcoTorneoPdfAction, runEcoTorneoPngAction } from "./eco-torneo-pdf";
 
 export function EcoTorneoHeaderActions({ clubSlug }: { clubSlug: string }) {
   const pathname = usePathname();
@@ -74,6 +77,18 @@ export function EcoTorneoHeaderActions({ clubSlug }: { clubSlug: string }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <ExportFileMenu
+        format="pdf"
+        disabled={!activeId}
+        align="end"
+        onAction={(action) => runEcoTorneoPdfAction(action)}
+      />
+      <ExportFileMenu
+        format="png"
+        disabled={!activeId}
+        align="end"
+        onAction={(action) => runEcoTorneoPngAction(action)}
+      />
       <Button
         type="button"
         size="sm"

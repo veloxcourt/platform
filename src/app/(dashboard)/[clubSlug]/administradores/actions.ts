@@ -1,7 +1,8 @@
 "use server";
 
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
+
+import { authConfirmUrl } from "@/lib/auth/app-origin";
 
 import { requireClubPrivilege } from "@/lib/auth/access";
 import { ensureClubUserTypes } from "@/lib/auth/user-types";
@@ -16,13 +17,8 @@ type ActionResult =
   | { ok: true; invited?: boolean; message?: string }
   | { ok: false; error: string };
 
-async function invitationRedirectUrl() {
-  const requestHeaders = await headers();
-  const origin =
-    process.env.NEXT_PUBLIC_SITE_URL ??
-    requestHeaders.get("origin") ??
-    "http://localhost:3000";
-  return `${origin.replace(/\/$/, "")}/auth/confirm`;
+async function invitationRedirectUrl(from?: "recovery") {
+  return authConfirmUrl(from);
 }
 
 async function resolveAssignableType(clubId: string, userTypeId: string) {
@@ -237,7 +233,7 @@ export async function resendAdministratorInviteAction(
     if (existing.user?.email_confirmed_at) {
       const { error: recoveryError } =
         await supabase.auth.resetPasswordForEmail(membership.user.email, {
-          redirectTo: await invitationRedirectUrl(),
+          redirectTo: await invitationRedirectUrl("recovery"),
         });
       if (recoveryError) return { ok: false, error: recoveryError.message };
       await prisma.membership.update({

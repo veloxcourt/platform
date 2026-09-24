@@ -1,5 +1,6 @@
 "use server";
 
+import { requireClubModuleAccess } from "@/lib/auth/access";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import { buildTestMessage } from "@/lib/whatsapp/messages";
 import { isWhatsAppApiConfigured } from "@/lib/whatsapp/config";
@@ -12,7 +13,10 @@ export type WhatsAppStatusResult = {
   apiConfigured: boolean;
 };
 
-export async function getWhatsAppStatusAction(): Promise<WhatsAppStatusResult> {
+export async function getWhatsAppStatusAction(
+  clubSlug: string,
+): Promise<WhatsAppStatusResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   return { apiConfigured: isWhatsAppApiConfigured() };
 }
 
@@ -21,6 +25,7 @@ export async function sendWhatsAppTestAction(
   playerId: string,
   options?: { forceApi?: boolean },
 ): Promise<WhatsAppSendResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
   const club = await repo.getClubBySlug(clubSlug);
   if (!club) return { ok: false, error: "Club no encontrado" };

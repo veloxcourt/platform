@@ -8,19 +8,26 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/money";
 import { normalizeText } from "@/components/features/turnos/player-combobox";
-import type {
-  ProductListItem,
-  ProductType,
-} from "@/modules/catalog/domain/types";
+import type { ProductType } from "@/modules/catalog/domain/types";
+
+export type MenuCardProduct = {
+  id: string;
+  name: string;
+  price: number;
+  photoUrl: string | null;
+  typeId: string | null;
+};
 
 export function PriceMenu({
   currency,
   products,
   types,
+  emptyMessage = "Sin productos publicados en el menú.",
 }: {
   currency: string;
-  products: ProductListItem[];
+  products: MenuCardProduct[];
   types: ProductType[];
+  emptyMessage?: string;
 }) {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -63,7 +70,7 @@ export function PriceMenu({
 
       {filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Sin productos publicados en el menú.
+          {emptyMessage}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">

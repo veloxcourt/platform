@@ -2,7 +2,6 @@
 export const NAV_TAB_IDS = [
   "jugadores",
   "catalogo",
-  "menu-precios",
   "turnos",
   "torneos",
   "socios",
@@ -25,7 +24,6 @@ export type NavTabId = (typeof NAV_TAB_IDS)[number];
 export const NAV_TAB_LABELS: Record<NavTabId, string> = {
   jugadores: "Jugadores",
   catalogo: "Catálogo",
-  "menu-precios": "Menú de precios",
   turnos: "Gestión de Turnos",
   torneos: "Torneos",
   socios: "Socios",
@@ -47,8 +45,6 @@ export function navTabHref(clubSlug: string, tabId: NavTabId): string {
   switch (tabId) {
     case "catalogo":
       return `/${clubSlug}/catalogo`;
-    case "menu-precios":
-      return `/${clubSlug}/catalogo/menu`;
     case "control-usuarios":
       return `/${clubSlug}/control-usuarios`;
     default:
@@ -116,6 +112,29 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   herramientas: "Herramientas",
 };
 
+/// Sub-pestañas del módulo Catálogo. Listado es la edición; Menú de precios es la consulta.
+export const CATALOGO_TABS = [
+  { slug: "listado", label: "Listado", privilege: "catalogo" },
+  { slug: "menu", label: "Menú de precios", privilege: "menu-precios" },
+] as const;
+
+export type CatalogoTabSlug = (typeof CATALOGO_TABS)[number]["slug"];
+
+export function catalogoTabHref(clubSlug: string, slug: CatalogoTabSlug): string {
+  return slug === "listado"
+    ? `/${clubSlug}/catalogo`
+    : `/${clubSlug}/catalogo/menu`;
+}
+
+/** Primera sub-pestaña de Catálogo que el usuario puede abrir. */
+export function firstCatalogoSlug(
+  allowedModules: readonly string[],
+): CatalogoTabSlug | null {
+  if (allowedModules.includes("catalogo")) return "listado";
+  if (allowedModules.includes("menu-precios")) return "menu";
+  return null;
+}
+
 /// Sub-pestañas del módulo Herramientas.
 export const HERRAMIENTAS_TABS = [
   { slug: "eco-torneo", label: "Eco-Torneo", privilege: "eco-torneo" },
@@ -141,6 +160,12 @@ export const CONTROL_USUARIOS_TABS = [
 /// Soporte vive dentro de Configuración del torneo (chequeo durante el armado).
 export const TORNEOS_TABS = [
   { slug: "listado", label: "Listado" },
+] as const;
+
+/// Sub-pestañas del módulo Jugadores (mismo privilegio; listado queda en /jugadores).
+export const JUGADORES_TABS = [
+  { slug: "listado", label: "Listado" },
+  { slug: "herramientas", label: "Herramientas" },
 ] as const;
 
 export function firstControlUsuariosSlug(

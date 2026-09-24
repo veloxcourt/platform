@@ -24,8 +24,18 @@ export function visibleNavTabs(
   const items: DashboardNavItem[] = [];
 
   for (const id of NAV_TAB_IDS) {
-    if (id === "jugadores" || id === "catalogo" || id === "menu-precios") {
+    if (id === "jugadores") {
       if (allowedModules.includes(id)) {
+        items.push({ id, enabled: true });
+      }
+      continue;
+    }
+
+    if (id === "catalogo") {
+      if (
+        allowedModules.includes("catalogo") ||
+        allowedModules.includes("menu-precios")
+      ) {
         items.push({ id, enabled: true });
       }
       continue;

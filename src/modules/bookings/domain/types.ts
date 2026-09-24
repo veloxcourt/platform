@@ -36,6 +36,7 @@ export interface PlayerRef {
   id: string;
   name: string;
   gender?: Gender | null;
+  city?: string | null;
 }
 
 /// Item del listado de jugadores del club (con saldo de cuenta).
@@ -43,12 +44,17 @@ export interface PlayerListItem {
   id: string;
   fullName: string;
   phone: string | null;
+  gender: Gender | null;
+  city: string | null;
   category: string | null;
   courtPosition: string | null;
   ranking: number | null;
   accumulatedPoints: number;
   photoUrl: string | null;
   balance: number;
+  inviteSentAt: string | null;
+  inviteForTournamentId: string | null;
+  inviteNote: string | null;
 }
 
 export interface Booking {

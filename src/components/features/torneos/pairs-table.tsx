@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Pencil, Plus, Search, Wallet, X } from "lucide-react";
+import { FileDown, Pencil, Plus, Search, Link2, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { AccountDialog } from "@/components/features/turnos/account-dialog";
@@ -25,16 +26,20 @@ import {
   updatePairPlayerConfirmationAction,
   updatePairPlayerPaymentAction,
   updatePairStatusAction,
+  getPairManageLinkAction,
 } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
+import { pairManagePath } from "@/modules/tournaments/domain/pair-manage";
+import { downloadInscriptionsPdf } from "./inscriptions-pdf";
 import { EditPairDialog } from "./edit-pair-dialog";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 
-type RowFilter = "all" | "incomplete" | "pending";
+type RowFilter = "all" | "incomplete" | "pending" | "cancel_requested";
 
 const ROW_FILTER_LABELS: Record<RowFilter, string> = {
   all: "Todas",
   incomplete: "Sin compañero",
   pending: "Sin confirmar",
+  cancel_requested: "Pedido de baja",
 };
 
 function pairRowState(pair: PairListItem) {
@@ -49,6 +54,8 @@ function pairRowState(pair: PairListItem) {
 export function PairsTable({
   clubSlug,
   tournamentId,
+  tournamentName,
+  publicSlug,
   currency,
   pairs,
   players,
@@ -58,9 +65,12 @@ export function PairsTable({
   reservations,
   categoryFilterId = null,
   onCategoryFilterChange,
+  toolbarHost,
 }: {
   clubSlug: string;
   tournamentId: string;
+  tournamentName: string;
+  publicSlug: string;
   currency: string;
   pairs: PairListItem[];
   players: PlayerRef[];
@@ -70,6 +80,7 @@ export function PairsTable({
   reservations: SlotReservationItem[];
   categoryFilterId?: string | null;
   onCategoryFilterChange?: (categoryId: string | null) => void;
+  toolbarHost?: HTMLElement | null;
 }) {
   const router = useRouter();
   const readOnly = useTournamentReadOnly();
@@ -95,6 +106,9 @@ export function PairsTable({
       ) {
         return false;
       }
+      if (rowFilter === "cancel_requested" && state !== "cancel_requested") {
+        return false;
+      }
       if (!q) return true;
       return (
         normalizeText(pair.player1.name).includes(q) ||
@@ -104,6 +118,11 @@ export function PairsTable({
       );
     });
   }, [pairs, query, rowFilter, categoryFilterId]);
+
+  const cancelRequestedCount = useMemo(
+    () => pairs.filter((pair) => pair.status === "CANCEL_REQUESTED").length,
+    [pairs],
+  );
 
   const confirmationSummary = useMemo(() => {
     const slots = filtered.flatMap((pair) => {
@@ -120,6 +139,54 @@ export function PairsTable({
     };
   }, [filtered]);
 
+  function pairLabel(pair: PairListItem) {
+    return pair.player2
+      ? `${pair.player1.name} / ${pair.player2.name}`
+      : pair.player1.name;
+  }
+
+  function confirmDeletePair(pair: PairListItem) {
+    const ok = window.confirm(
+      `¿Eliminar la inscripción de ${pairLabel(pair)}?\nEsta acción no se puede deshacer.`,
+    );
+    if (!ok) return;
+    runAction(
+      () =>
+        updatePairStatusAction(clubSlug, tournamentId, pair.id, "CANCELLED"),
+      "Inscripción eliminada",
+    );
+  }
+
+  const selectedCategory =
+    categories.find((category) => category.id === categoryFilterId) ?? null;
+
+  function downloadCategoryPdf() {
+    if (!selectedCategory) {
+      toast.error("Elegí una categoría para generar el PDF");
+      return;
+    }
+    const categoryPairs = pairs.filter(
+      (pair) =>
+        pair.status !== "CANCELLED" && pair.categoryId === selectedCategory.id,
+    );
+    if (categoryPairs.length === 0) {
+      toast.error("Esta categoría no tiene parejas inscriptas");
+      return;
+    }
+    try {
+      downloadInscriptionsPdf({
+        tournamentName,
+        categoryName: selectedCategory.name,
+        pairs: categoryPairs,
+        players,
+      });
+    } catch (error) {
+      toast.error("No se pudo generar el PDF", {
+        description: error instanceof Error ? error.message : "Error inesperado",
+      });
+    }
+  }
+
   function openAdd(categoryId?: string) {
     const id = categoryId ?? categoryFilterId ?? categories[0]?.id ?? null;
     if (!id) {
@@ -129,6 +196,37 @@ export function PairsTable({
     setAddCategoryId(id);
     onCategoryFilterChange?.(id);
     setAddOpen(true);
+  }
+
+  function copyManageLink(pair: PairListItem) {
+    const write = (path: string) => {
+      const url = `${window.location.origin}${path}`;
+      void navigator.clipboard.writeText(url).then(
+        () => toast.success("Link copiado"),
+        () => toast.error("No se pudo copiar el link"),
+      );
+    };
+
+    if (pair.manageToken) {
+      write(pairManagePath(publicSlug, pair.manageToken));
+      return;
+    }
+
+    startTransition(async () => {
+      const result = await getPairManageLinkAction(
+        clubSlug,
+        tournamentId,
+        pair.id,
+      );
+      if (!result.ok) {
+        toast.error("No se pudo obtener el link", {
+          description: result.error,
+        });
+        return;
+      }
+      write(result.path);
+      router.refresh();
+    });
   }
 
   function runToggle(action: () => Promise<{ ok: boolean; error?: string }>) {
@@ -157,63 +255,69 @@ export function PairsTable({
     });
   }
 
-  return (
-    <div className="flex flex-col gap-3">
-      {categories.length > 1 && (
-        <div className="flex flex-wrap gap-1.5">
-          {categories.map((category) => (
+  const toolbar = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="relative max-w-xs flex-1">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          className="pl-8"
+          placeholder="Buscar inscripción..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex rounded-lg border p-0.5">
+          {(Object.keys(ROW_FILTER_LABELS) as RowFilter[]).map((key) => (
             <Button
-              key={category.id}
+              key={key}
               type="button"
-              variant={
-                categoryFilterId === category.id ? "secondary" : "outline"
-              }
+              variant={rowFilter === key ? "secondary" : "ghost"}
               size="sm"
               className="h-7 px-2.5 text-xs"
-              onClick={() => onCategoryFilterChange?.(category.id)}
+              onClick={() => setRowFilter(key)}
             >
-              {category.name}
+              {ROW_FILTER_LABELS[key]}
+              {key === "cancel_requested" && cancelRequestedCount > 0
+                ? ` (${cancelRequestedCount})`
+                : ""}
             </Button>
           ))}
         </div>
-      )}
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative max-w-xs flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-8"
-            placeholder="Buscar inscripción..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex rounded-lg border p-0.5">
-            {(Object.keys(ROW_FILTER_LABELS) as RowFilter[]).map((key) => (
-              <Button
-                key={key}
-                type="button"
-                variant={rowFilter === key ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7 px-2.5 text-xs"
-                onClick={() => setRowFilter(key)}
-              >
-                {ROW_FILTER_LABELS[key]}
-              </Button>
-            ))}
-          </div>
-          {!readOnly && (
-            <Button
-              onClick={() => openAdd()}
-              disabled={categories.length === 0 || !categoryFilterId}
-            >
-              <Plus className="size-4" />
-              Inscribir
-            </Button>
-          )}
-        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={downloadCategoryPdf}
+          disabled={!selectedCategory}
+          title={
+            selectedCategory
+              ? `PDF de ${selectedCategory.name}`
+              : "PDF de la categoría seleccionada"
+          }
+        >
+          <FileDown className="size-4" />
+          PDF
+        </Button>
+        {!readOnly && (
+          <Button
+            onClick={() => openAdd()}
+            disabled={categories.length === 0 || !categoryFilterId}
+          >
+            <Plus className="size-4" />
+            Inscribir
+          </Button>
+        )}
       </div>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      {toolbarHost
+        ? createPortal(toolbar, toolbarHost)
+        : toolbarHost === undefined
+          ? toolbar
+          : null}
 
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full text-sm">
@@ -288,6 +392,8 @@ export function PairsTable({
                     className={cn(
                       "border-b last:border-b-0",
                       rowState === "incomplete" && "bg-amber-50/40 dark:bg-amber-950/10",
+                      rowState === "cancel_requested" &&
+                        "bg-orange-50/50 dark:bg-orange-950/20",
                     )}
                   >
                     <td className="px-2 py-2 text-center align-top text-xs tabular-nums text-muted-foreground">
@@ -417,39 +523,65 @@ export function PairsTable({
                       </div>
                     </td>
                     <td className="px-3 py-2">
-                      {!inactive && !readOnly && (
-                        <div className="flex justify-end gap-1.5">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={isPending}
-                            onClick={() => setEditPair(pair)}
-                          >
-                            <Pencil className="size-4" />
-                            Editar
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={isPending}
-                            onClick={() =>
-                              runAction(
-                                () =>
-                                  updatePairStatusAction(
-                                    clubSlug,
-                                    tournamentId,
-                                    pair.id,
-                                    "CANCELLED",
-                                  ),
-                                "Inscripción eliminada",
-                              )
-                            }
-                          >
-                            <X className="size-4" />
-                            <span className="sr-only">Eliminar</span>
-                          </Button>
-                        </div>
-                      )}
+                      <div className="flex justify-end gap-1.5">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="cursor-pointer"
+                          disabled={isPending}
+                          title="Copiar link de gestión"
+                          aria-label="Copiar link de gestión"
+                          onClick={() => copyManageLink(pair)}
+                        >
+                          <Link2 className="size-4" />
+                          <span className="sr-only">Copiar link</span>
+                        </Button>
+                        {!inactive && !readOnly && (
+                          pair.status === "CANCEL_REQUESTED" ? (
+                            <Button
+                              variant="default"
+                              size="sm"
+                              disabled={isPending}
+                              onClick={() =>
+                                runAction(
+                                  () =>
+                                    updatePairStatusAction(
+                                      clubSlug,
+                                      tournamentId,
+                                      pair.id,
+                                      "CANCELLED",
+                                    ),
+                                  "Baja confirmada",
+                                )
+                              }
+                            >
+                              Confirmar baja
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isPending}
+                                onClick={() => setEditPair(pair)}
+                              >
+                                <Pencil className="size-4" />
+                                Editar
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isPending}
+                                onClick={() => confirmDeletePair(pair)}
+                              >
+                                <X className="size-4" />
+                                <span className="sr-only">Eliminar</span>
+                              </Button>
+                            </>
+                          )
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -501,6 +633,9 @@ function PairStateBadge({
 }) {
   if (state === "cancelled") {
     return <Badge variant="outline">Cancelada</Badge>;
+  }
+  if (state === "cancel_requested") {
+    return <Badge variant="secondary">Pedido de baja</Badge>;
   }
   if (state === "incomplete") {
     return <Badge variant="secondary">Sin compañero</Badge>;

@@ -8,6 +8,8 @@ import { toast } from "sonner";
 
 import { saveNavOrderAction } from "@/app/(dashboard)/[clubSlug]/nav-actions";
 import {
+  catalogoTabHref,
+  firstCatalogoSlug,
   NAV_TAB_LABELS,
   navTabHref,
   type AdminModuleKey,
@@ -78,12 +80,17 @@ export function DashboardNav({
 
     const next: Partial<Record<NavTabId, string>> = {};
     for (const item of items) {
+      const catalogSlug =
+        item.id === "catalogo" ? firstCatalogoSlug(allowedModules) : null;
+      const fallback =
+        catalogSlug != null
+          ? catalogoTabHref(clubSlug, catalogSlug)
+          : navTabHref(clubSlug, item.id);
       next[item.id] =
-        getRememberedModulePath(clubSlug, item.id) ??
-        navTabHref(clubSlug, item.id);
+        getRememberedModulePath(clubSlug, item.id) ?? fallback;
     }
     setHrefByTab(next);
-  }, [clubSlug, pathname, searchParams, items]);
+  }, [allowedModules, clubSlug, pathname, searchParams, items]);
 
   const linkClass = (active: boolean, enabled: boolean) =>
     cn(

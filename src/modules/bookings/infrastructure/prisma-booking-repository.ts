@@ -227,6 +227,7 @@ export class PrismaBookingRepository implements BookingRepository {
       id: u.id,
       name: u.fullName,
       gender: u.gender,
+      city: u.city,
     }));
   }
 
@@ -235,6 +236,17 @@ export class PrismaBookingRepository implements BookingRepository {
       prisma.user.findMany({
         where: { memberships: { some: { clubId, role: "PLAYER" } } },
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { fullName: "asc" }],
+        include: {
+          memberships: {
+            where: { clubId, role: "PLAYER" },
+            select: {
+              inviteSentAt: true,
+              inviteForTournamentId: true,
+              inviteNote: true,
+            },
+            take: 1,
+          },
+        },
       }),
       prisma.accountMovement.groupBy({
         by: ["userId", "type"],
@@ -254,12 +266,17 @@ export class PrismaBookingRepository implements BookingRepository {
       id: u.id,
       fullName: u.fullName,
       phone: u.phone,
+      gender: u.gender,
+      city: u.city,
       category: u.category ? normalizeCategoryLevel(u.category) : null,
       courtPosition: u.courtPosition,
       ranking: u.ranking,
       accumulatedPoints: u.accumulatedPoints,
       photoUrl: u.photoUrl,
       balance: balanceMap.get(u.id) ?? 0,
+      inviteSentAt: u.memberships[0]?.inviteSentAt?.toISOString() ?? null,
+      inviteForTournamentId: u.memberships[0]?.inviteForTournamentId ?? null,
+      inviteNote: u.memberships[0]?.inviteNote ?? null,
     }));
   }
 
@@ -341,7 +358,7 @@ export class PrismaBookingRepository implements BookingRepository {
         memberships: { create: { clubId, role: "PLAYER" } },
       },
     });
-    return { id: user.id, name: user.fullName, gender: user.gender };
+    return { id: user.id, name: user.fullName, gender: user.gender, city: user.city };
   }
 
   async updatePlayer(
@@ -439,6 +456,9 @@ export class PrismaBookingRepository implements BookingRepository {
       });
       await tx.accountMovement.deleteMany({
         where: { clubId, userId },
+      });
+      await tx.playerEvent.deleteMany({
+        where: { clubId, playerId: userId },
       });
       await tx.tournamentRegistration.deleteMany({
         where: { userId, tournament: { clubId } },
@@ -830,7 +850,8 @@ export class PrismaBookingRepository implements BookingRepository {
       photoUrl: p.photoUrl,
       active: p.active,
       sortOrder: p.sortOrder,
-      showInPriceMenu: p.showInPriceMenu,
+      showInPriceMenu: p.showInPriceMenu === true,
+      showInClientMenu: p.showInClientMenu === true,
     }));
   }
 
@@ -920,6 +941,7 @@ export class PrismaBookingRepository implements BookingRepository {
             active: input.active,
             sortOrder,
             showInPriceMenu: false,
+            showInClientMenu: false,
           },
         });
         if (resolved.components.length > 0) {
@@ -1009,6 +1031,17 @@ export class PrismaBookingRepository implements BookingRepository {
     await prisma.product.updateMany({
       where: { id, clubId },
       data: { showInPriceMenu },
+    });
+  }
+
+  async setProductShowInClientMenu(
+    clubId: string,
+    id: string,
+    showInClientMenu: boolean,
+  ): Promise<void> {
+    await prisma.product.updateMany({
+      where: { id, clubId },
+      data: { showInClientMenu },
     });
   }
 

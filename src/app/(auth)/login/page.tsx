@@ -3,12 +3,28 @@ import { CalendarClock } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/access";
+import { isPasswordResetRequired } from "@/lib/auth/password-reset";
 
 import { LoginForm } from "./login-form";
 
-export default async function LoginPage() {
+function safeNextPath(raw: string | undefined): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  return raw;
+}
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
   const current = await getCurrentUser();
-  if (current) redirect("/");
+  const { next: nextRaw } = await searchParams;
+  const next = safeNextPath(nextRaw);
+  if (current) {
+    if (await isPasswordResetRequired()) redirect("/set-password?from=recovery");
+    redirect(next ?? "/");
+  }
 
   return (
     <main className="grid min-h-screen place-items-center bg-muted/30 px-4">
@@ -19,11 +35,11 @@ export default async function LoginPage() {
           </span>
           <CardTitle className="mt-2">Ingresar a VeloxCourt</CardTitle>
           <CardDescription>
-            Accedé con la cuenta asociada a tu club.
+            Staff del club o cuenta de jugador.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <LoginForm />
+          <LoginForm next={next} />
         </CardContent>
       </Card>
     </main>

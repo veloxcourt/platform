@@ -12,7 +12,11 @@ import type { ZonesFixturePersisted } from "./zones-fixture-schema";
 import type { CatalogCategory } from "@/modules/herramientas/domain/calendario-torneos";
 
 export type TournamentStatus = "DRAFT" | "OPEN" | "CLOSED" | "FINISHED";
-export type RegistrationStatus = "PENDING" | "CONFIRMED" | "CANCELLED";
+export type RegistrationStatus =
+  | "PENDING"
+  | "CONFIRMED"
+  | "CANCEL_REQUESTED"
+  | "CANCELLED";
 export type PaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
 
 export interface TournamentListItem {
@@ -27,6 +31,21 @@ export interface TournamentListItem {
   publicSlug: string;
   registrationCount: number;
   confirmedCount: number;
+}
+
+/// Categoría de un torneo con los IDs de jugadores inscriptos (parejas no canceladas).
+export interface TournamentCategoryInscriptions {
+  id: string;
+  name: string;
+  playerIds: string[];
+}
+
+/// Torneo del club con sus inscriptos. Alimenta el filtro por torneo del listado de jugadores.
+export interface TournamentInscriptionsItem {
+  id: string;
+  name: string;
+  startDate: string;
+  categories: TournamentCategoryInscriptions[];
 }
 
 export interface TournamentCategoryItem {
@@ -64,6 +83,8 @@ export interface PairListItem {
   player2PaymentStatus: PaymentStatus;
   paymentStatus: PaymentStatus;
   createdAt: string;
+  /// Token del link privado de gestión. Null si todavía no se generó.
+  manageToken?: string | null;
 }
 
 export interface SlotReservationItem {

@@ -113,6 +113,10 @@ export const playDaySchema = z
     overnightExtraSlots: z.number().int().min(-12).max(12),
     enabledSlotIndexes: z.array(z.number().int().min(0)),
     hasSlotSelection: z.boolean(),
+    /// Slots de intermedia (bloqueo inscripción). Vacío = cálculo automático.
+    intermediateSlotIndexes: z.array(z.number().int().min(0)),
+    /// Día de fase intermedia (la UI permite marcar solo uno).
+    isIntermediateDay: z.boolean(),
   })
   .refine((d) => isValidPlayDayWindow(d.startTime, d.endTime), {
     message:

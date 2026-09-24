@@ -263,6 +263,45 @@ function buildWinnerMap(
   return winners;
 }
 
+const KNOCKOUT_ROUND_ORDER = [
+  "32 avos",
+  "16 avos",
+  "Octavos",
+  "Cuartos",
+  "Semifinal",
+  "Final",
+];
+
+/// Instancia más lejana en la que la pareja aparece en la llave, según zonas y resultados.
+export function furthestRoundLabelForPair(
+  pairId: string,
+  qualification: ZoneQualificationPersisted | null,
+  fixtures: KnockoutFixtureSource[],
+): { label: string; champion: boolean } | null {
+  const seeds = seedPairByKey(qualification);
+  const winners = buildWinnerMap(fixtures, seeds);
+  let best: { label: string; index: number; champion: boolean } | null = null;
+
+  for (const source of fixtures) {
+    for (const round of source.fixture?.rounds ?? []) {
+      const index = KNOCKOUT_ROUND_ORDER.indexOf(round.label);
+      for (const match of round.matches) {
+        const leftId = pairIdFromSide(match.left, seeds, winners);
+        const rightId = pairIdFromSide(match.right, seeds, winners);
+        if (leftId !== pairId && rightId !== pairId) continue;
+        const champion =
+          round.label === "Final" && winners.get(match.officialId) === pairId;
+        const rank = index === -1 ? 0 : index;
+        if (!best || rank > best.index || (rank === best.index && champion)) {
+          best = { label: round.label, index: rank, champion };
+        }
+      }
+    }
+  }
+
+  return best ? { label: best.label, champion: best.champion } : null;
+}
+
 export function buildKnockoutNameResolver({
   qualification,
   pairs,

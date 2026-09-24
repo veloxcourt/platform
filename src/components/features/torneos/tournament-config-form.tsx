@@ -745,7 +745,28 @@ export function TournamentConfigForm({
     resolver: zodResolver(tournamentConfigSchema),
     defaultValues: {
       courtCount: initial.courtCount ?? 1,
-      playDays: initial.playDays.map((day) => toPlayDayValues(day)),
+      playDays: (() => {
+        const knockoutDates = new Set(
+          initial.categories.flatMap(
+            (category) => category.phases.knockout.playDates ?? [],
+          ),
+        );
+        const singleKnockoutDate =
+          knockoutDates.size === 1 ? [...knockoutDates][0] : null;
+        let assignedIntermediate = false;
+        return initial.playDays.map((day) => {
+          const values = toPlayDayValues(day);
+          const fromFlag = values.isIntermediateDay;
+          const fromKnockout =
+            !fromFlag &&
+            !assignedIntermediate &&
+            singleKnockoutDate != null &&
+            values.date === singleKnockoutDate;
+          const isIntermediateDay = fromFlag || fromKnockout;
+          if (isIntermediateDay) assignedIntermediate = true;
+          return { ...values, isIntermediateDay };
+        });
+      })(),
       categories: initial.categories.map((category) => ({
         categoryId: category.categoryId,
         phases: {
@@ -960,6 +981,18 @@ export function TournamentConfigForm({
                     de cada slot es la duración de zonas más el intervalo.
                   </p>
                   <p>
+                    Con el día de intermedia tildado, las pastillas de arriba de
+                    cada horario marcan qué slots son de intermedia (podés
+                    marcar solo dos, o los que necesites). Esos quedan
+                    bloqueados en la inscripción de zonas. Si no marcás
+                    pastillas, el bloqueo se calcula solo.
+                  </p>
+                  <p>
+                    El tilde junto a cada día indica el día de fase intermedia.
+                    Solo se puede marcar uno; al elegirlo se actualizan los días
+                    de intermedia de todas las categorías.
+                  </p>
+                  <p>
                     A la izquierda +/− mueve el inicio; a la derecha +/− alarga
                     o acorta el final (incluso después de las 0 hs). La
                     capacidad se expresa en slots (horas reloj entre
@@ -983,19 +1016,46 @@ export function TournamentConfigForm({
                   <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
                     <span className="inline-flex items-center gap-1.5">
                       <span
-                        className="inline-block size-3 rounded-sm border border-emerald-300/80 bg-emerald-50"
+                        className="inline-block size-3 rounded-sm border border-red-300 bg-red-50"
                         aria-hidden
                       />
-                      Libre
+                      No se Usa
                     </span>
                     <span className="inline-flex items-center gap-1.5">
                       <span
                         className="inline-block size-3 rounded-sm border border-sky-400 bg-sky-100"
                         aria-hidden
                       />
-                      En juego
+                      Usado para Juego
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className="inline-block h-3 w-5 rounded-sm border-2 border-orange-400"
+                        aria-hidden
+                      />
+                      Slot intermedia (vacío)
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className="inline-block h-3 w-5 rounded-sm border-2 border-orange-500 bg-orange-500"
+                        aria-hidden
+                      />
+                      Slot intermedia (marcado)
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className="inline-block size-3 rounded-sm border border-orange-400"
+                        aria-hidden
+                      />
+                      Tilde = día de fase intermedia (solo uno)
                     </span>
                   </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Marcá el tilde del día de intermedia. Encima de cada horario
+                    aparece una pastilla: tocá las que van a intermedia (ej.
+                    14:15 y 15:15). Esos slots quedan bloqueados en la
+                    inscripción de zonas.
+                  </p>
                   <PlayDaysRulerToolbar
                     markedCount={rulerTotals.marked}
                     allMarked={
@@ -1052,6 +1112,16 @@ export function TournamentConfigForm({
                           overnight,
                           { shouldDirty: true },
                         );
+                        setValue(
+                          `playDays.${index}.intermediateSlotIndexes`,
+                          [],
+                          { shouldDirty: true },
+                        );
+                        setValue(
+                          `playDays.${index}.isIntermediateDay`,
+                          false,
+                          { shouldDirty: true },
+                        );
                         const endTime = ruler[ruler.length - 1]?.endTime;
                         if (endTime) {
                           setValue(`playDays.${index}.endTime`, endTime, {
@@ -1072,6 +1142,8 @@ export function TournamentConfigForm({
                       courtCount={courts}
                       slotMinutes={slotMinutes}
                       readOnly={readOnly}
+                      playDayCount={fields.length}
+                      categoryCount={initial.categories.length}
                     />
                   ))}
                 </>

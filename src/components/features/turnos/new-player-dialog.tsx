@@ -490,6 +490,9 @@ export function NewPlayerDialog({
               ))}
             </select>
           </Field>
+          <Field label="Localidad" error={errors.city?.message}>
+            <Input {...register("city")} />
+          </Field>
           <Field label="Fecha de nacimiento" error={errors.birthDate?.message}>
             <Input type="date" {...register("birthDate")} />
           </Field>
@@ -544,9 +547,6 @@ export function NewPlayerDialog({
                 },
               })}
             />
-          </Field>
-          <Field label="Localidad">
-            <Input {...register("city")} />
           </Field>
           <Field label="País">
             <Input {...register("country")} />

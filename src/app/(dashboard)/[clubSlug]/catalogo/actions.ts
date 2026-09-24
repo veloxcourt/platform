@@ -35,6 +35,8 @@ async function resolveClubId(clubSlug: string) {
 function revalidate(clubSlug: string) {
   revalidatePath(`/${clubSlug}/catalogo`);
   revalidatePath(`/${clubSlug}/catalogo/menu`);
+  revalidatePath(`/menu/${clubSlug}`);
+  revalidatePath(`/menu-precios/${clubSlug}`);
 }
 
 // --- Tipos de producto ---
@@ -127,6 +129,18 @@ export async function setProductShowInPriceMenuAction(
   const { repo, clubId } = await resolveClubId(clubSlug);
   if (!clubId) return { ok: false, error: "Club no encontrado" };
   await repo.setProductShowInPriceMenu(clubId, id, showInPriceMenu);
+  revalidate(clubSlug);
+  return { ok: true };
+}
+
+export async function setProductShowInClientMenuAction(
+  clubSlug: string,
+  id: string,
+  showInClientMenu: boolean,
+): Promise<Result> {
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+  await repo.setProductShowInClientMenu(clubId, id, showInClientMenu);
   revalidate(clubSlug);
   return { ok: true };
 }

@@ -199,6 +199,8 @@ export function ZonasTournamentDetail({
   const [dailySubTab, setDailySubTab] = useState<string>(
     () => tournamentPlayDayOptions(config)[0]?.date ?? "",
   );
+  const [inscriptionsToolbarHost, setInscriptionsToolbarHost] =
+    useState<HTMLDivElement | null>(null);
   const dailyFilters = useDailyMatchesFilters({
     categories: tournament.categories,
     pairs: tournament.pairs,
@@ -556,6 +558,49 @@ export function ZonasTournamentDetail({
         <>
           <div className="relative z-30 shrink-0 -mx-4 -mt-4 border-b bg-background px-4 pt-4 pb-3">
             {chrome}
+            {activeTab === "inscripciones" ? (
+              <div className="mt-3 flex flex-col gap-3">
+                <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
+                  <div
+                    className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto"
+                    role="tablist"
+                    aria-label="Categorías de inscripciones"
+                  >
+                    {tournament.categories.map((category) => (
+                      <StableTabButton
+                        key={category.id}
+                        active={categoryFilterId === category.id}
+                        onSelect={() => setCategoryFilterId(category.id)}
+                      >
+                        {category.name}
+                      </StableTabButton>
+                    ))}
+                  </div>
+                  <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                    {selectedCategory ? (
+                      <CategoryInscriptionStats category={selectedCategory} />
+                    ) : null}
+                    <AyudaButton
+                      title="Ayuda de inscripciones"
+                      description="Cómo se inscriben y confirman las parejas."
+                    >
+                      <p>
+                        Solo esta categoría. Cambiá con las pestañas. Para dar
+                        de alta usá + Inscribir.
+                      </p>
+                      <p>
+                        La pareja queda confirmada cuando ambos jugadores
+                        confirman. Pendiente no entra a zonas; Parcial o
+                        Confirmado sí.
+                      </p>
+                    </AyudaButton>
+                  </div>
+                </div>
+                {tournament.categories.length > 0 ? (
+                  <div ref={setInscriptionsToolbarHost} />
+                ) : null}
+              </div>
+            ) : null}
             {activeTab === "zonas" ? (
               <div className="mt-3 flex w-full min-w-0 items-center gap-2">
                 <div
@@ -901,34 +946,7 @@ export function ZonasTournamentDetail({
       ) : null}
 
       {activeTab === "inscripciones" ? (
-        <Card id="inscripciones" className={STICKY_PANEL_CARD}>
-          <CardHeader className={`${STICKY_PANEL_HEADER} flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between`}>
-            <div className="space-y-1.5">
-              <CardTitle>
-                {selectedCategory
-                  ? `Inscripciones · ${selectedCategory.name}`
-                  : "Inscripciones"}
-              </CardTitle>
-            </div>
-            <div className="flex flex-wrap items-start justify-end gap-2">
-              {selectedCategory ? (
-                <CategoryInscriptionStats category={selectedCategory} />
-              ) : null}
-              <AyudaButton
-                title="Ayuda de inscripciones"
-                description="Cómo se inscriben y confirman las parejas."
-              >
-                <p>
-                  Solo esta categoría. Cambiá con los chips. Para dar de alta
-                  usá + Inscribir.
-                </p>
-                <p>
-                  La pareja queda confirmada cuando ambos jugadores confirman.
-                  Pendiente no entra a zonas; Parcial o Confirmado sí.
-                </p>
-              </AyudaButton>
-            </div>
-          </CardHeader>
+        <Card id="inscripciones">
           <CardContent>
             {tournament.categories.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -939,6 +957,8 @@ export function ZonasTournamentDetail({
               <PairsTable
                 clubSlug={clubSlug}
                 tournamentId={tournament.id}
+                tournamentName={tournament.name}
+                publicSlug={tournament.publicSlug}
                 currency={currency}
                 pairs={tournament.pairs}
                 players={players}
@@ -950,6 +970,7 @@ export function ZonasTournamentDetail({
                 onCategoryFilterChange={(id) => {
                   if (id) setCategoryFilterId(id);
                 }}
+                toolbarHost={inscriptionsToolbarHost}
               />
             )}
           </CardContent>
@@ -1144,7 +1165,7 @@ function CategoryInscriptionStats({
 
   return (
     <div
-      className="flex flex-wrap gap-2 sm:justify-end"
+      className="flex flex-wrap gap-2"
       aria-label={`Estadísticas de ${category.name}`}
     >
       {items.map((item) => (

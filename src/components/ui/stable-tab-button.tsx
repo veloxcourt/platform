@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  ButtonHTMLAttributes,
   MouseEvent,
   PointerEventHandler,
   ReactNode,
@@ -21,10 +22,11 @@ export function StableTabButton({
   onPointerLeave,
   className,
   title,
+  ...rest
 }: {
   active: boolean;
   children: ReactNode;
-  onSelect: () => void;
+  onSelect: (event: MouseEvent<HTMLButtonElement>) => void;
   onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
   onPointerDown?: PointerEventHandler<HTMLButtonElement>;
   onPointerMove?: PointerEventHandler<HTMLButtonElement>;
@@ -33,6 +35,11 @@ export function StableTabButton({
   onPointerLeave?: PointerEventHandler<HTMLButtonElement>;
   className?: string;
   title?: string;
+} & Pick<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "aria-haspopup" | "aria-expanded"
+> & {
+  "data-category-menu-tab"?: string;
 }) {
   return (
     <button
@@ -40,6 +47,7 @@ export function StableTabButton({
       role="tab"
       aria-selected={active}
       title={title}
+      {...rest}
       // Evita que el foco desplace el scroll horizontal de la fila.
       onMouseDown={(event) => {
         if (event.button === 0) event.preventDefault();

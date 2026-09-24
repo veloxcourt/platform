@@ -36,6 +36,7 @@ import type {
   SlotReservationItem,
   TournamentCategoryItem,
   TournamentConfig,
+  TournamentInscriptionsItem,
   TournamentListItem,
   TournamentStatus,
   ZonasTournamentDetail,
@@ -479,6 +480,42 @@ export class MockTournamentRepository implements TournamentRepository {
     return [];
   }
 
+  async listTournamentInscriptions(
+    clubId: string,
+  ): Promise<TournamentInscriptionsItem[]> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      return [...record.tournaments]
+        .sort((a, b) => b.startDate.localeCompare(a.startDate))
+        .map((tournament) => {
+          const pairs = (record.pairs.get(tournament.id) ?? []).filter(
+            (pair) => pair.status !== "CANCELLED",
+          );
+          return {
+            id: tournament.id,
+            name: tournament.name,
+            startDate: tournament.startDate,
+            categories: (record.categories.get(tournament.id) ?? []).map(
+              (category) => {
+                const playerIds = new Set<string>();
+                for (const pair of pairs) {
+                  if (pair.categoryId !== category.id) continue;
+                  playerIds.add(pair.player1.id);
+                  if (pair.player2) playerIds.add(pair.player2.id);
+                }
+                return {
+                  id: category.id,
+                  name: category.name,
+                  playerIds: [...playerIds],
+                };
+              },
+            ),
+          };
+        });
+    }
+    return [];
+  }
+
   async getZonasTournamentDetail(
     clubId: string,
     tournamentId: string,
@@ -566,6 +603,49 @@ export class MockTournamentRepository implements TournamentRepository {
       return { ...created };
     }
     return { error: "Club no encontrado" };
+  }
+
+  async updateCatalogCategory(
+    clubId: string,
+    id: string,
+    input: CalendarCategoryValues,
+  ): Promise<CatalogCategory | { error: string } | null> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const category = record.catalogCategories.find((c) => c.id === id);
+      if (!category) return null;
+      if (
+        record.catalogCategories.some(
+          (c) =>
+            c.id !== id &&
+            c.abbreviation.toLowerCase() === input.abbreviation.toLowerCase(),
+        )
+      ) {
+        return { error: "Ya existe una categoría con esa abreviación" };
+      }
+      if (
+        record.catalogCategories.some(
+          (c) =>
+            c.id !== id && c.name.toLowerCase() === input.name.toLowerCase(),
+        )
+      ) {
+        return { error: "Ya existe una categoría con ese nombre" };
+      }
+      category.name = input.name;
+      category.abbreviation = input.abbreviation;
+      category.color = input.color;
+      for (const categories of record.categories.values()) {
+        for (const tournamentCategory of categories) {
+          if (tournamentCategory.catalogCategoryId === id) {
+            tournamentCategory.name = input.name;
+            tournamentCategory.abbreviation = input.abbreviation;
+            tournamentCategory.color = input.color;
+          }
+        }
+      }
+      return { ...category };
+    }
+    return null;
   }
 
   async createTournamentCategory(

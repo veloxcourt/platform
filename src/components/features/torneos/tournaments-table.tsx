@@ -30,6 +30,7 @@ import { normalizeText } from "@/components/features/turnos/player-combobox";
 import type { TournamentListItem } from "@/modules/tournaments/domain/types";
 import {
   TOURNAMENT_STATUS_LABELS,
+  TOURNAMENT_STATUS_VALUES,
   type CreateTournamentValues,
 } from "@/modules/tournaments/domain/tournament-schema";
 import {
@@ -96,6 +97,9 @@ export function TournamentsTable({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | CreateTournamentValues["status"]
+  >("all");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [selectedType, setSelectedType] = useState<TournamentType | null>(null);
@@ -143,14 +147,15 @@ export function TournamentsTable({
 
   const filtered = useMemo(() => {
     const q = normalizeText(query);
-    return q
-      ? tournaments.filter(
-          (t) =>
-            normalizeText(t.name).includes(q) ||
-            normalizeText(t.description ?? "").includes(q),
-        )
-      : tournaments;
-  }, [tournaments, query]);
+    return tournaments.filter((t) => {
+      if (statusFilter !== "all" && t.status !== statusFilter) return false;
+      if (!q) return true;
+      return (
+        normalizeText(t.name).includes(q) ||
+        normalizeText(t.description ?? "").includes(q)
+      );
+    });
+  }, [tournaments, query, statusFilter]);
 
   function copyPublicLink(slug: string) {
     const url = `${window.location.origin}/inscripcion/${slug}`;
@@ -224,15 +229,34 @@ export function TournamentsTable({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="relative max-w-xs flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-8"
-            placeholder="Buscar torneo..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="relative max-w-xs flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-8"
+              placeholder="Buscar torneo..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <select
+            className="h-8 max-w-[16rem] shrink-0 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            aria-label="Filtrar por estado"
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(
+                e.target.value as "all" | CreateTournamentValues["status"],
+              )
+            }
+          >
+            <option value="all">Todos los estados</option>
+            {TOURNAMENT_STATUS_VALUES.map((status) => (
+              <option key={status} value={status}>
+                {TOURNAMENT_STATUS_LABELS[status]}
+              </option>
+            ))}
+          </select>
         </div>
         <Button
           onClick={openNewTournament}
@@ -248,20 +272,31 @@ export function TournamentsTable({
           <span className="grid size-14 place-items-center rounded-2xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
             <Trophy className="size-7" />
           </span>
-          <div>
-            <p className="font-medium">Sin torneos</p>
-            <p className="text-sm text-muted-foreground">
-              Creá el primer torneo para empezar a recibir inscripciones.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            onClick={openNewTournament}
-            className="border-emerald-300 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:text-emerald-200 dark:hover:bg-emerald-950/50"
-          >
-            <Plus className="size-4" />
-            Crear torneo
-          </Button>
+          {tournaments.length === 0 ? (
+            <>
+              <div>
+                <p className="font-medium">Sin torneos</p>
+                <p className="text-sm text-muted-foreground">
+                  Creá el primer torneo para empezar a recibir inscripciones.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={openNewTournament}
+                className="border-emerald-300 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:text-emerald-200 dark:hover:bg-emerald-950/50"
+              >
+                <Plus className="size-4" />
+                Crear torneo
+              </Button>
+            </>
+          ) : (
+            <div>
+              <p className="font-medium">Sin resultados</p>
+              <p className="text-sm text-muted-foreground">
+                Ningún torneo coincide con la búsqueda o el estado elegido.
+              </p>
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">

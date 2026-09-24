@@ -14,6 +14,7 @@ import type {
   SlotReservationItem,
   TournamentCategoryItem,
   TournamentConfig,
+  TournamentInscriptionsItem,
   TournamentListItem,
   ZonasTournamentDetail,
 } from "../domain/types";
@@ -47,6 +48,9 @@ export interface TournamentRepository {
   } | null>;
   getClubLevels(clubId: string): Promise<string[]>;
   listTournaments(clubId: string): Promise<TournamentListItem[]>;
+  listTournamentInscriptions(
+    clubId: string,
+  ): Promise<TournamentInscriptionsItem[]>;
   getZonasTournamentDetail(
     clubId: string,
     tournamentId: string,
@@ -60,6 +64,11 @@ export interface TournamentRepository {
     clubId: string,
     input: CalendarCategoryValues,
   ): Promise<CatalogCategory | { error: string }>;
+  updateCatalogCategory(
+    clubId: string,
+    id: string,
+    input: CalendarCategoryValues,
+  ): Promise<CatalogCategory | { error: string } | null>;
   createTournamentCategory(
     clubId: string,
     tournamentId: string,
@@ -95,7 +104,10 @@ export interface TournamentRepository {
     clubId: string,
     tournamentId: string,
     input: AddPairValues,
-  ): Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+  ): Promise<
+    | { ok: true; id: string; manageToken?: string | null }
+    | { ok: false; error: string }
+  >;
   updatePair(
     clubId: string,
     tournamentId: string,

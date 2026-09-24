@@ -15,6 +15,8 @@ const DEFAULT_PLAY_WINDOW = {
   overnightExtraSlots: 0,
   enabledSlotIndexes: [] as number[],
   hasSlotSelection: false,
+  intermediateSlotIndexes: [] as number[],
+  isIntermediateDay: false,
 };
 
 export function defaultPlayDays(
@@ -62,6 +64,8 @@ export function syncPlayDaysToRange(
           overnightExtraSlots: template.overnightExtraSlots,
           enabledSlotIndexes: template.enabledSlotIndexes,
           hasSlotSelection: template.hasSlotSelection,
+          intermediateSlotIndexes: [],
+          isIntermediateDay: false,
         });
   });
 }

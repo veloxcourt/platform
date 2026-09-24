@@ -40,7 +40,7 @@ async function main() {
     });
     const { error: recoveryError } =
       await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${siteUrl}/auth/confirm`,
+        redirectTo: `${siteUrl}/auth/confirm?from=recovery`,
       });
     if (recoveryError) throw recoveryError;
     console.log(`Enlace para crear contraseña enviado a ${email}`);

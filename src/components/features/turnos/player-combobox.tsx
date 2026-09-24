@@ -42,7 +42,11 @@ export function PlayerCombobox({
     ? players.filter((p) => !exclude.includes(p.id))
     : players;
   const filtered = q
-    ? available.filter((p) => normalizeText(p.name).includes(q))
+    ? available.filter(
+        (p) =>
+          normalizeText(p.name).includes(q) ||
+          normalizeText(p.city ?? "").includes(q),
+      )
     : available;
 
   return (
@@ -92,6 +96,9 @@ export function PlayerCombobox({
                 )}
               >
                 {p.name}
+                {p.city?.trim() ? (
+                  <span className="ml-2 text-muted-foreground">{p.city}</span>
+                ) : null}
               </button>
             ))
           )}

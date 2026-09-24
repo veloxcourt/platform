@@ -9,6 +9,7 @@ export type PublicClubPlayerMatch = {
   lastName: string;
   phone: string;
   gender: Gender | null;
+  city: string | null;
   phoneHint: string;
 };
 
@@ -104,6 +105,7 @@ export async function searchPublicClubPlayers(
       lastName: true,
       phone: true,
       gender: true,
+      city: true,
     },
     take: 40,
     orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { fullName: "asc" }],
@@ -133,6 +135,7 @@ export async function searchPublicClubPlayers(
         lastName: names.lastName,
         phone: formatPhoneDisplay(user.phone) || (user.phone ?? ""),
         gender: user.gender,
+        city: user.city,
         phoneHint: phoneHint(user.phone),
       };
     });

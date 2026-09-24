@@ -33,6 +33,8 @@ import {
   type EcoItem,
 } from "@/modules/herramientas/domain/eco-torneo";
 
+import { setEcoPdfSnapshot } from "./eco-torneo-pdf";
+
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
@@ -56,13 +58,17 @@ function moveItem(list: EcoItem[], fromId: string, toId: string): EcoItem[] {
 
 export function EcoTorneoPlanilla({
   clubSlug,
+  clubName,
   simulationId,
+  simulationName,
   currency = "ARS",
   initialItems,
   initialGroups = [],
 }: {
   clubSlug: string;
+  clubName: string;
   simulationId: string;
+  simulationName: string;
   currency?: string;
   initialItems: EcoItem[];
   initialGroups?: EcoGroup[];
@@ -92,6 +98,17 @@ export function EcoTorneoPlanilla({
   useEffect(() => {
     groupsRef.current = groups;
   }, [groups]);
+
+  useEffect(() => {
+    setEcoPdfSnapshot({
+      clubName,
+      simulationName,
+      currency,
+      items,
+      groups,
+    });
+    return () => setEcoPdfSnapshot(null);
+  }, [clubName, simulationName, currency, items, groups]);
 
   useEffect(() => {
     setItems(initialItems);
@@ -255,7 +272,18 @@ export function EcoTorneoPlanilla({
   return (
     <div className="flex flex-col gap-4">
       <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[54rem] border-collapse text-sm">
+        <table className="w-full min-w-[54rem] table-fixed border-collapse text-sm">
+          <colgroup>
+            <col className="w-8" />
+            <col className="w-14" />
+            <col className="w-48" />
+            <col />
+            <col className="w-24" />
+            <col className="w-28" />
+            <col className="w-32" />
+            <col className="w-32" />
+            <col className="w-10" />
+          </colgroup>
           <thead>
             <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
               <th className="w-8 px-1 py-2" aria-label="Reordenar" />
@@ -474,29 +502,33 @@ export function EcoTorneoPlanilla({
           </tbody>
           <tfoot>
             <tr className="border-t bg-muted/30 text-sm font-medium">
-              <td className="px-2 py-2" colSpan={6}>
+              <td />
+              <td />
+              <td className="px-2 py-2" colSpan={4}>
                 Totales (ítems en saldo)
               </td>
-              <td className="px-2 py-2 text-right tabular-nums">
+              <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
                 {formatMoney(planilla.totalDebeCents, currency)}
               </td>
-              <td className="px-2 py-2 text-right tabular-nums">
+              <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
                 {formatMoney(planilla.totalHaberCents, currency)}
               </td>
               <td />
             </tr>
             <tr className="text-sm">
-              <td className="px-2 py-2 text-muted-foreground" colSpan={6}>
+              <td />
+              <td />
+              <td className="px-2 py-2 text-muted-foreground" colSpan={4}>
                 Saldo (Debe − Haber)
               </td>
+              <td />
               <td
                 className={cn(
-                  "px-2 py-2 text-right tabular-nums font-semibold",
+                  "px-2 py-2 text-right tabular-nums font-semibold whitespace-nowrap",
                   planilla.saldoCents >= 0
                     ? "text-foreground"
                     : "text-destructive",
                 )}
-                colSpan={2}
               >
                 {formatMoney(planilla.saldoCents, currency)}
               </td>

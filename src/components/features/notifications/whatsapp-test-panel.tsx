@@ -35,8 +35,10 @@ export function WhatsAppTestPanel({
     : "";
 
   useEffect(() => {
-    void getWhatsAppStatusAction().then((s) => setApiConfigured(s.apiConfigured));
-  }, []);
+    void getWhatsAppStatusAction(clubSlug).then((s) =>
+      setApiConfigured(s.apiConfigured),
+    );
+  }, [clubSlug]);
 
   useEffect(() => {
     if (!playerId && withPhone[0]) setPlayerId(withPhone[0].id);

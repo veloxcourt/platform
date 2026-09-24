@@ -38,6 +38,7 @@ export interface ProductListItem {
   active: boolean;
   sortOrder: number;
   showInPriceMenu: boolean;
+  showInClientMenu: boolean;
 }
 
 /// Producto vendible para el selector de venta.

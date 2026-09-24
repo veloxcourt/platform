@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { FileDown, Plus, Trash2 } from "lucide-react";
+import { Check, FileDown, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -54,8 +54,14 @@ import { downloadSimulationPdf } from "./simulation-pdf";
 import { SlotRuleGrid, type SlotRuleGridCategory } from "./slot-rule-grid";
 import {
   deleteCategoryAction,
+  updateCategoryColorAction,
   updateCategorySimulationAction,
 } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/categorias/actions";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { AddCategoryDialog } from "./add-category-dialog";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 
@@ -89,13 +95,21 @@ function parseConfirmed(value: string): number | null {
   return Math.min(256, Math.max(0, parsed));
 }
 
+function toHexColor(value: string): string {
+  const match = value.trim().match(/^#([0-9A-Fa-f]{6})$/);
+  return match ? `#${match[1]!.toLowerCase()}` : "#2563eb";
+}
+
 /// Color del punto de la categoría (catálogo del club; si falta, paleta por orden).
 function categoryColor(
   category: TournamentCategoryItem,
   index: number,
+  drafts?: Record<string, string>,
 ): string {
   return (
-    category.color ?? CALENDAR_PALETTE[index % CALENDAR_PALETTE.length]
+    drafts?.[category.id] ??
+    category.color ??
+    CALENDAR_PALETTE[index % CALENDAR_PALETTE.length]
   );
 }
 
@@ -136,6 +150,7 @@ export function TournamentCategoriesPanel({
   const [playDaysDraft, setPlayDaysDraft] = useState<PlayDayValues[] | null>(
     null,
   );
+  const [colorDrafts, setColorDrafts] = useState<Record<string, string>>({});
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const playDays = playDaysDraft ?? config?.playDays ?? [];
   const slotMinutes = Math.max(
@@ -339,6 +354,37 @@ export function TournamentCategoriesPanel({
     });
   }
 
+  function changeCategoryColor(
+    category: TournamentCategoryItem,
+    nextColor: string,
+    currentColor: string,
+  ) {
+    const hex = toHexColor(nextColor);
+    if (hex === toHexColor(currentColor)) return;
+
+    setColorDrafts((current) => ({ ...current, [category.id]: hex }));
+    startCategoryMutation(async () => {
+      const result = await updateCategoryColorAction(
+        clubSlug,
+        tournamentId,
+        category.id,
+        hex,
+      );
+      if (!result.ok) {
+        setColorDrafts((current) => {
+          const next = { ...current };
+          delete next[category.id];
+          return next;
+        });
+        toast.error("No se pudo cambiar el color", {
+          description: result.error,
+        });
+        return;
+      }
+      router.refresh();
+    });
+  }
+
   function removeCategory(category: TournamentCategoryItem) {
     if (category.pairCount > 0) {
       const ok = window.confirm(
@@ -385,7 +431,7 @@ export function TournamentCategoriesPanel({
       sim,
       categoryConfig,
       result,
-      color: categoryColor(category, index),
+      color: categoryColor(category, index, colorDrafts),
     };
   });
 
@@ -546,9 +592,13 @@ export function TournamentCategoriesPanel({
                     )}
                   >
                     <div className="flex min-w-0 items-center gap-1.5">
-                      <span
-                        className="size-3 shrink-0 rounded-full"
-                        style={{ backgroundColor: color }}
+                      <CategoryColorPicker
+                        name={category.name}
+                        color={color}
+                        disabled={readOnly}
+                        onChange={(next) =>
+                          changeCategoryColor(category, next, color)
+                        }
                       />
                       <p className="min-w-0 truncate font-medium">
                         {category.name}
@@ -650,6 +700,95 @@ export function TournamentCategoriesPanel({
         onAdded={() => router.refresh()}
       />
     </>
+  );
+}
+
+function CategoryColorPicker({
+  name,
+  color,
+  disabled,
+  onChange,
+}: {
+  name: string;
+  color: string;
+  disabled: boolean;
+  onChange: (color: string) => void;
+}) {
+  const hex = toHexColor(color);
+  const [draft, setDraft] = useState(hex);
+
+  useEffect(() => {
+    setDraft(hex);
+  }, [hex]);
+
+  function commit(next: string) {
+    const value = toHexColor(next);
+    setDraft(value);
+    onChange(value);
+  }
+
+  if (disabled) {
+    return (
+      <span
+        className="size-3 shrink-0 rounded-full"
+        style={{ backgroundColor: hex }}
+      />
+    );
+  }
+
+  return (
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (!open && draft !== hex) onChange(draft);
+      }}
+    >
+      <DropdownMenuTrigger
+        type="button"
+        title="Cambiar color"
+        aria-label={`Cambiar color de ${name}`}
+        className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span
+          className="size-3 rounded-full ring-1 ring-black/15"
+          style={{ backgroundColor: draft }}
+        />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-44 min-w-44 p-2">
+        <p className="mb-1.5 px-0.5 text-[11px] text-muted-foreground">
+          Color de {name}
+        </p>
+        <div className="grid grid-cols-4 gap-1.5">
+          {CALENDAR_PALETTE.map((swatch) => {
+            const selected = draft === swatch.toLowerCase();
+            return (
+              <button
+                key={swatch}
+                type="button"
+                className="relative size-7 rounded-full ring-1 ring-black/10 hover:ring-2 hover:ring-foreground/40"
+                style={{ backgroundColor: swatch }}
+                title={swatch}
+                aria-label={`Usar ${swatch}`}
+                aria-pressed={selected}
+                onClick={() => commit(swatch)}
+              >
+                {selected ? (
+                  <Check className="absolute inset-0 m-auto size-3.5 text-white mix-blend-difference" />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+        <label className="mt-2 flex cursor-pointer items-center gap-2 px-0.5 text-xs text-muted-foreground">
+          Personalizado
+          <input
+            type="color"
+            value={draft}
+            onChange={(event) => setDraft(toHexColor(event.target.value))}
+            className="h-7 w-10 cursor-pointer rounded border bg-transparent p-0.5"
+          />
+        </label>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
