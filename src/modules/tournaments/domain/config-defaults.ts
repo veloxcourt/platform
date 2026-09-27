@@ -6,7 +6,7 @@ import type {
   PlayDayValues,
   RoundConfigMapValues,
 } from "./config-schema";
-import { toPlayDayValues } from "./play-day-slots";
+import { toPlayDayValues, normalizeIntermediatePlayDays } from "./play-day-slots";
 import { seedRoundConfigs } from "./round-phase-config";
 
 const DEFAULT_PLAY_WINDOW = {
@@ -53,21 +53,23 @@ export function syncPlayDaysToRange(
   const template =
     existing.find((day) => day.startTime && day.endTime) ?? DEFAULT_PLAY_WINDOW;
 
-  return defaultPlayDays(startDate, endDate).map((day) => {
-    const previous = byDate.get(day.date);
-    return previous
-      ? { ...previous, date: day.date }
-      : toPlayDayValues({
-          date: day.date,
-          startTime: template.startTime,
-          endTime: template.endTime,
-          overnightExtraSlots: template.overnightExtraSlots,
-          enabledSlotIndexes: template.enabledSlotIndexes,
-          hasSlotSelection: template.hasSlotSelection,
-          intermediateSlotIndexes: [],
-          isIntermediateDay: false,
-        });
-  });
+  return normalizeIntermediatePlayDays(
+    defaultPlayDays(startDate, endDate).map((day) => {
+      const previous = byDate.get(day.date);
+      return previous
+        ? { ...previous, date: day.date }
+        : toPlayDayValues({
+            date: day.date,
+            startTime: template.startTime,
+            endTime: template.endTime,
+            overnightExtraSlots: template.overnightExtraSlots,
+            enabledSlotIndexes: template.enabledSlotIndexes,
+            hasSlotSelection: template.hasSlotSelection,
+            intermediateSlotIndexes: [],
+            isIntermediateDay: false,
+          });
+    }),
+  );
 }
 
 /// Valores por defecto por fase (zonas corto, intermedia media, final largo).

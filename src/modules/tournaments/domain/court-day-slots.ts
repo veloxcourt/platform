@@ -1,3 +1,4 @@
+import { formatPlayDayOrdinalLabel } from "@/lib/date";
 import {
   minutesToTime,
   timeToMinutes,
@@ -265,7 +266,7 @@ function groupSlotsIntoRules(
       const daySlots = byDate.get(day.date) ?? [];
       return {
         playDate: day.date,
-        dayLabel: `Día ${dayIndex + 1}`,
+        dayLabel: formatPlayDayOrdinalLabel(dayIndex, day.date),
         startTime: day.startTime,
         endTime: day.endTime,
         slotMinutes: slotMinutesByDate?.get(day.date),
@@ -719,7 +720,11 @@ export function buildZonesRegistrationGrid(
 
   // Re-numerar labels Día N según orden de playDays del torneo (no solo zonas).
   const labeledDays = input.playDays
-    .map((d, i) => ({ date: d.date, label: `Día ${i + 1}`, day: d }))
+    .map((d, i) => ({
+      date: d.date,
+      label: formatPlayDayOrdinalLabel(i, d.date),
+      day: d,
+    }))
     .filter((d) => d.date && zonesDates.has(d.date));
 
   const rules = groupSlotsIntoRules(
@@ -1040,7 +1045,10 @@ export function buildMatchesRuleGrid(input: {
   const labelByDate = new Map(
     input.playDays
       .filter((day) => day.date)
-      .map((day, index) => [day.date, `Día ${index + 1}`] as const),
+      .map(
+        (day, index) =>
+          [day.date, formatPlayDayOrdinalLabel(index, day.date)] as const,
+      ),
   );
   const durationsByDate = new Map<string, number[]>();
   for (const match of input.matches) {

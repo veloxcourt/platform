@@ -1,4 +1,5 @@
-import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import { normalizeCategoryLevel } from "@/modules/tournaments/domain/category-level";
 import type {
   BookingRepository,
@@ -27,7 +28,15 @@ import type {
 } from "../domain/types";
 import type { CourtInput } from "../domain/settings-schema";
 import type { NewPlayerValues } from "../domain/new-player-schema";
-import { playerPhoneToE164 } from "../domain/new-player-schema";
+import {
+  normalizeInstagram,
+  playerPhoneToE164,
+} from "../domain/new-player-schema";
+import {
+  latestClubTournamentId,
+  visiblePlayerObservation,
+  writePlayerObservation,
+} from "@/modules/players/application/save-player-invite-note";
 import { splitPhoneForForm } from "@/lib/phone";
 import type {
   AddMovementData,
@@ -36,6 +45,49 @@ import type {
 import { expandFixedBookings } from "../domain/rules";
 import { addDaysISO } from "@/lib/date";
 import { formatQuantity } from "@/lib/quantity";
+
+function prismaUserHasInstagram(): boolean {
+  return "instagram" in Prisma.UserScalarFieldEnum;
+}
+
+async function persistUserInstagram(userId: string, instagram: string | null) {
+  await ensureRuntimeSchema();
+  await prisma.$executeRawUnsafe(
+    `UPDATE "users" SET "instagram" = $1 WHERE "id" = $2`,
+    instagram,
+    userId,
+  );
+}
+
+async function readUserInstagram(
+  userId: string,
+  fromClient?: string | null,
+): Promise<string> {
+  if (prismaUserHasInstagram()) return fromClient ?? "";
+  await ensureRuntimeSchema();
+  const rows = await prisma.$queryRawUnsafe<Array<{ instagram: string | null }>>(
+    `SELECT "instagram" FROM "users" WHERE "id" = $1`,
+    userId,
+  );
+  return rows[0]?.instagram ?? "";
+}
+
+/// Instagram de varios usuarios de una, para no pegarle a la base por fila.
+async function readManyUsersInstagram(
+  userIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (userIds.length === 0) return map;
+  await ensureRuntimeSchema();
+  const rows = await prisma.$queryRaw<
+    Array<{ id: string; instagram: string | null }>
+  >`SELECT "id", "instagram" FROM "users" WHERE "id" IN (${Prisma.join(userIds)})`;
+  for (const row of rows) {
+    const value = row.instagram?.trim();
+    if (value) map.set(row.id, value);
+  }
+  return map;
+}
 
 const DEFAULT_SETTINGS: BookingSettings = {
   openTime: "08:00",
@@ -144,12 +196,19 @@ type BookingRow = {
   durationMin: number;
   type: "FIJO" | "NO_FIJO";
   status: "PRE_RESERVA" | "RESERVADO" | "CANCELLED";
-  paymentStatus: PaymentStatus;
+  paymentStatus: string;
   price: number;
   chargeMovementId: string | null;
   responsible: { id: string; fullName: string };
   players: { user: { id: string; fullName: string } }[];
 };
+
+function toBookingPaymentStatus(value: string): PaymentStatus {
+  if (value === "PAID" || value === "PARTIAL" || value === "UNPAID") {
+    return value;
+  }
+  return "UNPAID";
+}
 
 function mapBooking(b: BookingRow): Booking {
   return {
@@ -160,7 +219,7 @@ function mapBooking(b: BookingRow): Booking {
     durationMin: b.durationMin,
     type: b.type,
     status: b.status as "PRE_RESERVA" | "RESERVADO",
-    paymentStatus: b.paymentStatus,
+    paymentStatus: toBookingPaymentStatus(b.paymentStatus),
     price: b.price,
     impacted: b.chargeMovementId != null,
     responsible: { id: b.responsible.id, name: b.responsible.fullName },
@@ -262,10 +321,16 @@ export class PrismaBookingRepository implements BookingRepository {
       balanceMap.set(g.userId, prev + (g.type === "CHARGE" ? amt : -amt));
     }
 
+    const instagramMap = prismaUserHasInstagram()
+      ? null
+      : await readManyUsersInstagram(users.map((u) => u.id));
+
     return users.map((u) => ({
       id: u.id,
       fullName: u.fullName,
       phone: u.phone,
+      instagram:
+        (instagramMap ? instagramMap.get(u.id) : u.instagram?.trim()) || null,
       gender: u.gender,
       city: u.city,
       category: u.category ? normalizeCategoryLevel(u.category) : null,
@@ -309,15 +374,30 @@ export class PrismaBookingRepository implements BookingRepository {
         id: userId,
         memberships: { some: { clubId, role: "PLAYER" } },
       },
+      include: {
+        memberships: {
+          where: { clubId, role: "PLAYER" },
+          select: { inviteNote: true, inviteForTournamentId: true },
+          take: 1,
+        },
+      },
     });
     if (!u) return null;
     const phone = splitPhoneForForm(u.phone);
+    const membership = u.memberships[0];
+    const tournamentId = await latestClubTournamentId(clubId);
     return {
       firstName: u.firstName ?? "",
       lastName: u.lastName ?? "",
       phoneCountryDial: phone.dial,
       phoneLocal: phone.local,
       email: u.email ?? "",
+      instagram: await readUserInstagram(u.id, u.instagram),
+      observation: visiblePlayerObservation(
+        membership?.inviteNote,
+        membership?.inviteForTournamentId,
+        tournamentId,
+      ),
       gender: u.gender ?? "",
       birthDate: u.birthDate ? u.birthDate.toISOString().slice(0, 10) : "",
       city: u.city ?? "",
@@ -334,6 +414,10 @@ export class PrismaBookingRepository implements BookingRepository {
     clubId: string,
     input: NewPlayerValues,
   ): Promise<PlayerRef> {
+    const observation = (input.observation ?? "").trim().slice(0, 500);
+    const tournamentId = observation
+      ? await latestClubTournamentId(clubId)
+      : null;
     const user = await prisma.user.create({
       data: {
         fullName: `${input.firstName} ${input.lastName}`.trim(),
@@ -355,9 +439,21 @@ export class PrismaBookingRepository implements BookingRepository {
         courtPosition: input.courtPosition ? input.courtPosition : null,
         ranking: input.ranking ?? null,
         accumulatedPoints: input.accumulatedPoints ?? 0,
-        memberships: { create: { clubId, role: "PLAYER" } },
+        memberships: {
+          create: {
+            clubId,
+            role: "PLAYER",
+            ...(observation
+              ? {
+                  inviteNote: observation,
+                  inviteForTournamentId: tournamentId,
+                }
+              : {}),
+          },
+        },
       },
     });
+    await persistUserInstagram(user.id, normalizeInstagram(input.instagram));
     return { id: user.id, name: user.fullName, gender: user.gender, city: user.city };
   }
 
@@ -368,7 +464,12 @@ export class PrismaBookingRepository implements BookingRepository {
   ): Promise<void> {
     const belongs = await prisma.membership.findFirst({
       where: { clubId, userId, role: "PLAYER" },
-      select: { id: true },
+      select: {
+        id: true,
+        inviteSentAt: true,
+        inviteForTournamentId: true,
+        inviteNote: true,
+      },
     });
     if (!belongs) return;
 
@@ -396,6 +497,18 @@ export class PrismaBookingRepository implements BookingRepository {
         accumulatedPoints: input.accumulatedPoints ?? 0,
       },
     });
+    await persistUserInstagram(userId, normalizeInstagram(input.instagram));
+
+    const tournamentId = await latestClubTournamentId(clubId);
+    const current = visiblePlayerObservation(
+      belongs.inviteNote,
+      belongs.inviteForTournamentId,
+      tournamentId,
+    );
+    const next = (input.observation ?? "").trim();
+    if (next !== current) {
+      await writePlayerObservation(belongs, tournamentId, next);
+    }
   }
 
   async deletePlayer(

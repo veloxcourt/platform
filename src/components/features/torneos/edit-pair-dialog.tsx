@@ -34,6 +34,7 @@ import {
   PairZonesSlotPicker,
   type PairDraftPreferences,
 } from "./pair-zones-slot-picker";
+import { defaultPreferenceSlotsForCategory } from "@/modules/tournaments/domain/zones-slot-registration";
 
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -96,7 +97,7 @@ export function EditPairDialog({
           ? defaultCategoryId
           : (categories[0]?.id ?? ""),
       );
-      setDraftPreferences({ dayPreference: "ANY", slots: [] });
+      setDraftPreferences({ dayPreference: "ANY", slots: [], ready: false });
       return;
     }
     if (!pair) return;
@@ -170,12 +171,23 @@ export function EditPairDialog({
         }
 
         const pairId = result.id;
-        if (draftPreferences.slots.length > 0) {
+        const categoryConfig = config?.categories.find(
+          (item) => item.categoryId === categoryId,
+        );
+        const slots =
+          draftPreferences.ready || !config || !categoryConfig
+            ? draftPreferences.slots
+            : defaultPreferenceSlotsForCategory({
+                categoryConfig,
+                playDays: config.playDays,
+                courtCount,
+              });
+        if (slots.length > 0) {
           const prefResult = await replacePairSlotPreferencesAction(
             clubSlug,
             tournamentId,
             pairId,
-            { slots: draftPreferences.slots },
+            { slots },
           );
           if (!prefResult.ok) {
             toast.error("Inscripción creada, pero no se guardaron las preferencias", {

@@ -15,6 +15,11 @@ import { cn } from "@/lib/utils";
 import { normalizeText } from "@/components/features/turnos/player-combobox";
 import type { PlayerRef } from "@/modules/bookings/domain/types";
 import { pairConfirmationDisplayState } from "@/modules/tournaments/domain/pair-confirmation";
+import {
+  PAIR_PAYMENT_METHODS,
+  PAIR_PAYMENT_METHOD_LABELS,
+  type PairPaymentMethod,
+} from "@/modules/tournaments/domain/pair-payment";
 import type {
   PairListItem,
   SlotReservationItem,
@@ -366,7 +371,7 @@ export function PairsTable({
                   Confirmó
                 </div>
               </th>
-              <th className="w-20 px-3 py-2 text-center font-medium">Pagó</th>
+              <th className="w-32 px-3 py-2 text-center font-medium">Pago</th>
               <th className="px-3 py-2" />
             </tr>
           </thead>
@@ -484,35 +489,35 @@ export function PairsTable({
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-col items-center gap-3">
-                        <PlayerToggle
-                          checked={pair.player1PaymentStatus === "PAID"}
+                        <PlayerPaymentSelect
+                          value={pair.player1PaymentStatus}
                           disabled={toggleDisabled}
-                          label={`Pagó ${pair.player1.name}`}
-                          onToggle={(paid) =>
+                          label={`Pago de ${pair.player1.name}`}
+                          onChange={(method) =>
                             runToggle(() =>
                               updatePairPlayerPaymentAction(
                                 clubSlug,
                                 tournamentId,
                                 pair.id,
                                 1,
-                                paid ? "PAID" : "UNPAID",
+                                method,
                               ),
                             )
                           }
                         />
                         {pair.player2 ? (
-                          <PlayerToggle
-                            checked={pair.player2PaymentStatus === "PAID"}
+                          <PlayerPaymentSelect
+                            value={pair.player2PaymentStatus}
                             disabled={toggleDisabled}
-                            label={`Pagó ${pair.player2.name}`}
-                            onToggle={(paid) =>
+                            label={`Pago de ${pair.player2.name}`}
+                            onChange={(method) =>
                               runToggle(() =>
                                 updatePairPlayerPaymentAction(
                                   clubSlug,
                                   tournamentId,
                                   pair.id,
                                   2,
-                                  paid ? "PAID" : "UNPAID",
+                                  method,
                                 ),
                               )
                             }
@@ -694,5 +699,36 @@ function PlayerToggle({
       title={label}
       onCheckedChange={(value) => onToggle(value === true)}
     />
+  );
+}
+
+function PlayerPaymentSelect({
+  value,
+  disabled,
+  label,
+  onChange,
+}: {
+  value: PairPaymentMethod;
+  disabled: boolean;
+  label: string;
+  onChange: (method: PairPaymentMethod) => void;
+}) {
+  return (
+    <select
+      className="h-7 w-[8.75rem] rounded-md border border-input bg-background px-1.5 text-[0.7rem] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+      value={value}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      onChange={(event) =>
+        onChange(event.target.value as PairPaymentMethod)
+      }
+    >
+      {PAIR_PAYMENT_METHODS.map((method) => (
+        <option key={method} value={method}>
+          {PAIR_PAYMENT_METHOD_LABELS[method]}
+        </option>
+      ))}
+    </select>
   );
 }

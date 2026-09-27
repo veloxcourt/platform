@@ -99,6 +99,8 @@ model User {
   /// Puntos acumulados (torneos / ranking).
   accumulatedPoints Int @default(0)
   photoUrl      String?
+  /// Usuario de Instagram, sin @.
+  instagram     String?
   /// Superadministrador de la plataforma (no es un privilegio de club).
   isSuperAdmin  Boolean        @default(false)
   createdAt     DateTime       @default(now())
@@ -336,6 +338,8 @@ enum PaymentStatus {
   UNPAID
   PARTIAL
   PAID
+  CASH
+  TRANSFER
 }
 
 // ---------------------------------------------------------------------------
@@ -601,6 +605,10 @@ model TournamentPair {
   status        RegistrationStatus @default(PENDING)
   player1Confirmed Boolean @default(false)
   player2Confirmed Boolean @default(false)
+  /// Forma de pago del jugador: UNPAID | CASH | TRANSFER (lista extensible).
+  player1PaymentMethod String @default("UNPAID")
+  player2PaymentMethod String @default("UNPAID")
+  /// Resumen pagó / no pagó (el enum viejo, compatible con el client cacheado).
   player1PaymentStatus PaymentStatus @default(UNPAID)
   player2PaymentStatus PaymentStatus @default(UNPAID)
   /// Resumen derivado (ambos pagados, uno, ninguno).

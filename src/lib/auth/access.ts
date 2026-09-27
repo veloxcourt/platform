@@ -9,7 +9,7 @@ import {
   firstHerramientasSlug,
   type AdminModuleKey,
 } from "@/config/modules";
-import { prisma } from "@/lib/prisma";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import { toModuleKeys } from "./permissions";
@@ -29,6 +29,7 @@ export class AuthorizationError extends Error {
 }
 
 const getCurrentUserRecord = cache(async () => {
+  await ensureRuntimeSchema();
   const supabase = await createSupabaseServerClient();
   const {
     data: { user: authUser },

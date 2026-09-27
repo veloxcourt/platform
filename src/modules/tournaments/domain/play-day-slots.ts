@@ -101,6 +101,33 @@ export function toPlayDayValues(day: {
   };
 }
 
+/// Como máximo un día de fase intermedia. Si hay varios tildes, gana el primero
+/// por fecha. Si no hay tilde, usa una única fecha de knockout como fallback.
+export function normalizeIntermediatePlayDays(
+  days: PlayDayValues[],
+  fallbackDates: string[] = [],
+): PlayDayValues[] {
+  const keepDate = resolveIntermediatePlayDate(days, fallbackDates);
+  return days.map((day) => {
+    const isIntermediateDay = keepDate != null && day.date === keepDate;
+    if (day.isIntermediateDay === isIntermediateDay) return day;
+    return { ...day, isIntermediateDay };
+  });
+}
+
+export function resolveIntermediatePlayDate(
+  days: PlayDayValues[],
+  fallbackDates: string[] = [],
+): string | null {
+  const flagged = days.find((day) => day.date && day.isIntermediateDay);
+  if (flagged) return flagged.date;
+  const unique = [
+    ...new Set(fallbackDates.map((date) => date.trim()).filter(Boolean)),
+  ];
+  if (unique.length !== 1) return null;
+  return days.some((day) => day.date === unique[0]) ? unique[0] : null;
+}
+
 function clampOvernightExtraSlots(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(
@@ -304,6 +331,13 @@ export type PlayDayWindowEdge = "start" | "end";
 export type PlayDayWindowDelta = "add" | "remove";
 export const PLAY_DAY_START_MINUTES = [0, 15, 30, 45] as const;
 export type PlayDayStartMinutes = (typeof PLAY_DAY_START_MINUTES)[number];
+
+export function playDayStartMinutesOf(startTime: string): PlayDayStartMinutes {
+  const raw = Number.parseInt(startTime.split(":")[1] ?? "0", 10);
+  return (PLAY_DAY_START_MINUTES as readonly number[]).includes(raw)
+    ? (raw as PlayDayStartMinutes)
+    : 0;
+}
 
 function playDayRulerSnapshot(
   day: PlayDayValues,

@@ -682,6 +682,8 @@ function pickSlot(params: {
   relaxPreferences?: boolean;
   /// G/G y P/P: solo slots posteriores a ambas aperturas de la zona.
   afterBound?: SlotBound | null;
+  /// Días de fase de zonas de esa categoría.
+  allowedDates?: Set<string>;
 }): SlotPick | null {
   const {
     resources,
@@ -693,10 +695,12 @@ function pickSlot(params: {
     pair2,
     relaxPreferences = false,
     afterBound = null,
+    allowedDates,
   } = params;
 
   const hardValid: ResourceSlot[] = [];
   for (const slot of resources) {
+    if (allowedDates && !allowedDates.has(slot.playDate)) continue;
     if (
       afterBound &&
       !isSlotAfterBound(
@@ -839,34 +843,142 @@ function markScheduled(
 export function buildZonesFixture(
   input: BuildZonesFixtureInput,
 ): ZonesFixtureResult {
-  const warnings: string[] = [];
-  const pairById = new Map(input.pairs.map((p) => [p.id, p]));
-
-  if (input.pairs.length === 0) {
-    return {
+  return (
+    buildZonesFixturesInterleaved({
+      categories: [
+        {
+          categoryId: "_",
+          pairs: input.pairs,
+          pairsPerZone: input.pairsPerZone,
+          zonesPlayDates: input.zonesPlayDates,
+          slotMinutes: input.slotMinutes,
+        },
+      ],
+      playDays: input.playDays,
+      courtCount: input.courtCount,
+      reservedSlots: input.reservedSlots,
+    }).get("_") ?? {
       zones: [],
       warnings: ["No hay parejas Parcial o Confirmado para armar zonas."],
       unassignedPairIds: [],
       builtAt: new Date().toISOString(),
-    };
-  }
-
-  const { zones: assigned, unassigned } = assignPairsToZones(
-    input.pairs,
-    input.pairsPerZone,
+    }
   );
+}
 
-  if (unassigned.length > 0) {
-    warnings.push(
-      `${unassigned.length} pareja(s) quedaron sin zona (tamaño de grupo).`,
+export type InterleavedZonesCategoryInput = {
+  categoryId: string;
+  pairs: FixturePairInput[];
+  pairsPerZone: number;
+  zonesPlayDates: string[];
+  slotMinutes: number;
+  /// Si viene, reusa esas zonas (solo reprograma horarios).
+  existingZones?: Array<{ label: string; pairIds: string[] }>;
+};
+
+type ZoneJob = {
+  categoryId: string;
+  label: string;
+  pairIds: string[];
+  pairings: ReturnType<typeof zonePairings<string>>;
+  matches: ScheduledZoneMatch[];
+  allowedDates: Set<string>;
+};
+
+function interleaveZoneJobs(groups: ZoneJob[][]): ZoneJob[] {
+  const max = groups.reduce((count, group) => Math.max(count, group.length), 0);
+  const out: ZoneJob[] = [];
+  for (let index = 0; index < max; index++) {
+    for (const group of groups) {
+      const job = group[index];
+      if (job) out.push(job);
+    }
+  }
+  return out;
+}
+
+/// Programa varias categorías en la misma pileta, intercalando zonas (A1, B1, A2, B2…).
+export function buildZonesFixturesInterleaved(input: {
+  categories: InterleavedZonesCategoryInput[];
+  playDays: PlayDayValues[];
+  courtCount: number;
+  reservedSlots?: ReservedCourtSlot[];
+}): Map<string, ZonesFixtureResult> {
+  const builtAt = new Date().toISOString();
+  const results = new Map<string, ZonesFixtureResult>();
+  const pairById = new Map<string, FixturePairInput>();
+  const groups: ZoneJob[][] = [];
+  const unassignedByCategory = new Map<string, string[]>();
+  const warningsByCategory = new Map<string, string[]>();
+
+  for (const category of input.categories) {
+    const warnings: string[] = [];
+    for (const pair of category.pairs) pairById.set(pair.id, pair);
+
+    if (category.pairs.length === 0) {
+      results.set(category.categoryId, {
+        zones: [],
+        warnings: ["No hay parejas Parcial o Confirmado para armar zonas."],
+        unassignedPairIds: [],
+        builtAt,
+      });
+      continue;
+    }
+
+    const grouped =
+      category.existingZones && category.existingZones.length > 0
+        ? { zones: category.existingZones, unassigned: [] as string[] }
+        : assignPairsToZones(category.pairs, category.pairsPerZone);
+    const assigned = grouped.zones;
+    const unassigned = grouped.unassigned;
+
+    if (unassigned.length > 0) {
+      warnings.push(
+        `${unassigned.length} pareja(s) quedaron sin zona (tamaño de grupo).`,
+      );
+    }
+
+    const allowedDates = new Set(category.zonesPlayDates.filter(Boolean));
+    groups.push(
+      assigned.map((zone) => ({
+        categoryId: category.categoryId,
+        label: zone.label,
+        pairIds: zone.pairIds,
+        pairings: zonePairings(zone.pairIds),
+        matches: [],
+        allowedDates,
+      })),
     );
+    unassignedByCategory.set(category.categoryId, unassigned);
+    warningsByCategory.set(category.categoryId, warnings);
   }
 
-  const resources = buildResourceSlots(input);
+  const active = input.categories.filter((category) => category.pairs.length > 0);
+  if (active.length === 0) return results;
+
+  const zonesPlayDates = [
+    ...new Set(active.flatMap((category) => category.zonesPlayDates.filter(Boolean))),
+  ];
+  const slotMinutes = Math.max(
+    1,
+    ...active.map((category) => category.slotMinutes),
+  );
+  const resources = buildResourceSlots({
+    pairs: active[0]!.pairs,
+    pairsPerZone: active[0]!.pairsPerZone,
+    playDays: input.playDays,
+    zonesPlayDates,
+    courtCount: input.courtCount,
+    slotMinutes,
+  });
   if (resources.length === 0) {
-    warnings.push(
-      "No hay franjas horarias en días de fase de zonas. Revisá la configuración.",
-    );
+    for (const category of active) {
+      const warnings = warningsByCategory.get(category.categoryId) ?? [];
+      warnings.push(
+        "No hay franjas horarias en días de fase de zonas. Revisá la configuración.",
+      );
+      warningsByCategory.set(category.categoryId, warnings);
+    }
   }
 
   const occupied = new Set<string>();
@@ -880,23 +992,7 @@ export function buildZonesFixture(
   const pairDates = new Map<string, Set<string>>();
   const appearances = new Map<string, PairAppearance[]>();
   const courtCount = Math.max(1, input.courtCount);
-
-  type ZoneJob = {
-    label: string;
-    pairIds: string[];
-    pairings: ReturnType<typeof zonePairings<string>>;
-    matches: ScheduledZoneMatch[];
-  };
-
-  // Trabajos por zona; se programan intercalados (1.er partido de cada zona,
-  // luego el 2.º, …) para llenar canchas en paralelo.
-  const jobs: ZoneJob[] = assigned.map((zone) => ({
-    label: zone.label,
-    pairIds: zone.pairIds,
-    pairings: zonePairings(zone.pairIds),
-    matches: [],
-  }));
-
+  const jobs = interleaveZoneJobs(groups);
   const maxRounds = jobs.reduce(
     (max, job) => Math.max(max, job.pairings.length),
     0,
@@ -906,6 +1002,7 @@ export function buildZonesFixture(
     for (const job of jobs) {
       const pairing = job.pairings[round];
       if (!pairing) continue;
+      const warnings = warningsByCategory.get(job.categoryId) ?? [];
 
       const pair1 = pairing.pair1 ? pairById.get(pairing.pair1) : undefined;
       const pair2 = pairing.pair2 ? pairById.get(pairing.pair2) : undefined;
@@ -931,6 +1028,7 @@ export function buildZonesFixture(
           slotIndex: null,
           noRestGap: false,
         });
+        warningsByCategory.set(job.categoryId, warnings);
         continue;
       }
 
@@ -951,6 +1049,7 @@ export function buildZonesFixture(
         pair2: softPair2,
         relaxPreferences: isFollowUp,
         afterBound,
+        allowedDates: job.allowedDates,
       });
 
       if (!picked) {
@@ -971,11 +1070,11 @@ export function buildZonesFixture(
           slotIndex: null,
           noRestGap: false,
         });
+        warningsByCategory.set(job.categoryId, warnings);
         continue;
       }
 
       const { slot, ruleBreaks } = picked;
-
       const scheduled: ScheduledZoneMatch = {
         matchIndex: round,
         kind: pairing.kind,
@@ -999,72 +1098,84 @@ export function buildZonesFixture(
         appearances,
         scheduled,
       );
-
       job.matches.push(scheduled);
+      warningsByCategory.set(job.categoryId, warnings);
     }
   }
 
   const dayOpenByDate = new Map(
     input.playDays.filter((d) => d.date).map((d) => [d.date, d.startTime]),
   );
-
-  const scheduledZones: ScheduledZone[] = jobs.map((job) => {
-    const matches = [...job.matches].sort((a, b) =>
-      comparePlayDaySchedule(a, b, dayOpenByDate),
-    );
-    for (let i = 0; i < matches.length; i++) {
-      matches[i]!.matchIndex = i;
-    }
-    return {
-      label: job.label,
-      pairIds: job.pairIds,
-      matches,
-    };
-  });
-
   const noRestCount = flagNoRestGapFromAppearances(appearances);
-  if (noRestCount > 0) {
-    warnings.push(
-      `${noRestCount} partido(s) sin celda de descanso entre turnos de una pareja (marcados para revisión manual).`,
-    );
+  const jobsByCategory = new Map<string, ZoneJob[]>();
+  for (const job of jobs) {
+    const list = jobsByCategory.get(job.categoryId) ?? [];
+    list.push(job);
+    jobsByCategory.set(job.categoryId, list);
   }
 
-  const allMatches = scheduledZones.flatMap((zone) => zone.matches);
-  const dayPrefBreaks = allMatches.filter((match) =>
-    match.ruleBreaks?.includes("day_pref"),
-  ).length;
-  const cellPrefBreaks = allMatches.filter((match) =>
-    match.ruleBreaks?.includes("cell_pref"),
-  ).length;
-  if (dayPrefBreaks > 0) {
-    warnings.push(
-      `${dayPrefBreaks} partido(s) fuera de preferencia de día (la oleada tuvo prioridad; solo informativo).`,
-    );
-  }
-  if (cellPrefBreaks > 0) {
-    warnings.push(
-      `${cellPrefBreaks} partido(s) fuera de preferencia de horario (la oleada tuvo prioridad; solo informativo).`,
-    );
+  for (const category of active) {
+    const warnings = warningsByCategory.get(category.categoryId) ?? [];
+    const categoryJobs = jobsByCategory.get(category.categoryId) ?? [];
+    const scheduledZones: ScheduledZone[] = categoryJobs.map((job) => {
+      const matches = [...job.matches].sort((a, b) =>
+        comparePlayDaySchedule(a, b, dayOpenByDate),
+      );
+      for (let i = 0; i < matches.length; i++) {
+        matches[i]!.matchIndex = i;
+      }
+      return {
+        label: job.label,
+        pairIds: job.pairIds,
+        matches,
+      };
+    });
+
+    if (noRestCount > 0) {
+      warnings.push(
+        `${noRestCount} partido(s) sin celda de descanso entre turnos de una pareja (marcados para revisión manual).`,
+      );
+    }
+
+    const allMatches = scheduledZones.flatMap((zone) => zone.matches);
+    const dayPrefBreaks = allMatches.filter((match) =>
+      match.ruleBreaks?.includes("day_pref"),
+    ).length;
+    const cellPrefBreaks = allMatches.filter((match) =>
+      match.ruleBreaks?.includes("cell_pref"),
+    ).length;
+    if (dayPrefBreaks > 0) {
+      warnings.push(
+        `${dayPrefBreaks} partido(s) fuera de preferencia de día (la oleada tuvo prioridad; solo informativo).`,
+      );
+    }
+    if (cellPrefBreaks > 0) {
+      warnings.push(
+        `${cellPrefBreaks} partido(s) fuera de preferencia de horario (la oleada tuvo prioridad; solo informativo).`,
+      );
+    }
+
+    const withoutPrefs = category.pairs.filter((p) => p.preferences.length === 0);
+    if (withoutPrefs.length > 0) {
+      warnings.push(
+        `${withoutPrefs.length} pareja(s) sin rangos de preferencia: se ubicaron en los huecos libres.`,
+      );
+    }
+
+    const oleadaHoles = leftoverOleadaHoleCount(resources, occupied, courtCount);
+    if (oleadaHoles > 0) {
+      warnings.push(
+        `${oleadaHoles} franja(s) con cancha libre y partidos más tarde (oleada incompleta: pareja ocupada o G/G).`,
+      );
+    }
+
+    results.set(category.categoryId, {
+      zones: scheduledZones,
+      warnings,
+      unassignedPairIds: unassignedByCategory.get(category.categoryId) ?? [],
+      builtAt,
+    });
   }
 
-  const withoutPrefs = input.pairs.filter((p) => p.preferences.length === 0);
-  if (withoutPrefs.length > 0) {
-    warnings.push(
-      `${withoutPrefs.length} pareja(s) sin rangos de preferencia: se ubicaron en los huecos libres.`,
-    );
-  }
-
-  const oleadaHoles = leftoverOleadaHoleCount(resources, occupied, courtCount);
-  if (oleadaHoles > 0) {
-    warnings.push(
-      `${oleadaHoles} franja(s) con cancha libre y partidos más tarde (oleada incompleta: pareja ocupada o G/G).`,
-    );
-  }
-
-  return {
-    zones: scheduledZones,
-    warnings,
-    unassignedPairIds: unassigned,
-    builtAt: new Date().toISOString(),
-  };
+  return results;
 }

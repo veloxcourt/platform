@@ -44,6 +44,7 @@ export interface PlayerListItem {
   id: string;
   fullName: string;
   phone: string | null;
+  instagram: string | null;
   gender: Gender | null;
   city: string | null;
   category: string | null;

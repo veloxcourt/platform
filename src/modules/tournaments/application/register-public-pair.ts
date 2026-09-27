@@ -17,6 +17,7 @@ import {
   pairManagePath,
 } from "@/modules/tournaments/application/find-public-pair";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
+import { defaultPreferenceSlotsForCategory } from "@/modules/tournaments/domain/zones-slot-registration";
 
 type PlayerInput = PublicInscriptionValues["player1"];
 
@@ -180,6 +181,24 @@ export async function registerPublicPair(
   }
 
   const repo = getTournamentRepository();
+  let slots = parsed.data.slots;
+  if (!parsed.data.slotsReady) {
+    const config = await repo.getTournamentConfig(
+      tournament.clubId,
+      tournament.id,
+    );
+    const categoryConfig = config?.categories.find(
+      (item) => item.categoryId === category.id,
+    );
+    if (config && categoryConfig) {
+      slots = defaultPreferenceSlotsForCategory({
+        categoryConfig,
+        playDays: config.playDays,
+        courtCount: config.courtCount || 1,
+      });
+    }
+  }
+
   const result = await repo.addPair(tournament.clubId, tournament.id, {
     categoryId: category.id,
     player1Id: player1.id,
@@ -187,12 +206,12 @@ export async function registerPublicPair(
   });
   if (!result.ok) return { ok: false, error: result.error };
 
-  if (parsed.data.slots.length > 0) {
+  if (slots.length > 0) {
     const prefs = await repo.replacePairSlotPreferences(
       tournament.clubId,
       tournament.id,
       result.id,
-      { slots: parsed.data.slots },
+      { slots },
     );
     if (!prefs.ok) {
       console.error("[public-inscription] slot preferences", prefs.error);

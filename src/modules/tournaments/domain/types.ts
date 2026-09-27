@@ -19,6 +19,16 @@ export type RegistrationStatus =
   | "CANCELLED";
 export type PaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
 
+/// Forma de pago por jugador en la inscripción. Sumar acá para agregar opciones.
+export const PAIR_PAYMENT_METHODS = ["UNPAID", "CASH", "TRANSFER"] as const;
+export type PairPaymentMethod = (typeof PAIR_PAYMENT_METHODS)[number];
+
+export const PAIR_PAYMENT_METHOD_LABELS: Record<PairPaymentMethod, string> = {
+  UNPAID: "No pago",
+  CASH: "Efectivo",
+  TRANSFER: "Transferencia",
+};
+
 export interface TournamentListItem {
   id: string;
   type: TournamentType;
@@ -79,8 +89,8 @@ export interface PairListItem {
   status: RegistrationStatus;
   player1Confirmed: boolean;
   player2Confirmed: boolean;
-  player1PaymentStatus: PaymentStatus;
-  player2PaymentStatus: PaymentStatus;
+  player1PaymentStatus: PairPaymentMethod;
+  player2PaymentStatus: PairPaymentMethod;
   paymentStatus: PaymentStatus;
   createdAt: string;
   /// Token del link privado de gestión. Null si todavía no se generó.

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { firstDestinationModule } from "@/lib/auth/permissions";
 import { clearPasswordResetRequired } from "@/lib/auth/password-reset";
-import { prisma } from "@/lib/prisma";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type LoginState = { error?: string };
@@ -26,6 +26,8 @@ export async function loginAction(
   if (!email || !password) {
     return { error: "Ingresá tu email y contraseña." };
   }
+
+  await ensureRuntimeSchema();
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.signInWithPassword({

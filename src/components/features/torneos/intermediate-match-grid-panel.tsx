@@ -80,6 +80,11 @@ export function IntermediateMatchGridPanel({
                 salen de Actualizar.
               </p>
               <p>
+                Se juega una ronda completa antes de la siguiente, contando
+                todas las categorías. Dentro de cada ronda los partidos se
+                alternan entre categorías.
+              </p>
+              <p>
                 <span className="font-medium text-foreground">
                   Incluir partidos de Zona
                 </span>{" "}

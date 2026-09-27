@@ -425,7 +425,9 @@ export function IntermediatePhasePanel({
             </p>
             <p>
               <span className="font-medium text-foreground">Actualizar</span>{" "}
-              asigna día, horario y cancha según las reglas de intermedia. En
+              asigna día, horario y cancha según las reglas de intermedia: se
+              completa una ronda antes de pasar a la siguiente y los partidos
+              se alternan entre categorías. En
               Modo Manual tocá día, horario o cancha para elegir las tres
               cosas juntas en la regla de slots. El partido se queda en su
               fila: no se reordena por horario. Las flechas solo intercambian

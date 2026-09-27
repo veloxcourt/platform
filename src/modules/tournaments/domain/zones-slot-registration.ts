@@ -1,5 +1,6 @@
 import {
   buildZonesRegistrationGrid,
+  listSelectablePreferenceSlots,
   ZONES_SLOTS_PER_PAIR,
   type CourtDaySlot,
   type SlotReservationRef,
@@ -85,6 +86,35 @@ export function findPreferenceSlotInRules(
   slotIndex: number,
 ): CourtDaySlot | null {
   return findSlotInRules(rules, playDate, 0, slotIndex);
+}
+
+export function defaultPreferenceSlotsForCategory(params: {
+  categoryConfig: CategoryPhaseConfig;
+  playDays: PlayDayValues[];
+  courtCount: number;
+  confirmedPairsForEstimate?: number;
+  otherReservations?: SlotReservationRef[];
+}): Array<{
+  playDate: string;
+  slotIndex: number;
+  startTime: string;
+  endTime: string;
+}> {
+  const rules = buildCategoryZonesGrid({
+    categoryConfig: params.categoryConfig,
+    playDays: params.playDays,
+    courtCount: params.courtCount,
+    confirmedPairsForEstimate: params.confirmedPairsForEstimate ?? 8,
+    reservations: params.otherReservations ?? [],
+    currentPairId: "__draft__",
+    preferenceMode: true,
+  });
+  return listSelectablePreferenceSlots(rules).map((slot) => ({
+    playDate: slot.playDate,
+    slotIndex: slot.slotIndex,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
+  }));
 }
 
 export { ZONES_SLOTS_PER_PAIR };

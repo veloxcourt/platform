@@ -15,6 +15,7 @@ import {
   type SyncTournamentEventsResult,
 } from "@/modules/players/application/player-events";
 import { createPlayerEventSchema } from "@/modules/players/domain/player-event";
+import { writePlayerObservation } from "@/modules/players/application/save-player-invite-note";
 
 async function findPlayerMembership(clubId: string, playerId: string) {
   return prisma.membership.findFirst({
@@ -67,26 +68,7 @@ export async function setPlayerInviteNoteAction(
   const membership = await findPlayerMembership(access.club.id, playerId);
   if (!membership) return { ok: false, error: "Jugador no encontrado" };
 
-  const trimmed = note.trim().slice(0, 500);
-  const sameTournament = membership.inviteForTournamentId === tournamentId;
-  const messageSentHere = membership.inviteSentAt != null && sameTournament;
-
-  await prisma.membership.update({
-    where: { id: membership.id },
-    data: trimmed
-      ? {
-          inviteNote: trimmed,
-          inviteForTournamentId: tournamentId,
-          ...(sameTournament ? {} : { inviteSentAt: null }),
-        }
-      : messageSentHere
-        ? { inviteNote: null }
-        : {
-            inviteNote: null,
-            inviteSentAt: null,
-            inviteForTournamentId: null,
-          },
-  });
+  await writePlayerObservation(membership, tournamentId, note);
 
   revalidatePath(`/${clubSlug}/jugadores`);
   return { ok: true };

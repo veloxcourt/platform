@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 53;
+const PRISMA_SCHEMA_REVISION = 57;
 
 /** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
 const PG_POOL_MAX = 1;
@@ -30,6 +30,7 @@ function schemaFingerprint(): string {
     "type" in Prisma.TournamentScalarFieldEnum ? "1" : "0",
     "categoryId" in pairFields ? "1" : "0",
     "player1PaymentStatus" in pairFields ? "1" : "0",
+    "player1PaymentMethod" in pairFields ? "1" : "0",
     "player1Confirmed" in pairFields ? "1" : "0",
     "zonesDayPreference" in pairFields ? "1" : "0",
     "simulationEnabled" in categoryFields ? "1" : "0",
@@ -73,6 +74,7 @@ function schemaFingerprint(): string {
     "playerEvent" in Prisma.ModelName ? "1" : "0",
     "inviteSentAt" in Prisma.MembershipScalarFieldEnum ? "1" : "0",
     "inviteNote" in Prisma.MembershipScalarFieldEnum ? "1" : "0",
+    "instagram" in Prisma.UserScalarFieldEnum ? "1" : "0",
     "showInClientMenu" in Prisma.ProductScalarFieldEnum ? "1" : "0",
   ].join(":");
 }
@@ -260,6 +262,25 @@ async function applyRuntimeSchema() {
     `ALTER TABLE "memberships" ADD COLUMN IF NOT EXISTS "inviteSentAt" TIMESTAMP(3)`,
     `ALTER TABLE "memberships" ADD COLUMN IF NOT EXISTS "inviteForTournamentId" TEXT`,
     `ALTER TABLE "memberships" ADD COLUMN IF NOT EXISTS "inviteNote" TEXT`,
+    `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "instagram" TEXT`,
+    `ALTER TABLE "tournament_pairs" ADD COLUMN IF NOT EXISTS "player1PaymentMethod" TEXT NOT NULL DEFAULT 'UNPAID'`,
+    `ALTER TABLE "tournament_pairs" ADD COLUMN IF NOT EXISTS "player2PaymentMethod" TEXT NOT NULL DEFAULT 'UNPAID'`,
+    `UPDATE "tournament_pairs" SET "player1PaymentMethod" = CASE "player1PaymentStatus"::text
+        WHEN 'TRANSFER' THEN 'TRANSFER'
+        WHEN 'CASH' THEN 'CASH'
+        WHEN 'PAID' THEN CASE WHEN "player1PaymentMethod" IN ('CASH', 'TRANSFER') THEN "player1PaymentMethod" ELSE 'CASH' END
+        WHEN 'PARTIAL' THEN CASE WHEN "player1PaymentMethod" IN ('CASH', 'TRANSFER') THEN "player1PaymentMethod" ELSE 'CASH' END
+        ELSE "player1PaymentMethod"
+      END`,
+    `UPDATE "tournament_pairs" SET "player2PaymentMethod" = CASE "player2PaymentStatus"::text
+        WHEN 'TRANSFER' THEN 'TRANSFER'
+        WHEN 'CASH' THEN 'CASH'
+        WHEN 'PAID' THEN CASE WHEN "player2PaymentMethod" IN ('CASH', 'TRANSFER') THEN "player2PaymentMethod" ELSE 'CASH' END
+        WHEN 'PARTIAL' THEN CASE WHEN "player2PaymentMethod" IN ('CASH', 'TRANSFER') THEN "player2PaymentMethod" ELSE 'CASH' END
+        ELSE "player2PaymentMethod"
+      END`,
+    `UPDATE "tournament_pairs" SET "player1PaymentStatus" = 'PAID' WHERE "player1PaymentStatus"::text IN ('CASH', 'TRANSFER')`,
+    `UPDATE "tournament_pairs" SET "player2PaymentStatus" = 'PAID' WHERE "player2PaymentStatus"::text IN ('CASH', 'TRANSFER')`,
   ];
 
   const pool = new Pool({

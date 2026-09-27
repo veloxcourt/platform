@@ -100,6 +100,12 @@ export function FinalMatchGridPanel({
                 cancha más baja. Día, horario y cancha salen de Actualizar.
               </p>
               <p>
+                Se juega una ronda completa antes de la siguiente: primero
+                todos los Cuartos, después las Semifinales y al final las
+                Finales, contando todas las categorías. Dentro de cada ronda
+                los partidos se alternan entre categorías.
+              </p>
+              <p>
                 <span className="font-medium text-foreground">
                   Incluir fases anteriores
                 </span>{" "}

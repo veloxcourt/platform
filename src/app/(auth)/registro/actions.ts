@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { DEFAULT_PHONE_DIAL, normalizeToE164 } from "@/lib/phone";
-import { prisma } from "@/lib/prisma";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type RegisterState = { error?: string };
@@ -39,6 +39,8 @@ export async function registerPlayerAction(
   if (!phone) {
     return { error: "Teléfono inválido." };
   }
+
+  await ensureRuntimeSchema();
 
   const fullName = `${firstName} ${lastName}`.trim();
 

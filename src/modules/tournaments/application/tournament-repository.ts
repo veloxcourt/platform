@@ -9,7 +9,7 @@ import type { ReplacePairSlotPreferencesValues } from "../domain/slot-reservatio
 import type { CreateTournamentValues } from "../domain/tournament-schema";
 import type { UpdateTournamentValues } from "../domain/tournament-schema";
 import type {
-  PaymentStatus,
+  PairPaymentMethod,
   RegistrationStatus,
   SlotReservationItem,
   TournamentCategoryItem,
@@ -123,7 +123,7 @@ export interface TournamentRepository {
     clubId: string,
     pairId: string,
     slot: 1 | 2,
-    paymentStatus: PaymentStatus,
+    method: PairPaymentMethod,
   ): Promise<MutationResult>;
   updatePairPlayerConfirmation(
     clubId: string,
@@ -162,9 +162,17 @@ export interface TournamentRepository {
   buildAndSaveZonesFixture(
     clubId: string,
     tournamentId: string,
-    categoryId: string,
+    categoryId?: string,
   ): Promise<
-    | { ok: true; fixture: ZonesFixturePersisted }
+    | {
+        ok: true;
+        fixture: ZonesFixturePersisted;
+        saved: Array<{
+          categoryId: string;
+          categoryName: string;
+          fixture: ZonesFixturePersisted;
+        }>;
+      }
     | { ok: false; error: string }
   >;
   buildAndSaveIntermediateFixture(

@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 
 export type EmailLinkResult =
   | { ok: true }
@@ -8,6 +8,7 @@ export async function linkAuthUserToLocalAccount(
   authUser: { id: string; email: string },
   options: { activateInvites: boolean },
 ): Promise<EmailLinkResult> {
+  await ensureRuntimeSchema();
   const email = authUser.email.toLowerCase();
   const user = await prisma.user.findFirst({
     where: {

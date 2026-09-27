@@ -17,7 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AyudaButton } from "./ayuda-button";
-import { formatShortDate } from "@/lib/date";
+import { formatPlayDayOrdinalLabel, formatShortDate } from "@/lib/date";
 import type {
   TournamentCategoryItem,
   TournamentConfig,
@@ -44,6 +44,7 @@ import { materializeCategoryRounds } from "@/modules/tournaments/domain/round-ph
 import { saveTournamentConfigAction } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/configuracion/actions";
 import {
   materializePlayDaySelection,
+  normalizeIntermediatePlayDays,
   playDayRulerSelectedMinutes,
   toPlayDayValues,
   zonesPlaySlotMinutes,
@@ -105,7 +106,7 @@ function PlayDateChecks({
     <div className="flex flex-wrap gap-3">
       {playDays.map((day, dayIndex) => {
         const date = day?.date ?? "";
-        const label = `Día ${dayIndex + 1}`;
+        const label = formatPlayDayOrdinalLabel(dayIndex, date);
         const checked = Boolean(date && selectedDates.includes(date));
         return (
           <label
@@ -745,28 +746,12 @@ export function TournamentConfigForm({
     resolver: zodResolver(tournamentConfigSchema),
     defaultValues: {
       courtCount: initial.courtCount ?? 1,
-      playDays: (() => {
-        const knockoutDates = new Set(
-          initial.categories.flatMap(
-            (category) => category.phases.knockout.playDates ?? [],
-          ),
-        );
-        const singleKnockoutDate =
-          knockoutDates.size === 1 ? [...knockoutDates][0] : null;
-        let assignedIntermediate = false;
-        return initial.playDays.map((day) => {
-          const values = toPlayDayValues(day);
-          const fromFlag = values.isIntermediateDay;
-          const fromKnockout =
-            !fromFlag &&
-            !assignedIntermediate &&
-            singleKnockoutDate != null &&
-            values.date === singleKnockoutDate;
-          const isIntermediateDay = fromFlag || fromKnockout;
-          if (isIntermediateDay) assignedIntermediate = true;
-          return { ...values, isIntermediateDay };
-        });
-      })(),
+      playDays: normalizeIntermediatePlayDays(
+        initial.playDays.map((day) => toPlayDayValues(day)),
+        initial.categories.flatMap(
+          (category) => category.phases.knockout.playDates ?? [],
+        ),
+      ),
       categories: initial.categories.map((category) => ({
         categoryId: category.categoryId,
         phases: {

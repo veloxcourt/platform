@@ -32,6 +32,8 @@ export const newPlayerSchema = z.object({
     .max(120)
     .optional()
     .or(z.literal("")),
+  instagram: optionalText(80),
+  observation: optionalText(500),
   gender: z.enum(GENDERS).or(z.literal("")).optional(),
   birthDate: z
     .string()
@@ -68,6 +70,14 @@ export const newPlayerSchema = z.object({
 });
 
 export type NewPlayerValues = z.infer<typeof newPlayerSchema>;
+
+/// Guarda el usuario sin @. Vacío queda en null.
+export function normalizeInstagram(
+  value: string | null | undefined,
+): string | null {
+  const text = (value ?? "").trim().replace(/^@+/, "");
+  return text ? text.slice(0, 80) : null;
+}
 
 export function playerPhoneToE164(
   values: Pick<NewPlayerValues, "phoneCountryDial" | "phoneLocal">,

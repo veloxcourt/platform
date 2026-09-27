@@ -1,11 +1,14 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AtSign,
   ChevronDown,
+  Columns3,
   History,
   Pencil,
+  PhoneOff,
   Search,
   Trash2,
   Trophy,
@@ -15,7 +18,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/money";
@@ -28,6 +39,7 @@ import {
 import type { TournamentInscriptionsItem } from "@/modules/tournaments/domain/types";
 import { normalizeText } from "@/components/features/turnos/player-combobox";
 import { NewPlayerDialog } from "@/components/features/turnos/new-player-dialog";
+import { PlayerSignupLinkButton } from "@/components/features/players/player-signup-link-button";
 import { AccountDialog } from "@/components/features/turnos/account-dialog";
 import {
   PlayerEventsDialog,
@@ -55,14 +67,61 @@ const ALL_TOURNAMENT_CATEGORIES = "";
 const FILTER_SELECT_CLASS =
   "h-8 max-w-[14rem] shrink-0 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
+/// Columnas que se pueden ocultar. "Nombre" y las acciones siempre quedan visibles.
+const OPTIONAL_COLUMNS = [
+  { key: "photo", label: "Foto" },
+  { key: "message", label: "Mensaje" },
+  { key: "note", label: "Observación" },
+  { key: "phone", label: "Teléfono" },
+  { key: "instagram", label: "Instagram" },
+  { key: "city", label: "Localidad" },
+  { key: "category", label: "Categoría" },
+  { key: "position", label: "Posición" },
+  { key: "ranking", label: "Ranking" },
+  { key: "points", label: "Puntos" },
+  { key: "balance", label: "Saldo" },
+] as const;
+
+type ColumnKey = (typeof OPTIONAL_COLUMNS)[number]["key"];
+
+type ColumnVisibility = Record<ColumnKey, boolean>;
+
+const COLUMNS_KEY = "players-table-columns";
+
+const DEFAULT_COLUMNS = Object.fromEntries(
+  OPTIONAL_COLUMNS.map((c) => [c.key, true]),
+) as ColumnVisibility;
+
+function loadColumns(): ColumnVisibility {
+  if (typeof window === "undefined") return { ...DEFAULT_COLUMNS };
+  try {
+    const raw = localStorage.getItem(COLUMNS_KEY);
+    if (!raw) return { ...DEFAULT_COLUMNS };
+    const parsed = JSON.parse(raw) as Partial<ColumnVisibility>;
+    return { ...DEFAULT_COLUMNS, ...parsed };
+  } catch {
+    return { ...DEFAULT_COLUMNS };
+  }
+}
+
+function saveColumns(columns: ColumnVisibility) {
+  try {
+    localStorage.setItem(COLUMNS_KEY, JSON.stringify(columns));
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
 export function PlayersTable({
   clubSlug,
+  clubName,
   currency,
   players,
   categories,
   tournaments = [],
 }: {
   clubSlug: string;
+  clubName: string;
   currency: string;
   players: PlayerListItem[];
   categories: string[];
@@ -79,6 +138,7 @@ export function PlayersTable({
   );
   const [tournamentPickerOpen, setTournamentPickerOpen] = useState(false);
   const [hideLatestInscribed, setHideLatestInscribed] = useState(false);
+  const [onlyWithoutPhone, setOnlyWithoutPhone] = useState(false);
   const [sentOverride, setSentOverride] = useState<Record<string, boolean>>({});
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
   const [newOpen, setNewOpen] = useState(false);
@@ -91,8 +151,26 @@ export function PlayersTable({
     values: NewPlayerValues;
     photoUrl?: string | null;
   } | null>(null);
+  const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [, startLoad] = useTransition();
   const [isDeleting, startDelete] = useTransition();
+
+  useEffect(() => {
+    setColumns(loadColumns());
+  }, []);
+
+  function toggleColumn(key: ColumnKey, visible: boolean) {
+    setColumns((current) => {
+      const next = { ...current, [key]: visible };
+      saveColumns(next);
+      return next;
+    });
+  }
+
+  function resetColumns() {
+    setColumns({ ...DEFAULT_COLUMNS });
+    saveColumns(DEFAULT_COLUMNS);
+  }
 
   function openEdit(p: PlayerListItem) {
     startLoad(async () => {
@@ -286,6 +364,7 @@ export function PlayersTable({
     return players.filter((p) => {
       if (inscribedIds && !inscribedIds.has(p.id)) return false;
       if (hideLatestInscribed && latestInscribedIds.has(p.id)) return false;
+      if (onlyWithoutPhone && p.phone?.trim()) return false;
       if (q && !normalizeText(p.fullName).includes(q) && !normalizeText(p.city ?? "").includes(q)) return false;
       if (category === NO_CATEGORY) {
         if (p.category?.trim()) return false;
@@ -312,7 +391,14 @@ export function PlayersTable({
     inscribedIds,
     hideLatestInscribed,
     latestInscribedIds,
+    onlyWithoutPhone,
   ]);
+
+  const visibleOptionalCount = OPTIONAL_COLUMNS.filter(
+    (c) => columns[c.key],
+  ).length;
+  /// Las opcionales visibles más "Nombre" y las acciones, que nunca se ocultan.
+  const visibleColumnCount = visibleOptionalCount + 2;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -396,32 +482,101 @@ export function PlayersTable({
               Para invitar
             </Button>
           )}
+          <Button
+            type="button"
+            variant={onlyWithoutPhone ? "default" : "outline"}
+            aria-pressed={onlyWithoutPhone}
+            title="Muestra solo a quien no tiene teléfono cargado"
+            onClick={() => setOnlyWithoutPhone((value) => !value)}
+          >
+            <PhoneOff className="size-4" />
+            Sin teléfono
+          </Button>
           <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
             {filtered.length}{" "}
             {filtered.length === 1 ? "jugador" : "jugadores"}
           </span>
         </div>
-        <Button onClick={() => setNewOpen(true)}>
-          <UserPlus className="size-4" />
-          Nuevo jugador
-        </Button>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <div className="flex items-center gap-3">
+            <PlayerSignupLinkButton clubSlug={clubSlug} clubName={clubName} />
+            <Button onClick={() => setNewOpen(true)}>
+              <UserPlus className="size-4" />
+              Nuevo jugador
+            </Button>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(buttonVariants({ variant: "outline" }), "shrink-0")}
+              title="Elegir qué columnas se muestran"
+            >
+              <Columns3 className="size-4" />
+              Columnas
+              {visibleOptionalCount < OPTIONAL_COLUMNS.length && (
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {visibleOptionalCount}/{OPTIONAL_COLUMNS.length}
+                </span>
+              )}
+              <ChevronDown className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-auto min-w-52">
+              {OPTIONAL_COLUMNS.map((col) => (
+                <DropdownMenuCheckboxItem
+                  key={col.key}
+                  checked={columns[col.key]}
+                  closeOnClick={false}
+                  onCheckedChange={(checked) =>
+                    toggleColumn(col.key, checked === true)
+                  }
+                >
+                  {col.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={resetColumns}>
+                Mostrar todas
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-10 border-b bg-muted text-left text-xs text-muted-foreground">
             <tr>
-              <th className="w-10 px-3 py-2" />
+              {columns.photo && <th className="w-10 px-3 py-2" />}
               <th className="px-3 py-2 font-medium">Nombre</th>
-              <th className="px-3 py-2 text-center font-medium">Mensaje</th>
-              <th className="px-3 py-2 font-medium">Observación</th>
-              <th className="px-3 py-2 font-medium">Teléfono</th>
-              <th className="px-3 py-2 font-medium">Localidad</th>
-              <th className="px-3 py-2 font-medium">Categoría</th>
-              <th className="px-3 py-2 font-medium">Posición</th>
-              <th className="px-3 py-2 text-right font-medium">Ranking</th>
-              <th className="px-3 py-2 text-right font-medium">Puntos</th>
-              <th className="px-3 py-2 text-right font-medium">Saldo</th>
+              {columns.message && (
+                <th className="px-3 py-2 text-center font-medium">Mensaje</th>
+              )}
+              {columns.note && (
+                <th className="px-3 py-2 font-medium">Observación</th>
+              )}
+              {columns.phone && (
+                <th className="px-3 py-2 font-medium">Teléfono</th>
+              )}
+              {columns.instagram && (
+                <th className="px-3 py-2 font-medium">Instagram</th>
+              )}
+              {columns.city && (
+                <th className="px-3 py-2 font-medium">Localidad</th>
+              )}
+              {columns.category && (
+                <th className="px-3 py-2 font-medium">Categoría</th>
+              )}
+              {columns.position && (
+                <th className="px-3 py-2 font-medium">Posición</th>
+              )}
+              {columns.ranking && (
+                <th className="px-3 py-2 text-right font-medium">Ranking</th>
+              )}
+              {columns.points && (
+                <th className="px-3 py-2 text-right font-medium">Puntos</th>
+              )}
+              {columns.balance && (
+                <th className="px-3 py-2 text-right font-medium">Saldo</th>
+              )}
               <th className="px-3 py-2" />
             </tr>
           </thead>
@@ -429,7 +584,7 @@ export function PlayersTable({
             {filtered.length === 0 ? (
               <tr>
                 <td
-                  colSpan={12}
+                  colSpan={visibleColumnCount}
                   className="px-3 py-6 text-center text-muted-foreground"
                 >
                   {players.length === 0
@@ -440,95 +595,136 @@ export function PlayersTable({
             ) : (
               filtered.map((p) => (
                 <tr key={p.id} className="border-b last:border-b-0">
-                  <td className="py-2 pl-3">
-                    <Avatar name={p.fullName} url={p.photoUrl} />
-                  </td>
+                  {columns.photo && (
+                    <td className="py-2 pl-3">
+                      <Avatar name={p.fullName} url={p.photoUrl} />
+                    </td>
+                  )}
                   <td className="px-3 py-2 font-medium">{p.fullName}</td>
-                  <td className="px-3 py-2 text-center">
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-foreground"
-                      checked={messageWasSent(p)}
-                      onChange={() => toggleMessage(p)}
-                      aria-label={
-                        messageWasSent(p)
-                          ? `Mensaje enviado a ${p.fullName}`
-                          : `Sin mensaje a ${p.fullName}`
-                      }
-                      title={
-                        messageWasSent(p)
-                          ? "Mensaje enviado"
-                          : "Todavía no se mandó el mensaje"
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <Input
-                      value={observationText(p)}
-                      placeholder="Observación"
-                      aria-label={`Observación de ${p.fullName}`}
-                      maxLength={500}
-                      className="h-8 w-44"
-                      onChange={(event) =>
-                        setNoteDraft((current) => ({
-                          ...current,
-                          [p.id]: event.target.value,
-                        }))
-                      }
-                      onBlur={() => commitObservation(p)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") event.currentTarget.blur();
-                      }}
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    <div className="flex items-center gap-1.5">
-                      <span>{formatPhoneDisplay(p.phone) || "—"}</span>
-                      {whatsAppUrl(p.phone) && (
+                  {columns.message && (
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-foreground"
+                        checked={messageWasSent(p)}
+                        onChange={() => toggleMessage(p)}
+                        aria-label={
+                          messageWasSent(p)
+                            ? `Mensaje enviado a ${p.fullName}`
+                            : `Sin mensaje a ${p.fullName}`
+                        }
+                        title={
+                          messageWasSent(p)
+                            ? "Mensaje enviado"
+                            : "Todavía no se mandó el mensaje"
+                        }
+                      />
+                    </td>
+                  )}
+                  {columns.note && (
+                    <td className="px-3 py-1.5">
+                      <Input
+                        value={observationText(p)}
+                        placeholder="Observación"
+                        aria-label={`Observación de ${p.fullName}`}
+                        maxLength={500}
+                        className="h-8 w-44"
+                        onChange={(event) =>
+                          setNoteDraft((current) => ({
+                            ...current,
+                            [p.id]: event.target.value,
+                          }))
+                        }
+                        onBlur={() => commitObservation(p)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") event.currentTarget.blur();
+                        }}
+                      />
+                    </td>
+                  )}
+                  {columns.phone && (
+                    <td className="px-3 py-2 text-muted-foreground">
+                      <div className="flex items-center gap-1.5">
+                        <span>{formatPhoneDisplay(p.phone) || "—"}</span>
+                        {whatsAppUrl(p.phone) && (
+                          <a
+                            href={whatsAppUrl(p.phone)!}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-green-600 hover:text-green-700"
+                            title="Abrir WhatsApp"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MessageCircle className="size-4" />
+                          </a>
+                        )}
+                      </div>
+                    </td>
+                  )}
+                  {columns.instagram && (
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {p.instagram ? (
                         <a
-                          href={whatsAppUrl(p.phone)!}
+                          href={`https://instagram.com/${p.instagram}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-green-600 hover:text-green-700"
-                          title="Abrir WhatsApp"
+                          className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
+                          title={`Abrir Instagram de ${p.fullName}`}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <MessageCircle className="size-4" />
+                          <AtSign className="size-3.5" />
+                          {p.instagram}
                         </a>
+                      ) : (
+                        "—"
                       )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {p.city?.trim() || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {p.category || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {p.courtPosition
-                      ? COURT_POSITION_LABELS[p.courtPosition as CourtPosition]
-                      : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                    {p.ranking ?? "—"}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                    {p.accumulatedPoints}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    <span
-                      className={cn(
-                        p.balance > 0 && "text-rose-600 dark:text-rose-400",
-                        p.balance < 0 &&
-                          "text-emerald-600 dark:text-emerald-400",
-                      )}
-                    >
-                      {formatMoney(Math.abs(p.balance), currency)}
-                    </span>
-                    <span className="ml-1 text-xs text-muted-foreground">
-                      {p.balance > 0 ? "debe" : p.balance < 0 ? "a favor" : ""}
-                    </span>
-                  </td>
+                    </td>
+                  )}
+                  {columns.city && (
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {p.city?.trim() || "—"}
+                    </td>
+                  )}
+                  {columns.category && (
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {p.category || "—"}
+                    </td>
+                  )}
+                  {columns.position && (
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {p.courtPosition
+                        ? COURT_POSITION_LABELS[
+                            p.courtPosition as CourtPosition
+                          ]
+                        : "—"}
+                    </td>
+                  )}
+                  {columns.ranking && (
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                      {p.ranking ?? "—"}
+                    </td>
+                  )}
+                  {columns.points && (
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                      {p.accumulatedPoints}
+                    </td>
+                  )}
+                  {columns.balance && (
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      <span
+                        className={cn(
+                          p.balance > 0 && "text-rose-600 dark:text-rose-400",
+                          p.balance < 0 &&
+                            "text-emerald-600 dark:text-emerald-400",
+                        )}
+                      >
+                        {formatMoney(Math.abs(p.balance), currency)}
+                      </span>
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        {p.balance > 0 ? "debe" : p.balance < 0 ? "a favor" : ""}
+                      </span>
+                    </td>
+                  )}
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1.5">
                       <Button
@@ -610,6 +806,15 @@ export function PlayersTable({
         open={editing !== null}
         onOpenChange={(o) => !o && setEditing(null)}
         onSaved={() => {
+          const id = editing?.id;
+          if (id) {
+            setNoteDraft((current) => {
+              if (!(id in current)) return current;
+              const copy = { ...current };
+              delete copy[id];
+              return copy;
+            });
+          }
           setEditing(null);
           router.refresh();
         }}

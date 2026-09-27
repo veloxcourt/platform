@@ -12,7 +12,7 @@ import type {
   TournamentConfigValues,
 } from "@/modules/tournaments/domain/config-schema";
 import { defaultRoundConfigs } from "@/modules/tournaments/domain/config-defaults";
-import { toPlayDayValues } from "@/modules/tournaments/domain/play-day-slots";
+import { normalizeIntermediatePlayDays, toPlayDayValues } from "@/modules/tournaments/domain/play-day-slots";
 import type { TournamentConfig } from "@/modules/tournaments/domain/types";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
 
@@ -60,7 +60,9 @@ function toConfigValues(
 ): TournamentConfigValues {
   return {
     courtCount: config.courtCount,
-    playDays: playDays.map((day) => toPlayDayValues(day)),
+    playDays: normalizeIntermediatePlayDays(
+      playDays.map((day) => toPlayDayValues(day)),
+    ),
     categories: config.categories.map((category) => ({
       categoryId: category.categoryId,
       phases: {

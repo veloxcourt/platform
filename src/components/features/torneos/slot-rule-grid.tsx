@@ -8,7 +8,6 @@ import {
   consumedHoldClick,
   type MenuPoint,
 } from "./field-menu-trigger";
-import { formatWeekdayName } from "@/lib/date";
 import type {
   CourtDayRule,
   CourtDaySlot,
@@ -28,11 +27,15 @@ import {
 } from "@/modules/tournaments/domain/court-day-slots";
 import {
   PLAY_DAY_START_MINUTES,
+  playDayStartMinutesOf,
   type PlayDayStartMinutes,
   type PlayDayWindowDelta,
   type PlayDayWindowEdge,
 } from "@/modules/tournaments/domain/play-day-slots";
-import { EdgeButtons } from "./play-day-slot-ruler";
+import {
+  EdgeButtons,
+  PlayDayStartMinutesButton,
+} from "./play-day-slot-ruler";
 
 export type SlotRuleGridMode = "simulation" | "registration";
 
@@ -356,14 +359,7 @@ export function SlotRuleGrid({
         <div key={day.playDate} className="space-y-2">
           <p className="font-medium">
             {day.dayLabel}
-            {mode === "registration" && (
-              <span className="font-normal text-muted-foreground">
-                {" "}
-                ({formatWeekdayName(day.playDate)})
-              </span>
-            )}
             <span className="ml-2 text-sm font-normal text-muted-foreground">
-              {mode === "simulation" ? `${day.playDate} · ` : ""}
               {day.startTime}–{day.endTime}
               {mode === "simulation" && daySlotLabel
                 ? ` · ${daySlotLabel}`
@@ -470,6 +466,18 @@ export function SlotRuleGrid({
                 <span className="w-20 shrink-0 text-xs text-muted-foreground">
                   {court.courtLabel}
                 </span>
+                {onSetPlayDayStartMinutes ? (
+                  <PlayDayStartMinutesButton
+                    currentMinutes={playDayStartMinutesOf(
+                      court.slots.find((slot) => !slot.spanContinuation)
+                        ?.startTime ?? "",
+                    )}
+                    onSelect={(minutes) =>
+                      onSetPlayDayStartMinutes(day.playDate, minutes)
+                    }
+                    disabled={adjustDisabled || court.slots.length === 0}
+                  />
+                ) : null}
                 {onAdjustPlayDay && (
                   <EdgeButtons
                     side="left"

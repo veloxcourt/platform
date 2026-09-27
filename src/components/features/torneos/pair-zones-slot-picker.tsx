@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,8 @@ export type PairDraftPreferences = {
     startTime: string;
     endTime: string;
   }>;
+  /// false hasta que la grilla emite el default (todos los slots) o un cambio.
+  ready?: boolean;
 };
 
 function preferenceKey(playDate: string, slotIndex: number) {
@@ -106,6 +108,8 @@ export function PairZonesSlotPicker({
   const [localReservations, setLocalReservations] = useState<
     LocalPreferenceSlot[]
   >([]);
+  const isDraftPair = pairId === "draft";
+  const draftDefaultsAppliedRef = useRef(false);
 
   function notifyChanged() {
     if (!onChanged) return;
@@ -126,6 +130,10 @@ export function PairZonesSlotPicker({
     setDayPreference(initialDayPreference);
   }, [initialDayPreference, pairId]);
 
+  useEffect(() => {
+    draftDefaultsAppliedRef.current = false;
+  }, [pairId, categoryId]);
+
   const mineReservations = useMemo(
     () => reservations.filter((r) => r.pairId === pairId),
     [reservations, pairId],
@@ -137,6 +145,7 @@ export function PairZonesSlotPicker({
 
   useEffect(() => {
     // No pisar el estado optimista con un snapshot viejo del servidor.
+    if (isDraftPair) return;
     if (pendingToggles > 0 || bulkPending) return;
 
     const serverFingerprint = preferencesFingerprint(mineReservations);
@@ -157,7 +166,7 @@ export function PairZonesSlotPicker({
         pairLabel: r.pairLabel,
       })),
     );
-  }, [mineReservations, pairId, pendingToggles, bulkPending]);
+  }, [isDraftPair, mineReservations, pairId, pendingToggles, bulkPending]);
 
   const categoryConfig = config?.categories.find(
     (c) => c.categoryId === categoryId,
@@ -242,6 +251,22 @@ export function PairZonesSlotPicker({
     [rules],
   );
 
+  useLayoutEffect(() => {
+    if (!isDraftPair) return;
+    if (draftDefaultsAppliedRef.current) return;
+    if (eligibleSlots.length === 0) return;
+    draftDefaultsAppliedRef.current = true;
+    setLocalReservations(
+      eligibleSlots.map((slot) => ({
+        playDate: slot.playDate,
+        courtIndex: 0,
+        slotIndex: slot.slotIndex,
+        pairId,
+        pairLabel: "",
+      })),
+    );
+  }, [isDraftPair, eligibleSlots, pairId]);
+
   const allMarked =
     eligibleSlots.length > 0 && mineCount === eligibleSlots.length;
   const noneMarked = mineCount === 0;
@@ -275,6 +300,7 @@ export function PairZonesSlotPicker({
     onDraftChange({
       dayPreference: preference,
       slots: draftSlotsFromReservations(reservations),
+      ready: true,
     });
   }
 

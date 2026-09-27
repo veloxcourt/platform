@@ -3,6 +3,11 @@ import { autoTable } from "jspdf-autotable";
 
 import type { PlayerRef } from "@/modules/bookings/domain/types";
 import type { PairListItem } from "@/modules/tournaments/domain/types";
+import {
+  PAIR_PAYMENT_METHOD_LABELS,
+  pairPaymentIsPaid,
+  parsePairPaymentMethod,
+} from "@/modules/tournaments/domain/pair-payment";
 
 export type InscriptionsPdfInput = {
   tournamentName: string;
@@ -16,6 +21,7 @@ type PdfRow = {
   name: string;
   city: string;
   paid: boolean;
+  paymentLabel: string;
 };
 
 function slugifyName(name: string): string {
@@ -38,18 +44,22 @@ function rowsForCategory(input: InscriptionsPdfInput): PdfRow[] {
     if (pair.status === "CANCELLED") continue;
     pairNumber += 1;
     const label = String(pairNumber);
+    const method = parsePairPaymentMethod(pair.player1PaymentStatus);
     rows.push({
       number: label,
       name: pair.player1.name,
       city: cityOf(input.players, pair.player1.id),
-      paid: pair.player1PaymentStatus === "PAID",
+      paid: pairPaymentIsPaid(method),
+      paymentLabel: PAIR_PAYMENT_METHOD_LABELS[method],
     });
     if (pair.player2) {
+      const partnerMethod = parsePairPaymentMethod(pair.player2PaymentStatus);
       rows.push({
         number: label,
         name: pair.player2.name,
         city: cityOf(input.players, pair.player2.id),
-        paid: pair.player2PaymentStatus === "PAID",
+        paid: pairPaymentIsPaid(partnerMethod),
+        paymentLabel: PAIR_PAYMENT_METHOD_LABELS[partnerMethod],
       });
     }
   }
@@ -99,7 +109,7 @@ export function downloadInscriptionsPdf(input: InscriptionsPdfInput) {
   autoTable(doc, {
     startY: 27,
     head: [["#", "Nombre y apellido", "Localidad", "Pagó", "Forma de pago"]],
-    body: rows.map((row) => [row.number, row.name, row.city, "", ""]),
+    body: rows.map((row) => [row.number, row.name, row.city, "", row.paymentLabel]),
     theme: "grid",
     styles: {
       font: "helvetica",
@@ -124,6 +134,7 @@ export function downloadInscriptionsPdf(input: InscriptionsPdfInput) {
       1: { cellWidth: 68 },
       2: { cellWidth: 42 },
       3: { cellWidth: 16, halign: "center" },
+      4: { cellWidth: 32, halign: "center" },
     },
     margin: { left: 10, right: 10, bottom: 12 },
     didParseCell: (data) => {

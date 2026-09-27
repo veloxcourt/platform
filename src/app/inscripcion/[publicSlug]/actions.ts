@@ -59,6 +59,7 @@ function inscriptionPayload(formData: FormData) {
     },
     zonesDayPreference: String(formData.get("zonesDayPreference") ?? "ANY"),
     slots: parseSlotsJson(String(formData.get("slotsJson") ?? "[]")),
+    slotsReady: String(formData.get("slotsReady") ?? "") === "1",
   };
 }
 

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { firstDestinationModule } from "@/lib/auth/permissions";
 import { clearPasswordResetRequired } from "@/lib/auth/password-reset";
-import { prisma } from "@/lib/prisma";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type PasswordState = { error?: string };
@@ -33,6 +33,7 @@ export async function setPasswordAction(
   if (error) return { error: "No se pudo guardar la contraseña." };
 
   await clearPasswordResetRequired();
+  await ensureRuntimeSchema();
 
   const localUser = await prisma.user.findUnique({
     where: { authUserId: user.id },

@@ -57,3 +57,16 @@ export function formatWeekday(dateISO: string): string {
 export function formatWeekdayName(dateISO: string): string {
   return format(parseISO(dateISO), "EEEE", { locale: es }).toLowerCase();
 }
+
+/// "Día 1 (Viernes)" para reglas de slots y reglas de días de juego.
+export function formatPlayDayOrdinalLabel(
+  dayIndex: number,
+  dateISO?: string | null,
+): string {
+  const label = `Día ${dayIndex + 1}`;
+  if (!dateISO || !/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return label;
+  const weekday = formatWeekdayName(dateISO);
+  if (!weekday) return label;
+  const pretty = weekday.charAt(0).toUpperCase() + weekday.slice(1);
+  return `${label} (${pretty})`;
+}

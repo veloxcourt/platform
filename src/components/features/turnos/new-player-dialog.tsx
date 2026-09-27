@@ -52,6 +52,8 @@ const EMPTY_PLAYER: NewPlayerValues = {
   lastName: "",
   ...EMPTY_PHONE_FIELDS,
   email: "",
+  instagram: "",
+  observation: "",
   gender: "",
   birthDate: "",
   city: "",
@@ -480,6 +482,11 @@ export function NewPlayerDialog({
           <Field label="Email" error={errors.email?.message}>
             <Input type="email" {...register("email")} />
           </Field>
+          <div className="col-span-2">
+            <Field label="Instagram" error={errors.instagram?.message}>
+              <Input placeholder="@usuario" {...register("instagram")} />
+            </Field>
+          </div>
           <Field label="Sexo">
             <select className={SELECT_CLASS} {...register("gender")}>
               <option value="">—</option>
@@ -554,6 +561,17 @@ export function NewPlayerDialog({
           <div className="col-span-2">
             <Field label="Dirección">
               <Input {...register("address")} />
+            </Field>
+          </div>
+          <div className="col-span-2">
+            <Field label="Observación" error={errors.observation?.message}>
+              <textarea
+                rows={3}
+                maxLength={500}
+                placeholder="Nota sobre el jugador"
+                className="w-full min-w-0 resize-y rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                {...register("observation")}
+              />
             </Field>
           </div>
 

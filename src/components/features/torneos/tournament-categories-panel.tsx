@@ -1172,7 +1172,7 @@ function IntegralSimulation({
 
       <p className="text-xs text-muted-foreground">
         {view === "regla"
-          ? `Un solo conjunto de días con ${courtCount} regla${courtCount === 1 ? "" : "s"} por día (una por cancha). Los + / − alargan o recortan el mismo rango que en Parámetros. Clic derecho o mantené 2 s (tablet/celular) en el primer slot para elegir minutos de arranque (0 / 15 / 30 / 45). Los partidos se intercalan entre categorías: zonas → intermedia → final. El punto de color indica qué categoría ocupa cada slot.`
+          ? `Un solo conjunto de días con ${courtCount} regla${courtCount === 1 ? "" : "s"} por día (una por cancha). Los + / − alargan o recortan el mismo rango que en Parámetros. El botón :00 / :15 / :30 / :45 elige los minutos de arranque. Los partidos se intercalan entre categorías: zonas → intermedia → final. El punto de color indica qué categoría ocupa cada slot.`
           : "Disponible y balance salen de la misma grilla de slots que el modo Regla (celdas libres tras empaquetar todas las categorías)."}
       </p>
     </div>

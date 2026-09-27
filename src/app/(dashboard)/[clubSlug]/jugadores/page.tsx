@@ -34,6 +34,7 @@ export default async function JugadoresPage({
 
       <PlayersTable
         clubSlug={clubSlug}
+        clubName={data.club.name}
         currency={data.club.currency}
         players={data.players}
         categories={data.categories}

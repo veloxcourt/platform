@@ -89,6 +89,7 @@ export function PublicInscriptionForm({
   const [draftPreferences, setDraftPreferences] = useState<PairDraftPreferences>({
     dayPreference: edit?.zonesDayPreference ?? "ANY",
     slots: edit?.slots ?? [],
+    ready: Boolean(edit),
   });
   const selectedCategoryName =
     categories.find((category) => category.id === categoryId)?.name ?? "";
@@ -200,6 +201,11 @@ export function PublicInscriptionForm({
         type="hidden"
         name="zonesDayPreference"
         value={draftPreferences.dayPreference}
+      />
+      <input
+        type="hidden"
+        name="slotsReady"
+        value={draftPreferences.ready ? "1" : "0"}
       />
       <input
         type="hidden"

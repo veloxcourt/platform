@@ -4,6 +4,7 @@ import type { PlayDayValues } from "./config-schema";
 import type { FinalPhaseStartRound } from "./config-schema";
 import { ZONE_PAIR_REST_SLOTS } from "./build-zones-fixture";
 import {
+  OFFICIAL_ROUND_ORDER,
   buildFinalOfficialRounds,
   buildIntermediateOfficialRounds,
   categoryHasFinalPhase,
@@ -347,6 +348,41 @@ function durationForRound(
   return input.roundSlotMinutes?.(categoryId, roundLabel) ?? input.slotMinutes;
 }
 
+function officialRoundRank(label: string): number {
+  const index = OFFICIAL_ROUND_ORDER.indexOf(
+    label as (typeof OFFICIAL_ROUND_ORDER)[number],
+  );
+  return index < 0 ? OFFICIAL_ROUND_ORDER.length : index;
+}
+
+/// Rondas de todas las categorías juntas, de la más temprana a la Final.
+function sharedRoundLabels(queues: { matches: PendingMatch[] }[]): string[] {
+  const labels = new Set<string>();
+  for (const queue of queues) {
+    for (const match of queue.matches) labels.add(match.roundLabel);
+  }
+  return [...labels].sort((a, b) => officialRoundRank(a) - officialRoundRank(b));
+}
+
+/// Dentro de una ronda alterna categorías: 1.º de A, 1.º de B, 2.º de A…
+function interleaveRound(
+  queues: { matches: PendingMatch[] }[],
+  roundLabel: string,
+): PendingMatch[] {
+  const lists = queues.map((queue) =>
+    queue.matches.filter((match) => match.roundLabel === roundLabel),
+  );
+  const longest = lists.reduce((max, list) => Math.max(max, list.length), 0);
+  const ordered: PendingMatch[] = [];
+  for (let index = 0; index < longest; index++) {
+    for (const list of lists) {
+      const match = list[index];
+      if (match) ordered.push(match);
+    }
+  }
+  return ordered;
+}
+
 export function buildIntermediateFixture(
   input: BuildIntermediateFixtureInput,
 ): IntermediateFixtureResult {
@@ -418,16 +454,14 @@ export function buildIntermediateFixture(
   const scheduledByOfficial = new Map<string, IntermediateScheduledMatch>();
   const noRestIds = new Set<string>();
 
-  const maxLen = queues.reduce(
-    (max, queue) => Math.max(max, queue.matches.length),
-    0,
-  );
+  /// Una ronda entera (todas las categorías) antes de pasar a la siguiente:
+  /// ningún octavo arranca hasta que terminó el último 16avo del torneo.
+  let previousRoundBound: SlotBound | null = null;
 
-  for (let index = 0; index < maxLen; index++) {
-    for (const queue of queues) {
-      const pending = queue.matches[index];
-      if (!pending) continue;
+  for (const roundLabel of sharedRoundLabels(queues)) {
+    let roundBound: SlotBound | null = null;
 
+    for (const pending of interleaveRound(queues, roundLabel)) {
       const feeders = feederOfficialIds(pending.left, pending.right)
         .map((id) =>
           scheduledByOfficial.get(`${pending.categoryId}:${id}`),
@@ -441,18 +475,25 @@ export function buildIntermediateFixture(
         },
       );
 
-      let afterBound = zonesBound;
+      /// El descanso corre contra zonas y los feeders de la pareja; el corte
+      /// de ronda es duro y no consume una celda de descanso del torneo.
+      let restAfter = zonesBound;
       for (const feeder of feeders) {
         if (feeder.playDate) {
           const slotIndex = matchLastSlotIndex(feeder, input.slotMinutes);
           if (slotIndex != null) {
-            afterBound = laterBound(afterBound, {
+            restAfter = laterBound(restAfter, {
               playDate: feeder.playDate,
               slotIndex,
             });
           }
         }
       }
+      const strictBound = laterBound(
+        restAfter ? restBound(restAfter) : null,
+        previousRoundBound,
+      );
+      const relaxedBound = laterBound(restAfter, previousRoundBound);
 
       const duration = durationForRound(
         input,
@@ -466,15 +507,15 @@ export function buildIntermediateFixture(
         picked = pickSlotBlock({
           resources,
           occupied,
-          afterBound,
-          requireRest: Boolean(afterBound),
+          afterBound: strictBound,
+          requireRest: false,
           cellsNeeded,
         });
-        if (!picked && afterBound) {
+        if (!picked && relaxedBound) {
           picked = pickSlotBlock({
             resources,
             occupied,
-            afterBound,
+            afterBound: relaxedBound,
             requireRest: false,
             cellsNeeded,
           });
@@ -510,6 +551,13 @@ export function buildIntermediateFixture(
         if (usedRestFallback) {
           noRestIds.add(`${pending.categoryId}:${pending.officialId}`);
         }
+        const lastSlotIndex = matchLastSlotIndex(scheduled, input.slotMinutes);
+        if (scheduled.playDate && lastSlotIndex != null) {
+          roundBound = laterBound(roundBound, {
+            playDate: scheduled.playDate,
+            slotIndex: lastSlotIndex,
+          });
+        }
       }
 
       list.push(scheduled);
@@ -519,6 +567,8 @@ export function buildIntermediateFixture(
         scheduled,
       );
     }
+
+    previousRoundBound = laterBound(previousRoundBound, roundBound);
   }
 
   if (noRestIds.size > 0) {
@@ -648,16 +698,14 @@ export function buildFinalFixture(
     }
   }
 
-  const maxLen = queues.reduce(
-    (max, queue) => Math.max(max, queue.matches.length),
-    0,
-  );
+  /// Una ronda entera (todas las categorías) antes de pasar a la siguiente:
+  /// ninguna semi arranca hasta que terminó el último cuarto del torneo.
+  let previousRoundBound: SlotBound | null = null;
 
-  for (let index = 0; index < maxLen; index++) {
-    for (const queue of queues) {
-      const pending = queue.matches[index];
-      if (!pending) continue;
+  for (const roundLabel of sharedRoundLabels(queues)) {
+    let roundBound: SlotBound | null = null;
 
+    for (const pending of interleaveRound(queues, roundLabel)) {
       const feeders = feederOfficialIds(pending.left, pending.right)
         .map((id) =>
           scheduledByOfficial.get(`${pending.categoryId}:${id}`),
@@ -671,18 +719,25 @@ export function buildFinalFixture(
         },
       );
 
-      let afterBound = zonesBound;
+      /// El descanso corre contra zonas y los feeders de la pareja; el corte
+      /// de ronda es duro y no consume una celda de descanso del torneo.
+      let restAfter = zonesBound;
       for (const feeder of feeders) {
         if (feeder.playDate) {
           const slotIndex = matchLastSlotIndex(feeder, input.slotMinutes);
           if (slotIndex != null) {
-            afterBound = laterBound(afterBound, {
+            restAfter = laterBound(restAfter, {
               playDate: feeder.playDate,
               slotIndex,
             });
           }
         }
       }
+      const strictBound = laterBound(
+        restAfter ? restBound(restAfter) : null,
+        previousRoundBound,
+      );
+      const relaxedBound = laterBound(restAfter, previousRoundBound);
 
       const duration = durationForRound(
         input,
@@ -696,15 +751,15 @@ export function buildFinalFixture(
         picked = pickSlotBlock({
           resources,
           occupied,
-          afterBound,
-          requireRest: Boolean(afterBound),
+          afterBound: strictBound,
+          requireRest: false,
           cellsNeeded,
         });
-        if (!picked && afterBound) {
+        if (!picked && relaxedBound) {
           picked = pickSlotBlock({
             resources,
             occupied,
-            afterBound,
+            afterBound: relaxedBound,
             requireRest: false,
             cellsNeeded,
           });
@@ -744,6 +799,13 @@ export function buildFinalFixture(
         if (usedRestFallback) {
           noRestIds.add(`${pending.categoryId}:${pending.officialId}`);
         }
+        const lastSlotIndex = matchLastSlotIndex(scheduled, input.slotMinutes);
+        if (scheduled.playDate && lastSlotIndex != null) {
+          roundBound = laterBound(roundBound, {
+            playDate: scheduled.playDate,
+            slotIndex: lastSlotIndex,
+          });
+        }
       }
 
       list.push(scheduled);
@@ -753,6 +815,8 @@ export function buildFinalFixture(
         scheduled,
       );
     }
+
+    previousRoundBound = laterBound(previousRoundBound, roundBound);
   }
 
   if (noRestIds.size > 0) {

@@ -490,6 +490,8 @@ async function main() {
           player2Confirmed: true,
           player1PaymentStatus: "PAID",
           player2PaymentStatus: "PAID",
+          player1PaymentMethod: "CASH",
+          player2PaymentMethod: "CASH",
           paymentStatus: "PAID",
         },
         {
@@ -503,6 +505,8 @@ async function main() {
           player2Confirmed: true,
           player1PaymentStatus: "PAID",
           player2PaymentStatus: "PAID",
+          player1PaymentMethod: "TRANSFER",
+          player2PaymentMethod: "CASH",
           paymentStatus: "PAID",
         },
         {
@@ -526,6 +530,8 @@ async function main() {
           player1Confirmed: true,
           player2Confirmed: false,
           player1PaymentStatus: "PAID",
+          player2PaymentStatus: "UNPAID",
+          player1PaymentMethod: "CASH",
           player2PaymentStatus: "UNPAID",
           paymentStatus: "PAID",
         },

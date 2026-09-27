@@ -18,9 +18,10 @@ import {
   type UpdatePairZonesDayPreferenceValues,
 } from "@/modules/tournaments/domain/zones-day-preference";
 import type {
-  PaymentStatus,
+  PairPaymentMethod,
   RegistrationStatus,
 } from "@/modules/tournaments/domain/types";
+import { isPairPaymentMethod } from "@/modules/tournaments/domain/pair-payment";
 import { intermediateFixtureSchema } from "@/modules/tournaments/domain/intermediate-fixture-schema";
 import { zonesFixtureDraftSchema } from "@/modules/tournaments/domain/zones-fixture-schema";
 import {
@@ -164,8 +165,11 @@ export async function updatePairPlayerPaymentAction(
   tournamentId: string,
   pairId: string,
   slot: 1 | 2,
-  paymentStatus: PaymentStatus,
+  method: PairPaymentMethod,
 ): Promise<Result> {
+  if (!isPairPaymentMethod(method)) {
+    return { ok: false, error: "Forma de pago inválida" };
+  }
   const { repo, clubId } = await resolveClubId(clubSlug);
   if (!clubId) return { ok: false, error: "Club no encontrado" };
 
@@ -173,7 +177,7 @@ export async function updatePairPlayerPaymentAction(
     clubId,
     pairId,
     slot,
-    paymentStatus,
+    method,
   );
   if (result.ok) revalidate(clubSlug, tournamentId);
   return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };
@@ -318,7 +322,7 @@ export async function buildZonesFixtureAction(
   if (!isPhaseManual(modes, categoryId, "zones")) {
     await rebuildDownstreamFixtures(repo, clubId, tournamentId, warnings, {
       includeIntermediate: true,
-      categoryId,
+      categoryId: result.saved.length > 1 ? undefined : categoryId,
     });
   }
 
@@ -359,38 +363,31 @@ export async function buildAllZonesFixturesAction(
 
   const modes = await repo.getFixtureEditModes(clubId, tournamentId);
   const warnings: string[] = [];
-  let zoneCount = 0;
-  let matchCount = 0;
-  let okCategories = 0;
-
   for (const category of config.categories) {
     if (isPhaseManual(modes, category.categoryId, "zones")) {
       warnings.push(`${category.categoryName}: no se rearmó (Modo Manual)`);
-      continue;
-    }
-    const result = await repo.buildAndSaveZonesFixture(
-      clubId,
-      tournamentId,
-      category.categoryId,
-    );
-    if (!result.ok) {
-      warnings.push(
-        `${category.categoryName}: ${result.error ?? "Error"}`,
-      );
-      continue;
-    }
-    okCategories += 1;
-    zoneCount += result.fixture.zones.length;
-    matchCount += result.fixture.zones.reduce(
-      (sum, zone) => sum + zone.matches.length,
-      0,
-    );
-    for (const warning of result.fixture.warnings) {
-      warnings.push(`${category.categoryName}: ${warning}`);
     }
   }
 
-  if (okCategories === 0) {
+  const result = await repo.buildAndSaveZonesFixture(clubId, tournamentId);
+  if (!result.ok) {
+    return { ok: false, error: result.error ?? "No se pudieron armar las zonas" };
+  }
+
+  let zoneCount = 0;
+  let matchCount = 0;
+  for (const item of result.saved) {
+    zoneCount += item.fixture.zones.length;
+    matchCount += item.fixture.zones.reduce(
+      (sum, zone) => sum + zone.matches.length,
+      0,
+    );
+    for (const warning of item.fixture.warnings) {
+      warnings.push(`${item.categoryName}: ${warning}`);
+    }
+  }
+
+  if (result.saved.length === 0) {
     return {
       ok: false,
       error: warnings[0] ?? "No se pudieron armar las zonas",
@@ -405,7 +402,7 @@ export async function buildAllZonesFixturesAction(
   return {
     ok: true,
     warnings,
-    categoryCount: okCategories,
+    categoryCount: result.saved.length,
     zoneCount,
     matchCount,
   };

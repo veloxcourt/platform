@@ -1,12 +1,21 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Minus, Plus } from "lucide-react";
+import { Check, Minus, Plus } from "lucide-react";
 import type { useForm } from "react-hook-form";
 import { useWatch } from "react-hook-form";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { formatPlayDayOrdinalLabel } from "@/lib/date";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { TournamentConfigValues } from "@/modules/tournaments/domain/config-schema";
 import {
@@ -14,11 +23,15 @@ import {
   buildPlayDayRulerSlots,
   canAdjustPlayDayWindow,
   derivePlayDayEndTime,
+  PLAY_DAY_START_MINUTES,
+  playDayStartMinutesOf,
+  setPlayDayStartMinutes,
   effectiveOvernightExtraSlots,
   remapEnabledSlotIndexes,
   resolveEnabledSlotIndexes,
   toPlayDayValues,
   type PlayDayRulerSlot,
+  type PlayDayStartMinutes,
 } from "@/modules/tournaments/domain/play-day-slots";
 
 function formatSlotHours(totalMinutes: number): string {
@@ -142,6 +155,58 @@ export function PlayDaysRulerToolbar({
         </Button>
       </div>
     </div>
+  );
+}
+
+export function PlayDayStartMinutesButton({
+  currentMinutes,
+  onSelect,
+  disabled = false,
+}: {
+  currentMinutes: number;
+  onSelect: (minutes: PlayDayStartMinutes) => void;
+  disabled?: boolean;
+}) {
+  const value: PlayDayStartMinutes = PLAY_DAY_START_MINUTES.includes(
+    currentMinutes as PlayDayStartMinutes,
+  )
+    ? (currentMinutes as PlayDayStartMinutes)
+    : 0;
+  const label = `:${String(value).padStart(2, "0")}`;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        disabled={disabled}
+        type="button"
+        title="Minutos de arranque"
+        aria-label={`Minutos de arranque: ${value}`}
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          "h-10 w-10 shrink-0 px-1 text-[11px] font-semibold tabular-nums",
+        )}
+      >
+        {label}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-36">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Minutos de arranque</DropdownMenuLabel>
+          {PLAY_DAY_START_MINUTES.map((minutes) => (
+            <DropdownMenuItem
+              key={minutes}
+              onClick={() => onSelect(minutes)}
+            >
+              {minutes === value ? (
+                <Check className="size-4" />
+              ) : (
+                <span className="size-4" aria-hidden />
+              )}
+              {minutes} minutos
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -351,16 +416,33 @@ export function PlayDaySlotRuler({
     });
   }
 
+  function applyStartMinutes(minutes: PlayDayStartMinutes) {
+    if (readOnly || !day) return;
+    const next = setPlayDayStartMinutes(
+      toPlayDayValues(day),
+      slotMinutes,
+      minutes,
+    );
+    if (!next) return;
+    commitDay(setValue, index, {
+      startTime: next.startTime,
+      overnightExtraSlots: next.overnightExtraSlots,
+      enabledSlotIndexes: next.enabledSlotIndexes,
+      endTime: next.endTime,
+      intermediateSlotIndexes: next.intermediateSlotIndexes,
+    });
+  }
+
   return (
     <div className="space-y-2 rounded-lg border p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <label className="flex items-center gap-2 font-medium">
-          <span>Día {index + 1}</span>
+          <span>{formatPlayDayOrdinalLabel(index, day?.date)}</span>
           <Checkbox
             checked={isIntermediateDay}
             disabled={readOnly || !day?.date}
             onCheckedChange={(value) => onToggleIntermediateDay(value === true)}
-            aria-label={`Día ${index + 1}: fase intermedia`}
+            aria-label={`${formatPlayDayOrdinalLabel(index, day?.date)}: fase intermedia`}
             title="Marcar como día de fase intermedia (solo uno)"
             className="border-orange-400 data-checked:border-orange-500 data-checked:bg-orange-500"
           />
@@ -381,6 +463,11 @@ export function PlayDaySlotRuler({
 
       <div className="max-w-full overflow-x-auto">
         <div className="flex w-max flex-nowrap items-end gap-1.5">
+          <PlayDayStartMinutesButton
+            currentMinutes={playDayStartMinutesOf(startTime)}
+            onSelect={applyStartMinutes}
+            disabled={readOnly || !startTime}
+          />
           <EdgeButtons
             side="left"
             onAdd={() => applyWindow("start", "add")}

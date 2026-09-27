@@ -21,6 +21,8 @@ export const publicInscriptionSchema = z
     player2: playerSchema,
     zonesDayPreference: zonesDayPreferenceSchema.optional().default("ANY"),
     slots: z.array(pairPreferenceSlotSchema).optional().default([]),
+    /// false/omitido en alta = usar todos los slots de zonas.
+    slotsReady: z.boolean().optional().default(false),
   })
   .superRefine((data, ctx) => {
     const phone1 = normalizeToE164(data.player1.phone, DEFAULT_PHONE_DIAL);

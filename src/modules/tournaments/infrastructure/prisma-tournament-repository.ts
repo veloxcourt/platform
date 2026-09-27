@@ -6,7 +6,12 @@ import type {
   MutationResult,
 } from "../application/tournament-repository";
 import type { AddPairValues, UpdatePairValues } from "../domain/pair-schema";
-import { derivePairPaymentStatus } from "../domain/pair-payment";
+import {
+  derivePairPaymentStatus,
+  parsePairPaymentMethod,
+  prismaPaidFromMethod,
+  type PairPaymentMethod,
+} from "../domain/pair-payment";
 import {
   derivePairRegistrationStatus,
   isPairEligibleForZones,
@@ -42,7 +47,6 @@ import { buildTournamentPublicSlug } from "../domain/slug";
 import type {
   CategoryPhaseConfig,
   PairListItem,
-  PaymentStatus,
   RegistrationStatus,
   SlotReservationItem,
   TournamentCategoryItem,
@@ -70,7 +74,7 @@ import {
   type FixtureEditPhase,
 } from "../domain/fixture-edit-mode";
 import {
-  buildZonesFixture,
+  buildZonesFixturesInterleaved,
   reservedSlotsFromOtherFixtures,
   type FixturePairInput,
 } from "../domain/build-zones-fixture";
@@ -199,6 +203,69 @@ async function ensureZoneQualificationColumn() {
   await ensureRuntimeSchema();
 }
 
+type PersistZonesFixtureItem = {
+  categoryId: string;
+  categoryName: string;
+  fixture: ZonesFixturePersisted;
+  matchFormat: MatchFormat;
+  zone4Advancers: 2 | 3;
+};
+
+async function persistZonesFixtures(
+  tournamentId: string,
+  items: PersistZonesFixtureItem[],
+) {
+  await ensureZoneQualificationColumn();
+  await prisma.$transaction(async (tx) => {
+    const categoryIds = items.map((item) => item.categoryId);
+    await tx.tournamentPair.updateMany({
+      where: { tournamentId, categoryId: { in: categoryIds } },
+      data: { zoneLabel: null },
+    });
+
+    for (const item of items) {
+      for (const zone of item.fixture.zones) {
+        if (zone.pairIds.length === 0) continue;
+        await tx.tournamentPair.updateMany({
+          where: {
+            tournamentId,
+            categoryId: item.categoryId,
+            id: { in: zone.pairIds },
+          },
+          data: { zoneLabel: zone.label },
+        });
+      }
+
+      // Raw SQL: evita PrismaClientValidationError si Turbopack cachea un client
+      // sin el campo zonesFixture en el DMMF.
+      const qualification = JSON.stringify(
+        buildZoneQualification({
+          fixture: item.fixture,
+          format: item.matchFormat,
+          zone4Advancers: item.zone4Advancers,
+        }),
+      );
+      const updated = await tx.$executeRawUnsafe(
+        `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb, "zoneQualification" = $2::jsonb WHERE "categoryId" = $3`,
+        JSON.stringify(item.fixture),
+        qualification,
+        item.categoryId,
+      );
+      if (updated === 0) {
+        await tx.tournamentSettings.create({
+          data: { categoryId: item.categoryId },
+        });
+        await tx.$executeRawUnsafe(
+          `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb, "zoneQualification" = $2::jsonb WHERE "categoryId" = $3`,
+          JSON.stringify(item.fixture),
+          qualification,
+          item.categoryId,
+        );
+      }
+    }
+  });
+}
+
 async function ensureRoundPhaseConfigsColumn() {
   if (roundPhaseConfigsColumnReady) return;
   await ensureRuntimeSchema();
@@ -271,24 +338,31 @@ function mapStoredPlayDay(day: {
   });
 }
 
-function mapPair(row: {
-  id: string;
-  categoryId: string;
-  zoneLabel: string | null;
-  zonesDayPreference?: string | null;
-  status: string;
-  player1Confirmed: boolean;
-  player2Confirmed: boolean;
-  player1PaymentStatus: string;
-  player2PaymentStatus: string;
-  paymentStatus: string;
-  createdAt: Date;
-  manageToken?: string | null;
-  category: { name: string };
-  player1: { id: string; fullName: string };
-  player2: { id: string; fullName: string } | null;
-}): PairListItem {
+function mapPair(
+  row: {
+    id: string;
+    categoryId: string;
+    zoneLabel: string | null;
+    zonesDayPreference?: string | null;
+    status: string;
+    player1Confirmed: boolean;
+    player2Confirmed: boolean;
+    player1PaymentStatus: string;
+    player2PaymentStatus: string;
+    paymentStatus: string;
+    createdAt: Date;
+    manageToken?: string | null;
+    category: { name: string };
+    player1: { id: string; fullName: string };
+    player2: { id: string; fullName: string } | null;
+  },
+  methods?: { player1: PairPaymentMethod; player2: PairPaymentMethod },
+): PairListItem {
   const hasPlayer2 = row.player2 !== null;
+  const player1PaymentStatus =
+    methods?.player1 ?? parsePairPaymentMethod(row.player1PaymentStatus);
+  const player2PaymentStatus =
+    methods?.player2 ?? parsePairPaymentMethod(row.player2PaymentStatus);
   return {
     id: row.id,
     player1: { id: row.player1.id, name: row.player1.fullName },
@@ -302,16 +376,60 @@ function mapPair(row: {
     status: row.status as RegistrationStatus,
     player1Confirmed: row.player1Confirmed,
     player2Confirmed: row.player2Confirmed,
-    player1PaymentStatus: row.player1PaymentStatus as PaymentStatus,
-    player2PaymentStatus: row.player2PaymentStatus as PaymentStatus,
+    player1PaymentStatus,
+    player2PaymentStatus,
     paymentStatus: derivePairPaymentStatus(
-      row.player1PaymentStatus as PaymentStatus,
-      row.player2PaymentStatus as PaymentStatus,
+      player1PaymentStatus,
+      player2PaymentStatus,
       hasPlayer2,
     ),
     createdAt: row.createdAt.toISOString(),
     manageToken: row.manageToken ?? null,
   };
+}
+
+async function loadPairPaymentMethods(
+  pairIds: string[],
+): Promise<Map<string, { player1: PairPaymentMethod; player2: PairPaymentMethod }>> {
+  const out = new Map<
+    string,
+    { player1: PairPaymentMethod; player2: PairPaymentMethod }
+  >();
+  if (pairIds.length === 0) return out;
+  try {
+    const rows = await prisma.$queryRawUnsafe<
+      Array<{
+        id: string;
+        player1PaymentMethod: string | null;
+        player2PaymentMethod: string | null;
+      }>
+    >(
+      `SELECT "id", "player1PaymentMethod", "player2PaymentMethod" FROM "tournament_pairs" WHERE "id" = ANY($1::text[])`,
+      pairIds,
+    );
+    for (const row of rows) {
+      out.set(row.id, {
+        player1: parsePairPaymentMethod(row.player1PaymentMethod),
+        player2: parsePairPaymentMethod(row.player2PaymentMethod),
+      });
+    }
+  } catch (error) {
+    console.error("[tournaments] player payment method columns unavailable", error);
+  }
+  return out;
+}
+
+async function persistPairPaymentMethods(
+  pairId: string,
+  player1: PairPaymentMethod,
+  player2: PairPaymentMethod,
+) {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "tournament_pairs" SET "player1PaymentMethod" = $1, "player2PaymentMethod" = $2 WHERE "id" = $3`,
+    player1,
+    player2,
+    pairId,
+  );
 }
 
 function mapCategory(
@@ -703,6 +821,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     clubId: string,
     tournamentId: string,
   ): Promise<ZonasTournamentDetail | null> {
+    await ensureRuntimeSchema();
     const row = await prisma.tournament.findFirst({
       where: { id: tournamentId, clubId, type: "ZONAS" },
       include: {
@@ -735,7 +854,10 @@ export class PrismaTournamentRepository implements TournamentRepository {
       publicSlug: row.publicSlug,
       fixtureEditModes: await readFixtureEditModes(row.id),
       categories: row.categories.map(mapCategory),
-      pairs: row.pairs.map(mapPair),
+      pairs: await (async () => {
+        const methods = await loadPairPaymentMethods(row.pairs.map((pair) => pair.id));
+        return row.pairs.map((pair) => mapPair(pair, methods.get(pair.id)));
+      })(),
       slotReservations: await this.listSlotReservations(clubId, tournamentId),
     };
   }
@@ -1076,6 +1198,10 @@ export class PrismaTournamentRepository implements TournamentRepository {
     });
     if (!source) return { ok: false, error: "Torneo no encontrado" };
 
+    const sourcePaymentMethods = await loadPairPaymentMethods(
+      source.pairs.map((pair) => pair.id),
+    );
+
     const cloneName = input.name.trim();
     if (!cloneName) return { ok: false, error: "Ingresá el nombre del torneo" };
 
@@ -1158,6 +1284,11 @@ export class PrismaTournamentRepository implements TournamentRepository {
           if (pair.status === "CANCELLED") continue;
           const categoryId = categoryIdMap.get(pair.categoryId);
           if (!categoryId) continue;
+          const payment =
+            sourcePaymentMethods.get(pair.id) ?? {
+              player1: parsePairPaymentMethod(pair.player1PaymentStatus),
+              player2: parsePairPaymentMethod(pair.player2PaymentStatus),
+            };
           const created = await tx.tournamentPair.create({
             data: {
               tournamentId: clone.id,
@@ -1169,14 +1300,20 @@ export class PrismaTournamentRepository implements TournamentRepository {
               status: pair.status,
               player1Confirmed: pair.player1Confirmed,
               player2Confirmed: pair.player2Confirmed,
-              player1PaymentStatus: pair.player1PaymentStatus,
-              player2PaymentStatus: pair.player2PaymentStatus,
+              player1PaymentStatus: prismaPaidFromMethod(payment.player1),
+              player2PaymentStatus: prismaPaidFromMethod(payment.player2),
               paymentStatus: pair.paymentStatus,
               notes: pair.notes,
             },
             select: { id: true },
           });
           pairIdMap.set(pair.id, created.id);
+          await tx.$executeRawUnsafe(
+            `UPDATE "tournament_pairs" SET "player1PaymentMethod" = $1, "player2PaymentMethod" = $2 WHERE "id" = $3`,
+            payment.player1,
+            payment.player2,
+            created.id,
+          );
         }
 
         const slotRows = source.slotReservations
@@ -1431,10 +1568,18 @@ export class PrismaTournamentRepository implements TournamentRepository {
       : player2Id
         ? existing.player2Confirmed
         : false;
-    const player2PaymentStatus =
+    const player2PaymentMethod =
       player2Changed || !player2Id
         ? "UNPAID"
-        : (existing.player2PaymentStatus as PaymentStatus);
+        : parsePairPaymentMethod(existing.player2PaymentStatus);
+    const methods = await loadPairPaymentMethods([pairId]);
+    const player1PaymentMethod =
+      methods.get(pairId)?.player1 ??
+      parsePairPaymentMethod(existing.player1PaymentStatus);
+    const player2Resolved =
+      player2Changed || !player2Id
+        ? "UNPAID"
+        : (methods.get(pairId)?.player2 ?? player2PaymentMethod);
 
     await prisma.tournamentPair.update({
       where: { id: pairId },
@@ -1443,7 +1588,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
         player1Id: input.player1Id,
         player2Id,
         player2Confirmed,
-        player2PaymentStatus,
+        player2PaymentStatus: prismaPaidFromMethod(player2Resolved),
         status: derivePairRegistrationStatus(
           existing.status as RegistrationStatus,
           player2Id,
@@ -1451,12 +1596,13 @@ export class PrismaTournamentRepository implements TournamentRepository {
           player2Confirmed,
         ),
         paymentStatus: derivePairPaymentStatus(
-          existing.player1PaymentStatus as PaymentStatus,
-          player2PaymentStatus,
+          player1PaymentMethod,
+          player2Resolved,
           player2Id !== null,
         ),
       },
     });
+    await persistPairPaymentMethods(pairId, player1PaymentMethod, player2Resolved);
     return { ok: true };
   }
 
@@ -1493,8 +1639,9 @@ export class PrismaTournamentRepository implements TournamentRepository {
     clubId: string,
     pairId: string,
     slot: 1 | 2,
-    paymentStatus: PaymentStatus,
+    method: PairPaymentMethod,
   ): Promise<MutationResult> {
+    await ensureRuntimeSchema();
     const pair = await prisma.tournamentPair.findFirst({
       where: {
         id: pairId,
@@ -1511,10 +1658,15 @@ export class PrismaTournamentRepository implements TournamentRepository {
       return { ok: false, error: "La inscripción no tiene compañero" };
     }
 
-    const player1PaymentStatus =
-      slot === 1 ? paymentStatus : (pair.player1PaymentStatus as PaymentStatus);
-    const player2PaymentStatus =
-      slot === 2 ? paymentStatus : (pair.player2PaymentStatus as PaymentStatus);
+    const current = (await loadPairPaymentMethods([pairId])).get(pairId);
+    const player1PaymentMethod =
+      slot === 1
+        ? method
+        : (current?.player1 ?? parsePairPaymentMethod(pair.player1PaymentStatus));
+    const player2PaymentMethod =
+      slot === 2
+        ? method
+        : (current?.player2 ?? parsePairPaymentMethod(pair.player2PaymentStatus));
 
     const updated = await prisma.tournamentPair.updateMany({
       where: {
@@ -1522,18 +1674,26 @@ export class PrismaTournamentRepository implements TournamentRepository {
         tournament: { clubId },
       },
       data: {
-        ...(slot === 1 ? { player1PaymentStatus: paymentStatus } : {}),
-        ...(slot === 2 ? { player2PaymentStatus: paymentStatus } : {}),
+        ...(slot === 1
+          ? { player1PaymentStatus: prismaPaidFromMethod(method) }
+          : {}),
+        ...(slot === 2
+          ? { player2PaymentStatus: prismaPaidFromMethod(method) }
+          : {}),
         paymentStatus: derivePairPaymentStatus(
-          player1PaymentStatus,
-          player2PaymentStatus,
+          player1PaymentMethod,
+          player2PaymentMethod,
           pair.player2Id !== null,
         ),
       },
     });
-    return updated.count
-      ? { ok: true }
-      : { ok: false, error: "Pareja no encontrada" };
+    if (!updated.count) return { ok: false, error: "Pareja no encontrada" };
+    await persistPairPaymentMethods(
+      pairId,
+      player1PaymentMethod,
+      player2PaymentMethod,
+    );
+    return { ok: true };
   }
 
   async updatePairPlayerConfirmation(
@@ -1973,9 +2133,17 @@ export class PrismaTournamentRepository implements TournamentRepository {
   async buildAndSaveZonesFixture(
     clubId: string,
     tournamentId: string,
-    categoryId: string,
+    categoryId?: string,
   ): Promise<
-    | { ok: true; fixture: ZonesFixturePersisted }
+    | {
+        ok: true;
+        fixture: ZonesFixturePersisted;
+        saved: Array<{
+          categoryId: string;
+          categoryName: string;
+          fixture: ZonesFixturePersisted;
+        }>;
+      }
     | { ok: false; error: string }
   > {
     const tournament = await prisma.tournament.findFirst({
@@ -1986,48 +2154,111 @@ export class PrismaTournamentRepository implements TournamentRepository {
 
     await ensureRuntimeSchema();
     await ensureRoundPhaseConfigsColumn();
-    const category = await prisma.tournamentCategory.findFirst({
-      where: { id: categoryId, tournamentId },
-      include: { settings: SETTINGS_INCLUDE },
-    });
-    if (!category) return { ok: false, error: "Categoría no encontrada" };
-
     const config = await this.getTournamentConfig(clubId, tournamentId);
     if (!config) return { ok: false, error: "Configuración no encontrada" };
+    const modes = await readFixtureEditModes(tournamentId);
 
-    const categoryConfig = config.categories.find(
-      (c) => c.categoryId === categoryId,
-    );
-    if (!categoryConfig) {
-      return { ok: false, error: "Configuración de categoría no encontrada" };
+    if (categoryId) {
+      const categoryConfig = config.categories.find(
+        (c) => c.categoryId === categoryId,
+      );
+      if (!categoryConfig) {
+        return { ok: false, error: "Configuración de categoría no encontrada" };
+      }
+      const zoneMode = fixtureEditModeFor(modes, categoryId, "zones");
+      if (zoneMode === "AUTO" && categoryConfig.phases.zones.playDates.length === 0) {
+        return {
+          ok: false,
+          error: "Asigná días a la fase de zonas en Configuración",
+        };
+      }
+      if (zoneMode === "MANUAL") {
+        const pairs = await prisma.tournamentPair.findMany({
+          where: {
+            tournamentId,
+            categoryId,
+            status: { not: "CANCELLED" },
+            player2Id: { not: null },
+            OR: [{ player1Confirmed: true }, { player2Confirmed: true }],
+          },
+          select: { id: true },
+          orderBy: { createdAt: "asc" },
+        });
+        if (pairs.length === 0) {
+          return {
+            ok: false,
+            error: "No hay parejas Parcial o Confirmado para armar zonas",
+          };
+        }
+        const result = reshapeZonesForManualUpdate({
+          previous: categoryConfig.zonesFixture,
+          pairIds: pairs.map((pair) => pair.id),
+          pairsPerZone: categoryConfig.pairsPerZone || 3,
+        });
+        const persisted = carryZoneScores(
+          categoryConfig.zonesFixture,
+          toPersistedZonesFixture(result),
+        );
+        await persistZonesFixtures(tournamentId, [
+          {
+            categoryId,
+            categoryName: categoryConfig.categoryName,
+            fixture: persisted,
+            matchFormat: categoryConfig.phases.zones.matchFormat,
+            zone4Advancers: categoryConfig.zone4Advancers === 2 ? 2 : 3,
+          },
+        ]);
+        return {
+          ok: true,
+          fixture: persisted,
+          saved: [
+            {
+              categoryId,
+              categoryName: categoryConfig.categoryName,
+              fixture: persisted,
+            },
+          ],
+        };
+      }
     }
-    const zoneMode = await readFixtureEditMode(tournamentId, categoryId, "zones");
-    if (
-      zoneMode === "AUTO" &&
-      categoryConfig.phases.zones.playDates.length === 0
-    ) {
+
+    const autoConfigs = config.categories.filter((category) => {
+      if (fixtureEditModeFor(modes, category.categoryId, "zones") !== "AUTO") {
+        return false;
+      }
+      return category.phases.zones.playDates.length > 0;
+    });
+    if (autoConfigs.length === 0) {
       return {
         ok: false,
-        error: "Asigná días a la fase de zonas en Configuración",
+        error: categoryId
+          ? "Asigná días a la fase de zonas en Configuración"
+          : "Ninguna categoría en Modo Automático tiene días de zonas para armar",
       };
     }
 
-    const pairs = await prisma.tournamentPair.findMany({
+    const pairRows = await prisma.tournamentPair.findMany({
       where: {
         tournamentId,
-        categoryId,
+        categoryId: { in: autoConfigs.map((category) => category.categoryId) },
         status: { not: "CANCELLED" },
         player2Id: { not: null },
         OR: [{ player1Confirmed: true }, { player2Confirmed: true }],
       },
       select: {
         id: true,
+        categoryId: true,
         zonesDayPreference: true,
       },
       orderBy: { createdAt: "asc" },
     });
-
-    if (pairs.length === 0) {
+    if (categoryId && !pairRows.some((pair) => pair.categoryId === categoryId)) {
+      return {
+        ok: false,
+        error: "No hay parejas Parcial o Confirmado para armar zonas",
+      };
+    }
+    if (pairRows.length === 0) {
       return {
         ok: false,
         error: "No hay parejas Parcial o Confirmado para armar zonas",
@@ -2037,8 +2268,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     const reservations = await prisma.tournamentSlotReservation.findMany({
       where: {
         tournamentId,
-        categoryId,
-        pairId: { in: pairs.map((p) => p.id) },
+        pairId: { in: pairRows.map((pair) => pair.id) },
       },
       select: {
         pairId: true,
@@ -2048,9 +2278,8 @@ export class PrismaTournamentRepository implements TournamentRepository {
         endTime: true,
       },
     });
-
     const prefsByPair = new Map<string, FixturePairInput["preferences"]>();
-    for (const pair of pairs) prefsByPair.set(pair.id, []);
+    for (const pair of pairRows) prefsByPair.set(pair.id, []);
     for (const reservation of reservations) {
       const list = prefsByPair.get(reservation.pairId);
       if (!list) continue;
@@ -2062,92 +2291,96 @@ export class PrismaTournamentRepository implements TournamentRepository {
       });
     }
 
-    const fixturePairs: FixturePairInput[] = pairs.map((pair) => ({
-      id: pair.id,
-      zonesDayPreference: parseZonesDayPreference(pair.zonesDayPreference),
-      preferences: prefsByPair.get(pair.id) ?? [],
-    }));
-
-    const slotMinutes =
-      categoryConfig.phases.zones.matchDurationMin +
-      categoryConfig.intervalMin;
-
-    const result =
-      zoneMode === "MANUAL"
-        ? reshapeZonesForManualUpdate({
-            previous: categoryConfig.zonesFixture,
-            pairIds: fixturePairs.map((pair) => pair.id),
-            pairsPerZone: categoryConfig.pairsPerZone || 3,
-          })
-        : buildZonesFixture({
-            pairs: fixturePairs,
-            pairsPerZone: categoryConfig.pairsPerZone || 3,
-            playDays: config.playDays,
-            zonesPlayDates: categoryConfig.phases.zones.playDates,
-            courtCount: Math.max(
-              1,
-              config.courtCount || tournament.courtCount || 1,
-            ),
-            slotMinutes: Math.max(1, slotMinutes),
-            reservedSlots: reservedSlotsFromOtherFixtures(
-              config.categories,
-              categoryId,
-            ),
-          });
-
-    const persisted = carryZoneScores(
-      categoryConfig.zonesFixture,
-      toPersistedZonesFixture(result),
-    );
-
-    await prisma.$transaction(async (tx) => {
-      await tx.tournamentPair.updateMany({
-        where: { tournamentId, categoryId },
-        data: { zoneLabel: null },
+    const pairsByCategory = new Map<string, FixturePairInput[]>();
+    for (const pair of pairRows) {
+      const list = pairsByCategory.get(pair.categoryId) ?? [];
+      list.push({
+        id: pair.id,
+        zonesDayPreference: parseZonesDayPreference(pair.zonesDayPreference),
+        preferences: prefsByPair.get(pair.id) ?? [],
       });
+      pairsByCategory.set(pair.categoryId, list);
+    }
 
-      for (const zone of persisted.zones) {
-        if (zone.pairIds.length === 0) continue;
-        await tx.tournamentPair.updateMany({
-          where: {
-            tournamentId,
-            categoryId,
-            id: { in: zone.pairIds },
-          },
-          data: { zoneLabel: zone.label },
-        });
-      }
+    const reassignAll = !categoryId;
+    const inputs = autoConfigs.flatMap((category) => {
+      const pairs = pairsByCategory.get(category.categoryId) ?? [];
+      if (pairs.length === 0) return [];
+      const reassign = reassignAll || category.categoryId === categoryId;
+      const existingZones = category.zonesFixture?.zones.map((zone) => ({
+        label: zone.label,
+        pairIds: [...zone.pairIds],
+      }));
+      return [
+        {
+          categoryId: category.categoryId,
+          pairs,
+          pairsPerZone: category.pairsPerZone || 3,
+          zonesPlayDates: category.phases.zones.playDates,
+          slotMinutes: Math.max(
+            1,
+            category.phases.zones.matchDurationMin + category.intervalMin,
+          ),
+          existingZones:
+            reassign || !existingZones || existingZones.length === 0
+              ? undefined
+              : existingZones,
+        },
+      ];
+    });
+    if (inputs.length === 0) {
+      return {
+        ok: false,
+        error: "No hay parejas Parcial o Confirmado para armar zonas",
+      };
+    }
 
-      // Raw SQL: evita PrismaClientValidationError si Turbopack cachea un client
-      // sin el campo zonesFixture en el DMMF.
-      await ensureZoneQualificationColumn();
-      const qualification = JSON.stringify(
-        buildZoneQualification({
-          fixture: persisted,
-          format: categoryConfig.phases.zones.matchFormat,
-          zone4Advancers: categoryConfig.zone4Advancers === 2 ? 2 : 3,
-        }),
-      );
-      const updated = await tx.$executeRawUnsafe(
-        `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb, "zoneQualification" = $2::jsonb WHERE "categoryId" = $3`,
-        JSON.stringify(persisted),
-        qualification,
-        categoryId,
-      );
-      if (updated === 0) {
-        await tx.tournamentSettings.create({
-          data: { categoryId },
-        });
-        await tx.$executeRawUnsafe(
-          `UPDATE "tournament_settings" SET "zonesFixture" = $1::jsonb, "zoneQualification" = $2::jsonb WHERE "categoryId" = $3`,
-          JSON.stringify(persisted),
-          qualification,
-          categoryId,
-        );
-      }
+    const scheduledIds = new Set(inputs.map((input) => input.categoryId));
+    const results = buildZonesFixturesInterleaved({
+      categories: inputs,
+      playDays: config.playDays,
+      courtCount: Math.max(1, config.courtCount || tournament.courtCount || 1),
+      reservedSlots: reservedSlotsFromOtherFixtures(
+        config.categories.filter(
+          (category) => !scheduledIds.has(category.categoryId),
+        ),
+        "",
+      ),
     });
 
-    return { ok: true, fixture: persisted };
+    const toPersist: PersistZonesFixtureItem[] = [];
+    for (const [id, result] of results) {
+      const category = config.categories.find((item) => item.categoryId === id);
+      if (!category) continue;
+      toPersist.push({
+        categoryId: id,
+        categoryName: category.categoryName,
+        fixture: carryZoneScores(
+          category.zonesFixture,
+          toPersistedZonesFixture(result),
+        ),
+        matchFormat: category.phases.zones.matchFormat,
+        zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
+      });
+    }
+    if (toPersist.length === 0) {
+      return { ok: false, error: "No se pudieron armar las zonas" };
+    }
+
+    await persistZonesFixtures(tournamentId, toPersist);
+    const requested =
+      (categoryId
+        ? toPersist.find((item) => item.categoryId === categoryId)
+        : toPersist[0]) ?? toPersist[0]!;
+    return {
+      ok: true,
+      fixture: requested.fixture,
+      saved: toPersist.map((item) => ({
+        categoryId: item.categoryId,
+        categoryName: item.categoryName,
+        fixture: item.fixture,
+      })),
+    };
   }
 
   async buildAndSaveIntermediateFixture(

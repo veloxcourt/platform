@@ -31,7 +31,7 @@ import {
 import { buildTournamentPublicSlug } from "../domain/slug";
 import type {
   PairListItem,
-  PaymentStatus,
+  PairPaymentMethod,
   RegistrationStatus,
   SlotReservationItem,
   TournamentCategoryItem,
@@ -42,7 +42,7 @@ import type {
   ZonasTournamentDetail,
 } from "../domain/types";
 import {
-  buildZonesFixture,
+  buildZonesFixturesInterleaved,
   reservedSlotsFromOtherFixtures,
 } from "../domain/build-zones-fixture";
 import { reshapeZonesForManualUpdate } from "../domain/reshape-zones-manual";
@@ -257,8 +257,8 @@ function demoPairs(): Map<string, PairListItem[]> {
       status: "CONFIRMED",
       player1Confirmed: true,
       player2Confirmed: true,
-      player1PaymentStatus: "PAID",
-      player2PaymentStatus: "PAID",
+      player1PaymentStatus: "CASH",
+      player2PaymentStatus: "CASH",
       paymentStatus: "PAID",
       createdAt: "2026-01-10T12:00:00.000Z",
     },
@@ -273,8 +273,8 @@ function demoPairs(): Map<string, PairListItem[]> {
       status: "CONFIRMED",
       player1Confirmed: true,
       player2Confirmed: true,
-      player1PaymentStatus: "PAID",
-      player2PaymentStatus: "PAID",
+      player1PaymentStatus: "TRANSFER",
+      player2PaymentStatus: "CASH",
       paymentStatus: "PAID",
       createdAt: "2026-01-11T12:00:00.000Z",
     },
@@ -305,7 +305,7 @@ function demoPairs(): Map<string, PairListItem[]> {
       status: "PENDING",
       player1Confirmed: true,
       player2Confirmed: false,
-      player1PaymentStatus: "PAID",
+      player1PaymentStatus: "CASH",
       player2PaymentStatus: "UNPAID",
       paymentStatus: "PAID",
       createdAt: "2026-01-13T12:00:00.000Z",
@@ -1094,7 +1094,7 @@ export class MockTournamentRepository implements TournamentRepository {
     clubId: string,
     pairId: string,
     slot: 1 | 2,
-    paymentStatus: PaymentStatus,
+    method: PairPaymentMethod,
   ): Promise<MutationResult> {
     for (const record of store.values()) {
       if (record.club.id !== clubId) continue;
@@ -1106,9 +1106,9 @@ export class MockTournamentRepository implements TournamentRepository {
         }
 
         const player1PaymentStatus =
-          slot === 1 ? paymentStatus : pair.player1PaymentStatus;
+          slot === 1 ? method : pair.player1PaymentStatus;
         const player2PaymentStatus =
-          slot === 2 ? paymentStatus : pair.player2PaymentStatus;
+          slot === 2 ? method : pair.player2PaymentStatus;
 
         pair.player1PaymentStatus = player1PaymentStatus;
         pair.player2PaymentStatus = player2PaymentStatus;
@@ -1481,9 +1481,17 @@ export class MockTournamentRepository implements TournamentRepository {
   async buildAndSaveZonesFixture(
     clubId: string,
     tournamentId: string,
-    categoryId: string,
+    categoryId?: string,
   ): Promise<
-    | { ok: true; fixture: import("../domain/zones-fixture-schema").ZonesFixturePersisted }
+    | {
+        ok: true;
+        fixture: import("../domain/zones-fixture-schema").ZonesFixturePersisted;
+        saved: Array<{
+          categoryId: string;
+          categoryName: string;
+          fixture: import("../domain/zones-fixture-schema").ZonesFixturePersisted;
+        }>;
+      }
     | { ok: false; error: string }
   > {
     for (const record of store.values()) {
@@ -1493,37 +1501,136 @@ export class MockTournamentRepository implements TournamentRepository {
         return { ok: false, error: "Torneo no encontrado" };
       }
       const categories = record.categories.get(tournamentId) ?? [];
-      if (!categories.some((c) => c.id === categoryId)) {
+      if (categoryId && !categories.some((c) => c.id === categoryId)) {
         return { ok: false, error: "Categoría no encontrada" };
       }
 
       const config =
         record.configs.get(tournamentId) ??
         buildTournamentConfig(tournament, categories);
-      const categoryConfig = config.categories.find(
-        (c) => c.categoryId === categoryId,
-      );
-      if (!categoryConfig) {
-        return { ok: false, error: "Configuración de categoría no encontrada" };
+
+      const applySaved = (
+        saved: Array<{
+          categoryId: string;
+          categoryName: string;
+          fixture: import("../domain/zones-fixture-schema").ZonesFixturePersisted;
+        }>,
+      ) => {
+        const byId = new Map(saved.map((item) => [item.categoryId, item.fixture]));
+        for (const pair of record.pairs.get(tournamentId) ?? []) {
+          if (byId.has(pair.categoryId)) pair.zoneLabel = null;
+        }
+        for (const item of saved) {
+          for (const zone of item.fixture.zones) {
+            for (const pairId of zone.pairIds) {
+              const pair = (record.pairs.get(tournamentId) ?? []).find(
+                (p) => p.id === pairId,
+              );
+              if (pair) pair.zoneLabel = zone.label;
+            }
+          }
+        }
+        const nextCategories = config.categories.map((category) => {
+          const fixture = byId.get(category.categoryId);
+          if (!fixture) return category;
+          return {
+            ...category,
+            zonesFixture: fixture,
+            zoneQualification: buildZoneQualification({
+              fixture,
+              format: category.phases.zones.matchFormat,
+              zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
+            }),
+          };
+        });
+        record.configs.set(tournamentId, { ...config, categories: nextCategories });
+        syncCategoryCounts(record, tournamentId);
+        const requested =
+          (categoryId
+            ? saved.find((item) => item.categoryId === categoryId)
+            : saved[0]) ?? saved[0]!;
+        return { ok: true as const, fixture: requested.fixture, saved };
+      };
+
+      if (categoryId) {
+        const categoryConfig = config.categories.find(
+          (c) => c.categoryId === categoryId,
+        );
+        if (!categoryConfig) {
+          return { ok: false, error: "Configuración de categoría no encontrada" };
+        }
+        const zoneMode = fixtureEditModeFor(
+          config.fixtureEditModes,
+          categoryId,
+          "zones",
+        );
+        if (
+          zoneMode === "AUTO" &&
+          categoryConfig.phases.zones.playDates.length === 0
+        ) {
+          return {
+            ok: false,
+            error: "Asigná días a la fase de zonas en Configuración",
+          };
+        }
+        if (zoneMode === "MANUAL") {
+          const pairs = (record.pairs.get(tournamentId) ?? []).filter(
+            (p) =>
+              p.categoryId === categoryId &&
+              isPairEligibleForZones({
+                status: p.status,
+                hasPartner: Boolean(p.player2),
+                player1Confirmed: p.player1Confirmed,
+                player2Confirmed: p.player2Confirmed,
+              }),
+          );
+          if (pairs.length === 0) {
+            return {
+              ok: false,
+              error: "No hay parejas Parcial o Confirmado para armar zonas",
+            };
+          }
+          const result = reshapeZonesForManualUpdate({
+            previous: categoryConfig.zonesFixture,
+            pairIds: pairs.map((pair) => pair.id),
+            pairsPerZone: categoryConfig.pairsPerZone || 3,
+          });
+          const persisted = carryZoneScores(
+            categoryConfig.zonesFixture,
+            toPersistedZonesFixture(result),
+          );
+          return applySaved([
+            {
+              categoryId,
+              categoryName: categoryConfig.categoryName,
+              fixture: persisted,
+            },
+          ]);
+        }
       }
-      const zoneMode = fixtureEditModeFor(
-        config.fixtureEditModes,
-        categoryId,
-        "zones",
-      );
-      if (
-        zoneMode === "AUTO" &&
-        categoryConfig.phases.zones.playDates.length === 0
-      ) {
+
+      const autoConfigs = config.categories.filter((category) => {
+        if (
+          fixtureEditModeFor(config.fixtureEditModes, category.categoryId, "zones") !==
+          "AUTO"
+        ) {
+          return false;
+        }
+        return category.phases.zones.playDates.length > 0;
+      });
+      if (autoConfigs.length === 0) {
         return {
           ok: false,
-          error: "Asigná días a la fase de zonas en Configuración",
+          error: categoryId
+            ? "Asigná días a la fase de zonas en Configuración"
+            : "Ninguna categoría en Modo Automático tiene días de zonas para armar",
         };
       }
 
-      const pairs = (record.pairs.get(tournamentId) ?? []).filter(
+      const autoIds = new Set(autoConfigs.map((category) => category.categoryId));
+      const eligiblePairs = (record.pairs.get(tournamentId) ?? []).filter(
         (p) =>
-          p.categoryId === categoryId &&
+          autoIds.has(p.categoryId) &&
           isPairEligibleForZones({
             status: p.status,
             hasPartner: Boolean(p.player2),
@@ -1531,87 +1638,101 @@ export class MockTournamentRepository implements TournamentRepository {
             player2Confirmed: p.player2Confirmed,
           }),
       );
-      if (pairs.length === 0) {
+      if (
+        categoryId &&
+        !eligiblePairs.some((pair) => pair.categoryId === categoryId)
+      ) {
+        return {
+          ok: false,
+          error: "No hay parejas Parcial o Confirmado para armar zonas",
+        };
+      }
+      if (eligiblePairs.length === 0) {
         return {
           ok: false,
           error: "No hay parejas Parcial o Confirmado para armar zonas",
         };
       }
 
-      const reservations = (record.slotReservations.get(tournamentId) ?? []).filter(
-        (r) => r.categoryId === categoryId,
-      );
-
-      const fixturePairs = pairs.map((pair) => ({
-        id: pair.id,
-        zonesDayPreference: pair.zonesDayPreference,
-        preferences: reservations
-          .filter((r) => r.pairId === pair.id)
-          .map((r) => ({
-            playDate: r.playDate,
-            slotIndex: r.slotIndex,
-            startTime: r.startTime,
-            endTime: r.endTime,
-          })),
-      }));
-
-      const slotMinutes =
-        categoryConfig.phases.zones.matchDurationMin +
-        categoryConfig.intervalMin;
-
-      const result =
-        zoneMode === "MANUAL"
-          ? reshapeZonesForManualUpdate({
-              previous: categoryConfig.zonesFixture,
-              pairIds: fixturePairs.map((pair) => pair.id),
-              pairsPerZone: categoryConfig.pairsPerZone || 3,
-            })
-          : buildZonesFixture({
-              pairs: fixturePairs,
-              pairsPerZone: categoryConfig.pairsPerZone || 3,
-              playDays: config.playDays,
-              zonesPlayDates: categoryConfig.phases.zones.playDates,
-              courtCount: Math.max(1, config.courtCount || 1),
-              slotMinutes: Math.max(1, slotMinutes),
-              reservedSlots: reservedSlotsFromOtherFixtures(
-                config.categories,
-                categoryId,
-              ),
-            });
-
-      const persisted = carryZoneScores(
-        categoryConfig.zonesFixture,
-        toPersistedZonesFixture(result),
-      );
-
-      for (const pair of record.pairs.get(tournamentId) ?? []) {
-        if (pair.categoryId === categoryId) pair.zoneLabel = null;
-      }
-      for (const zone of persisted.zones) {
-        for (const pairId of zone.pairIds) {
-          const pair = (record.pairs.get(tournamentId) ?? []).find(
-            (p) => p.id === pairId,
-          );
-          if (pair) pair.zoneLabel = zone.label;
-        }
+      const reservations = record.slotReservations.get(tournamentId) ?? [];
+      const reassignAll = !categoryId;
+      const inputs = autoConfigs.flatMap((category) => {
+        const pairs = eligiblePairs.filter((pair) => pair.categoryId === category.categoryId);
+        if (pairs.length === 0) return [];
+        const reassign = reassignAll || category.categoryId === categoryId;
+        const existingZones = category.zonesFixture?.zones.map((zone) => ({
+          label: zone.label,
+          pairIds: [...zone.pairIds],
+        }));
+        return [
+          {
+            categoryId: category.categoryId,
+            pairs: pairs.map((pair) => ({
+              id: pair.id,
+              zonesDayPreference: pair.zonesDayPreference,
+              preferences: reservations
+                .filter((reservation) => reservation.pairId === pair.id)
+                .map((reservation) => ({
+                  playDate: reservation.playDate,
+                  slotIndex: reservation.slotIndex,
+                  startTime: reservation.startTime,
+                  endTime: reservation.endTime,
+                })),
+            })),
+            pairsPerZone: category.pairsPerZone || 3,
+            zonesPlayDates: category.phases.zones.playDates,
+            slotMinutes: Math.max(
+              1,
+              category.phases.zones.matchDurationMin + category.intervalMin,
+            ),
+            existingZones:
+              reassign || !existingZones || existingZones.length === 0
+                ? undefined
+                : existingZones,
+          },
+        ];
+      });
+      if (inputs.length === 0) {
+        return {
+          ok: false,
+          error: "No hay parejas Parcial o Confirmado para armar zonas",
+        };
       }
 
-      const nextCategories = config.categories.map((c) =>
-        c.categoryId === categoryId
-          ? {
-              ...c,
-              zonesFixture: persisted,
-              zoneQualification: buildZoneQualification({
-                fixture: persisted,
-                format: categoryConfig.phases.zones.matchFormat,
-                zone4Advancers: categoryConfig.zone4Advancers === 2 ? 2 : 3,
-              }),
-            }
-          : c,
-      );
-      record.configs.set(tournamentId, { ...config, categories: nextCategories });
-      syncCategoryCounts(record, tournamentId);
-      return { ok: true, fixture: persisted };
+      const scheduledIds = new Set(inputs.map((input) => input.categoryId));
+      const results = buildZonesFixturesInterleaved({
+        categories: inputs,
+        playDays: config.playDays,
+        courtCount: Math.max(1, config.courtCount || 1),
+        reservedSlots: reservedSlotsFromOtherFixtures(
+          config.categories.filter(
+            (category) => !scheduledIds.has(category.categoryId),
+          ),
+          "",
+        ),
+      });
+
+      const saved: Array<{
+        categoryId: string;
+        categoryName: string;
+        fixture: import("../domain/zones-fixture-schema").ZonesFixturePersisted;
+      }> = [];
+      for (const [id, result] of results) {
+        const category = config.categories.find((item) => item.categoryId === id);
+        if (!category) continue;
+        saved.push({
+          categoryId: id,
+          categoryName: category.categoryName,
+          fixture: carryZoneScores(
+            category.zonesFixture,
+            toPersistedZonesFixture(result),
+          ),
+        });
+      }
+      if (saved.length === 0) {
+        return { ok: false, error: "No se pudieron armar las zonas" };
+      }
+      return applySaved(saved);
     }
     return { ok: false, error: "Club no encontrado" };
   }
