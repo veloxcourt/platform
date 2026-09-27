@@ -15,6 +15,8 @@ export function PhoneInput({
   onLocalChange,
   error,
   disabled,
+  actions,
+  inputRef,
 }: {
   dial: string;
   local: string;
@@ -22,6 +24,9 @@ export function PhoneInput({
   onLocalChange: (local: string) => void;
   error?: string;
   disabled?: boolean;
+  /// Botones extra a la derecha del campo (ej. copiar / pegar).
+  actions?: React.ReactNode;
+  inputRef?: React.Ref<HTMLInputElement>;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -41,6 +46,7 @@ export function PhoneInput({
           ))}
         </select>
         <Input
+          ref={inputRef}
           type="tel"
           inputMode="tel"
           autoComplete="tel-national"
@@ -50,6 +56,7 @@ export function PhoneInput({
           onChange={(e) => onLocalChange(e.target.value)}
           aria-invalid={!!error}
         />
+        {actions}
       </div>
       <p className="text-xs text-muted-foreground">
         Sin 0 ni 15. Ej: 11 2345 6789 — se guarda listo para WhatsApp.

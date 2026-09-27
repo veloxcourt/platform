@@ -91,6 +91,23 @@ export function PublicPlayerSignupForm({
         </p>
       </div>
 
+      <Field label="Categoría" htmlFor="category">
+        <select
+          id="category"
+          name="category"
+          defaultValue=""
+          required={categories.length > 0}
+          className={SELECT_CLASS}
+        >
+          <option value="">Elegí tu categoría</option>
+          {categories.map((category) => (
+            <option key={category} value={category}>
+              {category}
+            </option>
+          ))}
+        </select>
+      </Field>
+
       <Field label="Email" htmlFor="email" hint="Opcional">
         <Input
           id="email"
@@ -127,33 +144,21 @@ export function PublicPlayerSignupForm({
         </Field>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Categoría" htmlFor="category" hint="Opcional">
-          <select id="category" name="category" defaultValue="" className={SELECT_CLASS}>
-            <option value="">—</option>
-            {categories.map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Posición en cancha" htmlFor="courtPosition" hint="Opcional">
-          <select
-            id="courtPosition"
-            name="courtPosition"
-            defaultValue=""
-            className={SELECT_CLASS}
-          >
-            <option value="">—</option>
-            {COURT_POSITIONS.map((position) => (
-              <option key={position} value={position}>
-                {COURT_POSITION_LABELS[position]}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
+      <Field label="Posición en cancha" htmlFor="courtPosition" hint="Opcional">
+        <select
+          id="courtPosition"
+          name="courtPosition"
+          defaultValue=""
+          className={SELECT_CLASS}
+        >
+          <option value="">—</option>
+          {COURT_POSITIONS.map((position) => (
+            <option key={position} value={position}>
+              {COURT_POSITION_LABELS[position]}
+            </option>
+          ))}
+        </select>
+      </Field>
 
       {state.error ? (
         <p className="text-sm text-destructive" role="alert">

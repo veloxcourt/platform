@@ -51,6 +51,10 @@ export async function registerPublicPlayer(
   const courtPosition = (data.courtPosition || null) as CourtPosition | null;
   const categoryRaw = data.category?.trim() ?? "";
   const category = categoryRaw ? normalizeCategoryLevel(categoryRaw) : null;
+  // Si el club todavía no cargó categorías, no podemos exigirla.
+  if (club.categories.length > 0 && !category) {
+    return { ok: false, error: "Elegí tu categoría" };
+  }
   if (category && !club.categories.includes(category)) {
     return { ok: false, error: "Elegí una categoría del club" };
   }

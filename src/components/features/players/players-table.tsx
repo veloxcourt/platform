@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   AtSign,
@@ -46,6 +53,12 @@ import {
   type PlayerEventsTarget,
 } from "@/components/features/players/player-events-dialog";
 import { TournamentFilterDialog } from "@/components/features/players/tournament-filter-dialog";
+import {
+  PLAYER_FIELD_LABELS,
+  PlayerFieldDialog,
+  type PlayerFieldKey,
+  type PlayerFieldTarget,
+} from "@/components/features/players/player-field-dialog";
 import { formatPhoneDisplay, whatsAppUrl } from "@/lib/phone";
 import {
   deletePlayerAction,
@@ -151,13 +164,37 @@ export function PlayersTable({
     values: NewPlayerValues;
     photoUrl?: string | null;
   } | null>(null);
+  const [fieldEditing, setFieldEditing] = useState<PlayerFieldTarget | null>(
+    null,
+  );
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [, startLoad] = useTransition();
   const [isDeleting, startDelete] = useTransition();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const activeRowRef = useRef<HTMLTableRowElement>(null);
+  /// scrollTop guardado antes de un refresh, para no volver al principio de la tabla.
+  const restoreScrollTop = useRef<number | null>(null);
 
   useEffect(() => {
     setColumns(loadColumns());
   }, []);
+
+  /// Vuelve a la misma altura tras `router.refresh()` y, si hiciera falta,
+  /// trae a la vista la fila del jugador que se acaba de tocar.
+  useLayoutEffect(() => {
+    const top = restoreScrollTop.current;
+    if (top == null) return;
+    restoreScrollTop.current = null;
+    if (scrollRef.current) scrollRef.current.scrollTop = top;
+    activeRowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [players]);
+
+  function refreshKeepingPosition(playerId?: string) {
+    restoreScrollTop.current = scrollRef.current?.scrollTop ?? null;
+    if (playerId) setActiveId(playerId);
+    router.refresh();
+  }
 
   function toggleColumn(key: ColumnKey, visible: boolean) {
     setColumns((current) => {
@@ -173,11 +210,30 @@ export function PlayersTable({
   }
 
   function openEdit(p: PlayerListItem) {
+    setActiveId(p.id);
     startLoad(async () => {
       const result = await getPlayerProfileAction(clubSlug, p.id);
       if (result.ok)
         setEditing({ id: p.id, values: result.profile, photoUrl: p.photoUrl });
       else toast.error("No se pudo abrir la ficha", { description: result.error });
+    });
+  }
+
+  /// Clic en una celda: se abre el mismo formulario pero con ese solo campo.
+  function openFieldEdit(p: PlayerListItem, field: PlayerFieldKey) {
+    setActiveId(p.id);
+    startLoad(async () => {
+      const result = await getPlayerProfileAction(clubSlug, p.id);
+      if (result.ok) {
+        setFieldEditing({
+          id: p.id,
+          name: p.fullName,
+          field,
+          values: result.profile,
+        });
+      } else {
+        toast.error("No se pudo abrir el campo", { description: result.error });
+      }
     });
   }
 
@@ -259,7 +315,8 @@ export function PlayersTable({
       const result = await deletePlayerAction(clubSlug, p.id);
       if (result.ok) {
         toast.success("Jugador eliminado");
-        router.refresh();
+        if (activeId === p.id) setActiveId(null);
+        refreshKeepingPosition();
       } else {
         toast.error("No se pudo eliminar", { description: result.error });
       }
@@ -541,7 +598,10 @@ export function PlayersTable({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-auto rounded-lg border"
+      >
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-10 border-b bg-muted text-left text-xs text-muted-foreground">
             <tr>
@@ -594,13 +654,27 @@ export function PlayersTable({
               </tr>
             ) : (
               filtered.map((p) => (
-                <tr key={p.id} className="border-b last:border-b-0">
+                <tr
+                  key={p.id}
+                  ref={p.id === activeId ? activeRowRef : undefined}
+                  className={cn(
+                    "border-b last:border-b-0",
+                    p.id === activeId && "bg-accent/60",
+                  )}
+                >
                   {columns.photo && (
                     <td className="py-2 pl-3">
                       <Avatar name={p.fullName} url={p.photoUrl} />
                     </td>
                   )}
-                  <td className="px-3 py-2 font-medium">{p.fullName}</td>
+                  <EditableCell
+                    player={p}
+                    field="name"
+                    onEdit={openFieldEdit}
+                    className="font-medium"
+                  >
+                    {p.fullName}
+                  </EditableCell>
                   {columns.message && (
                     <td className="px-3 py-2 text-center">
                       <input
@@ -643,7 +717,12 @@ export function PlayersTable({
                     </td>
                   )}
                   {columns.phone && (
-                    <td className="px-3 py-2 text-muted-foreground">
+                    <EditableCell
+                      player={p}
+                      field="phone"
+                      onEdit={openFieldEdit}
+                      className="text-muted-foreground"
+                    >
                       <div className="flex items-center gap-1.5">
                         <span>{formatPhoneDisplay(p.phone) || "—"}</span>
                         {whatsAppUrl(p.phone) && (
@@ -659,10 +738,15 @@ export function PlayersTable({
                           </a>
                         )}
                       </div>
-                    </td>
+                    </EditableCell>
                   )}
                   {columns.instagram && (
-                    <td className="px-3 py-2 text-muted-foreground">
+                    <EditableCell
+                      player={p}
+                      field="instagram"
+                      onEdit={openFieldEdit}
+                      className="text-muted-foreground"
+                    >
                       {p.instagram ? (
                         <a
                           href={`https://instagram.com/${p.instagram}`}
@@ -678,36 +762,61 @@ export function PlayersTable({
                       ) : (
                         "—"
                       )}
-                    </td>
+                    </EditableCell>
                   )}
                   {columns.city && (
-                    <td className="px-3 py-2 text-muted-foreground">
+                    <EditableCell
+                      player={p}
+                      field="city"
+                      onEdit={openFieldEdit}
+                      className="text-muted-foreground"
+                    >
                       {p.city?.trim() || "—"}
-                    </td>
+                    </EditableCell>
                   )}
                   {columns.category && (
-                    <td className="px-3 py-2 text-muted-foreground">
+                    <EditableCell
+                      player={p}
+                      field="category"
+                      onEdit={openFieldEdit}
+                      className="text-muted-foreground"
+                    >
                       {p.category || "—"}
-                    </td>
+                    </EditableCell>
                   )}
                   {columns.position && (
-                    <td className="px-3 py-2 text-muted-foreground">
+                    <EditableCell
+                      player={p}
+                      field="position"
+                      onEdit={openFieldEdit}
+                      className="text-muted-foreground"
+                    >
                       {p.courtPosition
                         ? COURT_POSITION_LABELS[
                             p.courtPosition as CourtPosition
                           ]
                         : "—"}
-                    </td>
+                    </EditableCell>
                   )}
                   {columns.ranking && (
-                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                    <EditableCell
+                      player={p}
+                      field="ranking"
+                      onEdit={openFieldEdit}
+                      className="text-right tabular-nums text-muted-foreground"
+                    >
                       {p.ranking ?? "—"}
-                    </td>
+                    </EditableCell>
                   )}
                   {columns.points && (
-                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                    <EditableCell
+                      player={p}
+                      field="points"
+                      onEdit={openFieldEdit}
+                      className="text-right tabular-nums text-muted-foreground"
+                    >
                       {p.accumulatedPoints}
-                    </td>
+                    </EditableCell>
                   )}
                   {columns.balance && (
                     <td className="px-3 py-2 text-right tabular-nums">
@@ -796,7 +905,7 @@ export function PlayersTable({
         categories={categories}
         open={newOpen}
         onOpenChange={setNewOpen}
-        onCreated={() => router.refresh()}
+        onCreated={(player) => refreshKeepingPosition(player.id)}
       />
 
       <NewPlayerDialog
@@ -816,9 +925,22 @@ export function PlayersTable({
             });
           }
           setEditing(null);
-          router.refresh();
+          refreshKeepingPosition(id);
         }}
-        onPhotoChanged={() => router.refresh()}
+        onPhotoChanged={() => refreshKeepingPosition(editing?.id)}
+      />
+
+      <PlayerFieldDialog
+        clubSlug={clubSlug}
+        categories={categories}
+        target={fieldEditing}
+        open={fieldEditing !== null}
+        onOpenChange={(o) => !o && setFieldEditing(null)}
+        onSaved={() => {
+          const id = fieldEditing?.id;
+          setFieldEditing(null);
+          refreshKeepingPosition(id);
+        }}
       />
 
       <PlayerEventsDialog
@@ -835,9 +957,47 @@ export function PlayersTable({
         currency={currency}
         open={accountPlayer !== null}
         onOpenChange={(o) => !o && setAccountPlayer(null)}
-        onChanged={() => router.refresh()}
+        onChanged={() => refreshKeepingPosition(accountPlayer?.id)}
       />
     </div>
+  );
+}
+
+/// Celda que abre el editor de ese único campo. Los links de adentro
+/// (WhatsApp, Instagram) frenan la propagación para seguir andando como links.
+function EditableCell({
+  player,
+  field,
+  onEdit,
+  className,
+  children,
+}: {
+  player: PlayerListItem;
+  field: PlayerFieldKey;
+  onEdit: (player: PlayerListItem, field: PlayerFieldKey) => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const label = PLAYER_FIELD_LABELS[field].toLowerCase();
+  return (
+    <td
+      role="button"
+      tabIndex={0}
+      title={`Editar ${label} de ${player.fullName}`}
+      aria-label={`Editar ${label} de ${player.fullName}`}
+      onClick={() => onEdit(player, field)}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onEdit(player, field);
+      }}
+      className={cn(
+        "cursor-pointer px-3 py-2 outline-none hover:bg-muted focus-visible:bg-muted",
+        className,
+      )}
+    >
+      {children}
+    </td>
   );
 }
 
