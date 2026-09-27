@@ -1,0 +1,24 @@
+# Archivos que la CLI de Vercel NO sube al deploy.
+# Ojo: cuando existe este archivo, Vercel lo usa en lugar de `.gitignore`.
+
+# Dependencias y artefactos de build (Vercel los regenera en el servidor).
+node_modules
+.next
+out
+build
+.vercel
+
+# Control de versiones y config de editor.
+.git
+.DS_Store
+*.tsbuildinfo
+*.code-workspace
+
+# Secretos: en Vercel las variables vienen de Environment Variables,
+# no del `.env` local (que además tiene credenciales).
+.env
+.env.*
+
+# Documentación y material de referencia (no se usa en runtime).
+docs
+*.pdf
