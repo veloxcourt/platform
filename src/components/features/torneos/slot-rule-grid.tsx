@@ -55,6 +55,18 @@ const STATUS_LABEL: Record<SlotCellStatus, string> = {
     mine: "Tu preferencia",
 };
 
+const REGISTRATION_STATUS_LABEL: Partial<Record<SlotCellStatus, string>> = {
+  free: "No puedo",
+  mine: "Sí puedo",
+};
+
+function statusLabel(mode: SlotRuleGridMode, status: SlotCellStatus): string {
+  return (
+    (mode === "registration" ? REGISTRATION_STATUS_LABEL[status] : undefined) ??
+    STATUS_LABEL[status]
+  );
+}
+
 const SLOT_BOX_CLASS =
   "relative flex h-[3.25rem] w-16 shrink-0 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border px-1 text-xs leading-tight transition-colors";
 
@@ -93,6 +105,17 @@ function cellClass(
       return "border-orange-400 bg-orange-100 text-orange-950 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-100";
     default:
       return "border-border bg-muted";
+  }
+}
+
+function registrationCellClass(status: SlotCellStatus): string {
+  switch (status) {
+    case "free":
+      return "border-rose-300 bg-rose-50 text-rose-900 hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200";
+    case "mine":
+      return "border-emerald-500 bg-emerald-100 text-emerald-950 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-100";
+    default:
+      return cellClass(status);
   }
 }
 
@@ -275,7 +298,9 @@ export function SlotRuleGrid({
       )}
 
       <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
-        <LegendSwatch className={cellClass("free")} label="Libre" />
+        {mode === "simulation" && (
+          <LegendSwatch className={cellClass("free")} label="Libre" />
+        )}
         {mode === "simulation" && phaseLegend ? (
           <>
             <LegendSwatch
@@ -304,7 +329,16 @@ export function SlotRuleGrid({
           />
         ) : (
           <>
-            <LegendSwatch className={cellClass("mine")} label="Tu preferencia" />
+            <LegendSwatch
+              className={registrationCellClass("free")}
+              label="No puedo"
+              bold
+            />
+            <LegendSwatch
+              className={registrationCellClass("mine")}
+              label="Sí puedo"
+              bold
+            />
             <LegendSwatch
               className={cellClass("blocked")}
               label="Bloqueado (intermedia)"
@@ -357,15 +391,43 @@ export function SlotRuleGrid({
 
         return (
         <div key={day.playDate} className="space-y-2">
-          <p className="font-medium">
-            {day.dayLabel}
-            <span className="ml-2 text-sm font-normal text-muted-foreground">
-              {day.startTime}–{day.endTime}
-              {mode === "simulation" && daySlotLabel
-                ? ` · ${daySlotLabel}`
-                : ""}
-            </span>
-          </p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <p className="font-medium">
+              {day.dayLabel}
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                {day.startTime}–{day.endTime}
+                {mode === "simulation" && daySlotLabel
+                  ? ` · ${daySlotLabel}`
+                  : ""}
+              </span>
+            </p>
+            {showDayActions && (
+              <div className="flex gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 shrink-0 bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700"
+                  onClick={() => onMarkDay?.(day.playDate)}
+                  disabled={
+                    dayActionsDisabled ||
+                    dayAllMarked ||
+                    selectableDaySlots.length === 0
+                  }
+                >
+                  Siempre
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 shrink-0 bg-rose-600 px-3 text-xs font-semibold text-white hover:bg-rose-700"
+                  onClick={() => onClearDay?.(day.playDate)}
+                  disabled={dayActionsDisabled || dayNoneMarked}
+                >
+                  Nunca
+                </Button>
+              </div>
+            )}
+          </div>
           {mode === "registration" ? (
             <div className="max-w-full overflow-x-auto">
               <div className="flex w-max flex-nowrap items-end gap-1.5">
@@ -377,7 +439,7 @@ export function SlotRuleGrid({
                   ? undefined
                   : preferenceHeatStyle(count, heatPeak);
                 const titleParts = [
-                  STATUS_LABEL[slot.status],
+                  statusLabel(mode, slot.status),
                   `${slot.startTime}–${slot.endTime}`,
                   blocked
                     ? "Reservado fase intermedia"
@@ -409,11 +471,11 @@ export function SlotRuleGrid({
                       type="button"
                       disabled={!clickable}
                       title={titleParts.join(" · ")}
-                      aria-label={`${slot.startTime} ${STATUS_LABEL[slot.status]}${blocked ? "" : ` · ${count} pedidos`}`}
+                      aria-label={`${slot.startTime} ${statusLabel(mode, slot.status)}${blocked ? "" : ` · ${count} pedidos`}`}
                       onClick={() => clickable && onToggleSlot?.(slot)}
                       className={cn(
                         "flex h-10 w-full flex-col items-center justify-center rounded-md border px-1.5 text-[10px] leading-tight transition-colors",
-                        cellClass(slot.status),
+                        registrationCellClass(slot.status),
                         clickable && "cursor-pointer",
                         !clickable && "cursor-default opacity-95",
                       )}
@@ -425,34 +487,6 @@ export function SlotRuleGrid({
                   </div>
                 );
               })}
-              {showDayActions && (
-                <div className="flex gap-1.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-10 shrink-0 px-2 text-xs"
-                    onClick={() => onMarkDay?.(day.playDate)}
-                    disabled={
-                      dayActionsDisabled ||
-                      dayAllMarked ||
-                      selectableDaySlots.length === 0
-                    }
-                  >
-                    Marcar todas
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-10 shrink-0 px-2 text-xs"
-                    onClick={() => onClearDay?.(day.playDate)}
-                    disabled={dayActionsDisabled || dayNoneMarked}
-                  >
-                    Desmarcar todas
-                  </Button>
-                </div>
-              )}
               </div>
             </div>
           ) : (
@@ -807,12 +841,19 @@ export function SlotRuleGrid({
 function LegendSwatch({
   className,
   label,
+  bold = false,
 }: {
   className: string;
   label: string;
+  bold?: boolean;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5",
+        bold && "font-semibold text-foreground",
+      )}
+    >
       <span
         className={cn("inline-block size-3 rounded-sm border", className)}
         aria-hidden

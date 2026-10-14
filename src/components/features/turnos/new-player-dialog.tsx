@@ -43,6 +43,7 @@ import {
   updatePlayerAction,
   uploadPlayerPhotoAction,
 } from "@/app/(dashboard)/[clubSlug]/turnos/actions";
+import { CityCombobox } from "@/components/features/cities/city-combobox";
 
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -57,6 +58,7 @@ const EMPTY_PLAYER: NewPlayerValues = {
   gender: "",
   birthDate: "",
   city: "",
+  catalogCityId: "",
   address: "",
   country: "",
   category: "",
@@ -497,8 +499,16 @@ export function NewPlayerDialog({
               ))}
             </select>
           </Field>
-          <Field label="Localidad" error={errors.city?.message}>
-            <Input {...register("city")} />
+          <Field label="Localidad" error={errors.catalogCityId?.message}>
+            <CityCombobox
+              value={watch("catalogCityId") ?? ""}
+              allowCreate
+              clubSlug={clubSlug}
+              onChange={(cityId, cityName) => {
+                setValue("catalogCityId", cityId, { shouldValidate: true });
+                setValue("city", cityName, { shouldValidate: true });
+              }}
+            />
           </Field>
           <Field label="Fecha de nacimiento" error={errors.birthDate?.message}>
             <Input type="date" {...register("birthDate")} />

@@ -1,14 +1,16 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import { submitClubRequestAction } from "@/app/solicitar-club/actions";
+import { CityCombobox } from "@/components/features/cities/city-combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export function ClubRequestForm() {
   const [state, action, pending] = useActionState(submitClubRequestAction, {});
+  const [catalogCityId, setCatalogCityId] = useState("");
 
   if (state.ok) {
     return (
@@ -41,8 +43,14 @@ export function ClubRequestForm() {
           <Input id="phone" name="phone" required />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="locality">Localidad</Label>
-          <Input id="locality" name="locality" required />
+          <Label htmlFor="catalogCityId">Localidad</Label>
+          <CityCombobox
+            id="catalogCityId"
+            name="catalogCityId"
+            required
+            value={catalogCityId}
+            onChange={(cityId) => setCatalogCityId(cityId)}
+          />
         </div>
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="message">Mensaje</Label>

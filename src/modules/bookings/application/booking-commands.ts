@@ -1,6 +1,10 @@
 import type { BookingRepository } from "./booking-repository";
 import type { CommandResult } from "./create-booking";
-import type { PaymentStatus, UpdateBookingData } from "../domain/types";
+import type {
+  PaymentStatus,
+  UpdateBookingData,
+  UpdateFixedBookingData,
+} from "../domain/types";
 import { MAX_PLAYERS_PER_BOOKING } from "../domain/rules";
 
 /// Confirma una pre-reserva (PRE_RESERVA -> RESERVADO).
@@ -60,6 +64,69 @@ export async function setBookingStatus(
   const club = await repo.getClubBySlug(clubSlug);
   if (!club) return { ok: false, error: "Club no encontrado" };
   await repo.setBookingStatus(club.id, bookingId, status);
+  return { ok: true };
+}
+
+/// Cambia responsable y jugadores de un turno fijo. Vale para toda la serie.
+export async function updateFixedBooking(
+  repo: BookingRepository,
+  clubSlug: string,
+  fixedBookingId: string,
+  data: UpdateFixedBookingData,
+): Promise<CommandResult> {
+  const club = await repo.getClubBySlug(clubSlug);
+  if (!club) return { ok: false, error: "Club no encontrado" };
+  if (!data.responsibleId) return { ok: false, error: "Elegí un responsable" };
+
+  const playerIds = Array.from(new Set(data.playerIds.filter(Boolean)));
+  if (playerIds.length > MAX_PLAYERS_PER_BOOKING) {
+    return {
+      ok: false,
+      error: `Máximo ${MAX_PLAYERS_PER_BOOKING} jugadores por turno`,
+    };
+  }
+
+  const result = await repo.updateFixedBooking(club.id, fixedBookingId, {
+    responsibleId: data.responsibleId,
+    playerIds,
+  });
+  if (!result.ok) {
+    return { ok: false, error: result.error ?? "No se pudo guardar" };
+  }
+  return { ok: true };
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/// Libera una sola fecha de un turno fijo. La serie sigue las demás semanas.
+export async function releaseFixedOccurrence(
+  repo: BookingRepository,
+  clubSlug: string,
+  fixedBookingId: string,
+  date: string,
+): Promise<CommandResult> {
+  if (!ISO_DATE.test(date)) return { ok: false, error: "Fecha inválida" };
+  const club = await repo.getClubBySlug(clubSlug);
+  if (!club) return { ok: false, error: "Club no encontrado" };
+  const result = await repo.releaseFixedOccurrence(club.id, fixedBookingId, date);
+  if (!result.ok) return { ok: false, error: result.error ?? "No se pudo liberar" };
+  return { ok: true };
+}
+
+/// Devuelve al dueño una fecha que estaba liberada, si el horario sigue libre.
+export async function restoreFixedOccurrence(
+  repo: BookingRepository,
+  clubSlug: string,
+  fixedBookingId: string,
+  date: string,
+): Promise<CommandResult> {
+  if (!ISO_DATE.test(date)) return { ok: false, error: "Fecha inválida" };
+  const club = await repo.getClubBySlug(clubSlug);
+  if (!club) return { ok: false, error: "Club no encontrado" };
+  const result = await repo.restoreFixedOccurrence(club.id, fixedBookingId, date);
+  if (!result.ok) {
+    return { ok: false, error: result.error ?? "No se pudo devolver el turno" };
+  }
   return { ok: true };
 }
 

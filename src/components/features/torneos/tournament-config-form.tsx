@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -192,6 +192,7 @@ function RoundInstanceFields({
           min={30}
           max={180}
           step={15}
+          className="bg-background"
           disabled={readOnly}
           readOnly={readOnly}
           {...register(`${base}.matchDurationMin`, { valueAsNumber: true })}
@@ -406,6 +407,7 @@ function PhaseFields({
                 min={30}
                 max={180}
                 step={15}
+                className="bg-background"
                 disabled={readOnly}
                 readOnly={readOnly}
                 {...register(`${base}.matchDurationMin`, { valueAsNumber: true })}
@@ -711,6 +713,11 @@ function SharedParametersCard({
   );
 }
 
+export type ConfigFormGuard = {
+  isDirty: () => boolean;
+  save: () => Promise<boolean>;
+};
+
 export function TournamentConfigForm({
   clubSlug,
   tournamentId,
@@ -724,6 +731,7 @@ export function TournamentConfigForm({
    * all: todo (ruta standalone)
    */
   panel = "all",
+  onGuardReady,
 }: {
   clubSlug: string;
   tournamentId: string;
@@ -731,6 +739,7 @@ export function TournamentConfigForm({
   categories?: TournamentCategoryItem[];
   focusCategoryId?: string;
   panel?: "parameters" | "category" | "all";
+  onGuardReady?: (guard: ConfigFormGuard | null) => void;
 }) {
   const readOnly = useTournamentReadOnly();
   const [isPending, startTransition] = useTransition();
@@ -741,7 +750,8 @@ export function TournamentConfigForm({
     handleSubmit,
     setValue,
     getValues,
-    formState: { errors },
+    reset,
+    formState: { errors, isDirty },
   } = useForm<TournamentConfigValues>({
     resolver: zodResolver(tournamentConfigSchema),
     defaultValues: {
@@ -829,7 +839,7 @@ export function TournamentConfigForm({
   const showParameters = panel === "parameters" || panel === "all";
   const showCategories = panel === "category" || panel === "all";
 
-  function onSubmit(values: TournamentConfigValues) {
+  async function persist(values: TournamentConfigValues): Promise<boolean> {
     const validDates = new Set(
       values.playDays.map((d) => d.date).filter(Boolean),
     );
@@ -881,18 +891,61 @@ export function TournamentConfigForm({
       }),
     };
 
-    if (readOnly) return;
+    if (readOnly) return false;
 
+    const result = await saveTournamentConfigAction(
+      clubSlug,
+      tournamentId,
+      sanitized,
+    );
+    if (!result.ok) {
+      toast.error("No se pudo guardar", { description: result.error });
+      return false;
+    }
+    reset(sanitized);
+    toast.success("Configuración guardada");
+    return true;
+  }
+
+  function onSubmit(values: TournamentConfigValues) {
     startTransition(async () => {
-      const result = await saveTournamentConfigAction(
-        clubSlug,
-        tournamentId,
-        sanitized,
-      );
-      if (result.ok) toast.success("Configuración guardada");
-      else toast.error("No se pudo guardar", { description: result.error });
+      await persist(values);
     });
   }
+
+  const dirtyRef = useRef(false);
+  dirtyRef.current = isDirty;
+  const saveRef = useRef<() => Promise<boolean>>(async () => false);
+  saveRef.current = () =>
+    new Promise((resolve) => {
+      void handleSubmit(
+        (values) => {
+          startTransition(async () => {
+            try {
+              resolve(await persist(values));
+            } catch {
+              toast.error("No se pudo guardar");
+              resolve(false);
+            }
+          });
+        },
+        () => {
+          toast.error("No se pudo guardar", {
+            description: "Revisá los campos de la configuración.",
+          });
+          resolve(false);
+        },
+      )();
+    });
+
+  useEffect(() => {
+    if (!onGuardReady) return;
+    onGuardReady({
+      isDirty: () => dirtyRef.current,
+      save: () => saveRef.current(),
+    });
+    return () => onGuardReady(null);
+  }, [onGuardReady]);
 
   if (initial.categories.length === 0) {
     return (

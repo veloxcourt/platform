@@ -10,6 +10,7 @@ const DEFAULT_ADMIN_PRIVILEGES = [
   "catalogo",
   "menu-precios",
   "turnos",
+  "turnos-config",
   "torneos",
   "eco-torneo",
   "calendario",

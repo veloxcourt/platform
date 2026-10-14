@@ -26,6 +26,7 @@ export const publicPlayerSignupSchema = z
     instagram: optionalText(80),
     gender: z.enum(GENDERS).or(z.literal("")).optional(),
     city: optionalText(80),
+    catalogCityId: z.string().trim().max(40).optional().or(z.literal("")),
     category: optionalText(40),
     courtPosition: z.enum(COURT_POSITIONS).or(z.literal("")).optional(),
   })

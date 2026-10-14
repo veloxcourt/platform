@@ -1,8 +1,9 @@
 "use client";
 
-import { useActionState, type ReactNode } from "react";
+import { useActionState, useState, type ReactNode } from "react";
 
 import { submitPublicPlayerSignupAction } from "@/app/alta/[clubSlug]/actions";
+import { CityCombobox } from "@/components/features/cities/city-combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +32,7 @@ export function PublicPlayerSignupForm({
     submitPublicPlayerSignupAction,
     {},
   );
+  const [catalogCityId, setCatalogCityId] = useState("");
 
   if (state.ok) {
     return (
@@ -139,8 +141,13 @@ export function PublicPlayerSignupForm({
             ))}
           </select>
         </Field>
-        <Field label="Localidad" htmlFor="city" hint="Opcional">
-          <Input id="city" name="city" maxLength={80} autoComplete="address-level2" />
+        <Field label="Localidad" htmlFor="catalogCityId" hint="Opcional">
+          <CityCombobox
+            id="catalogCityId"
+            name="catalogCityId"
+            value={catalogCityId}
+            onChange={(cityId) => setCatalogCityId(cityId)}
+          />
         </Field>
       </div>
 

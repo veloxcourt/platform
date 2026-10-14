@@ -4,6 +4,7 @@ import {
   dayOfWeekISO,
   findBookingAt,
   MAX_PLAYERS_PER_BOOKING,
+  timeRangesOverlap,
 } from "../domain/rules";
 
 export type CommandResult = { ok: true } | { ok: false; error: string };
@@ -26,26 +27,43 @@ export async function createBooking(
     return { ok: false, error: "Ese horario ya está ocupado" };
   }
 
-  // Turno FIJO: se crea una plantilla recurrente (se repite cada semana en el
-  // mismo día/hora/cancha hasta que el club la cancele).
-  if (values.type === "FIJO") {
-    await repo.createFixedBooking(club.id, {
-      courtId: values.courtId,
-      dayOfWeek: dayOfWeekISO(values.date),
-      startTime: values.startTime,
-      durationMin: settings.slotDurationMin,
-      responsibleId: values.responsibleId,
-    });
-    return { ok: true };
-  }
-
-  // El responsable puede no jugar: los jugadores son los 4 participantes cargados.
   const playerIds = Array.from(new Set(values.playerIds.filter(Boolean)));
   if (playerIds.length > MAX_PLAYERS_PER_BOOKING) {
     return {
       ok: false,
       error: `Máximo ${MAX_PLAYERS_PER_BOOKING} jugadores por turno`,
     };
+  }
+
+  // Turno FIJO: se crea una plantilla recurrente (se repite cada semana en el
+  // mismo día/hora/cancha hasta que el club la cancele).
+  if (values.type === "FIJO") {
+    const templates = await repo.getActiveFixedBookings(club.id);
+    const dow = dayOfWeekISO(values.date);
+    const alreadyFixed = templates.some(
+      (template) =>
+        template.courtId === values.courtId &&
+        template.dayOfWeek === dow &&
+        timeRangesOverlap(
+          template.startTime,
+          template.durationMin,
+          values.startTime,
+          settings.slotDurationMin,
+        ),
+    );
+    if (alreadyFixed) {
+      return { ok: false, error: "Ese horario ya tiene un turno fijo" };
+    }
+
+    await repo.createFixedBooking(club.id, {
+      courtId: values.courtId,
+      dayOfWeek: dow,
+      startTime: values.startTime,
+      durationMin: settings.slotDurationMin,
+      responsibleId: values.responsibleId,
+      playerIds,
+    });
+    return { ok: true };
   }
 
   const expiresAt = new Date(

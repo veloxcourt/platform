@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 
+import { getClubAccess } from "@/lib/auth/access";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import { getTurnosConfig } from "@/modules/bookings/application/get-turnos-config";
 import { SettingsForm } from "@/components/features/turnos/settings-form";
@@ -19,6 +20,10 @@ export default async function ConfiguracionTurnosPage({
   params: Promise<{ clubSlug: string }>;
 }) {
   const { clubSlug } = await params;
+  const access = await getClubAccess(clubSlug);
+  if (!access?.allowedModules.includes("turnos-config")) {
+    redirect(`/${clubSlug}/turnos`);
+  }
 
   const repo = getBookingRepository();
   const config = await getTurnosConfig(repo, clubSlug);
@@ -29,14 +34,14 @@ export default async function ConfiguracionTurnosPage({
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
+      <Link
+        href={`/${clubSlug}/turnos`}
+        className="sticky top-0 z-10 -mb-3 flex items-center gap-1 bg-background py-2 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ChevronLeft className="size-4" />
+        Volver al calendario
+      </Link>
       <div className="flex flex-col gap-1">
-        <Link
-          href={`/${clubSlug}/turnos`}
-          className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="size-4" />
-          Volver al calendario
-        </Link>
         <h1 className="text-xl font-semibold">Configuración de Turnos</h1>
         <p className="text-sm text-muted-foreground">{config.club.name}</p>
       </div>

@@ -6,6 +6,11 @@ import { requireSuperAdmin } from "@/lib/auth/superadmin";
 import { prisma } from "@/lib/prisma";
 import { createClub } from "@/modules/platform/application/create-club";
 import { createClubSchema } from "@/modules/platform/domain/create-club-schema";
+import {
+  markCityReviewed,
+  mergeCatalogCities,
+} from "@/modules/cities/application/manage-cities";
+import { mergeCitiesSchema } from "@/modules/cities/domain/city";
 
 type ActionResult = { ok: true; slug?: string } | { ok: false; error: string };
 
@@ -39,6 +44,29 @@ export async function rejectClubRequestAction(
   if (result.count !== 1) {
     return { ok: false, error: "Solicitud no encontrada." };
   }
+  revalidatePath("/superadmin");
+  return { ok: true };
+}
+
+export async function mergeCitiesAction(
+  sourceId: string,
+  targetId: string,
+): Promise<ActionResult> {
+  await requireSuperAdmin();
+  const parsed = mergeCitiesSchema.safeParse({ sourceId, targetId });
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+  }
+  const result = await mergeCatalogCities(parsed.data.sourceId, parsed.data.targetId);
+  if (!result.ok) return result;
+  revalidatePath("/superadmin");
+  return { ok: true };
+}
+
+export async function reviewCityAction(cityId: string): Promise<ActionResult> {
+  await requireSuperAdmin();
+  const result = await markCityReviewed(cityId);
+  if (!result.ok) return result;
   revalidatePath("/superadmin");
   return { ok: true };
 }

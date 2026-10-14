@@ -24,6 +24,7 @@ export type PublicManagedPlayer = {
   phone: string | null;
   gender: Gender | null;
   city: string | null;
+  catalogCityId: string | null;
 };
 
 export type PublicManagedPairDetails = PublicManagedPair & {

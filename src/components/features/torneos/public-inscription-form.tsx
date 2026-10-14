@@ -35,6 +35,7 @@ export type LoggedInInscriptionPlayer = {
   phone: string | null;
   gender: Gender | null;
   city: string | null;
+  catalogCityId: string | null;
 };
 
 function playerToDefaults(
@@ -45,6 +46,7 @@ function playerToDefaults(
     phone: string | null;
     gender: Gender | null;
     city?: string | null;
+    catalogCityId?: string | null;
   } | null,
 ): PublicPlayerDefaults | null {
   if (!player) return null;
@@ -58,6 +60,7 @@ function playerToDefaults(
       : "",
     gender: player.gender ?? "",
     city: player.city ?? "",
+    catalogCityId: player.catalogCityId ?? "",
   };
 }
 
@@ -112,6 +115,7 @@ export function PublicInscriptionForm({
             : "",
           gender: loggedInPlayer.gender ?? "",
           city: loggedInPlayer.city ?? "",
+          catalogCityId: loggedInPlayer.catalogCityId ?? "",
         }
       : null);
   const player2Defaults = playerToDefaults(edit?.player2 ?? null);
@@ -276,7 +280,7 @@ export function PublicInscriptionForm({
               persist={false}
               onDraftChange={setDraftPreferences}
               title="Horarios de zonas"
-              hint="Marcá en azul los horarios en los que podrían jugar. El número de arriba es cuántas parejas ya pidieron ese horario (todas las categorías). El color va de verde a rojo según la demanda."
+              hint="Marcá en verde (Sí puedo) los horarios en los que podrían jugar; los rojos quedan como No puedo. El número de arriba es cuántas parejas ya pidieron ese horario (todas las categorías). El color va de verde a rojo según la demanda."
             />
           </div>
         ) : (

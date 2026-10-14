@@ -186,6 +186,7 @@ export const ADMIN_MODULES = [
   "catalogo",
   "menu-precios",
   "turnos",
+  "turnos-config",
   "torneos",
   "eco-torneo",
   "calendario",
@@ -201,6 +202,7 @@ export const ADMIN_MODULE_LABELS: Record<AdminModuleKey, string> = {
   catalogo: "Catálogo · Edición",
   "menu-precios": "Catálogo · Menú de precios",
   turnos: "Gestión de Turnos",
+  "turnos-config": "Gestión de Turnos · Configuración",
   torneos: "Torneos",
   "eco-torneo": "Eco-Torneo",
   calendario: "Calendario",
@@ -240,7 +242,10 @@ export const PRIVILEGE_GROUPS: PrivilegeGroup[] = [
   {
     id: "turnos",
     label: "Gestión de Turnos",
-    options: [{ key: "turnos", label: "Acceso" }],
+    options: [
+      { key: "turnos", label: "Acceso" },
+      { key: "turnos-config", label: "Configuración" },
+    ],
   },
   {
     id: "torneos",

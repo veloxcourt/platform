@@ -34,6 +34,7 @@ export default async function PublicInscriptionPage({
     phone: string | null;
     gender: Gender | null;
     city: string | null;
+    catalogCityId: string | null;
   } | null = null;
 
   if (current) {
@@ -69,6 +70,7 @@ export default async function PublicInscriptionPage({
       phone: current.user.phone,
       gender: (current.user.gender as Gender | null) ?? null,
       city: current.user.city ?? null,
+      catalogCityId: current.user.catalogCityId ?? null,
     };
   }
 

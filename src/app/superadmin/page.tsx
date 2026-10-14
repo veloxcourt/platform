@@ -1,3 +1,4 @@
+import { CitiesCatalogPanel } from "@/components/features/platform/cities-catalog-panel";
 import { SuperadminPanel } from "@/components/features/platform/superadmin-panel";
 import { enforceSuperAdminPage } from "@/lib/auth/superadmin";
 import { prisma } from "@/lib/prisma";
@@ -5,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 export default async function SuperadminPage() {
   await enforceSuperAdminPage();
 
-  const [requests, clubs] = await Promise.all([
+  const [requests, clubs, cities, provinces] = await Promise.all([
     prisma.clubRequest.findMany({
       orderBy: { createdAt: "desc" },
       take: 50,
@@ -13,6 +14,22 @@ export default async function SuperadminPage() {
     prisma.club.findMany({
       orderBy: { name: "asc" },
       select: { id: true, name: true, slug: true },
+    }),
+    prisma.city.findMany({
+      where: { active: true },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        pending: true,
+        province: { select: { name: true } },
+        aliases: { select: { label: true }, orderBy: { label: "asc" } },
+        _count: { select: { users: true } },
+      },
+    }),
+    prisma.province.findMany({
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      select: { id: true, name: true },
     }),
   ]);
 
@@ -32,6 +49,19 @@ export default async function SuperadminPage() {
           createdAt: request.createdAt.toISOString(),
         }))}
       />
+      <div className="mx-auto mt-6 max-w-6xl">
+        <CitiesCatalogPanel
+          provinces={provinces}
+          cities={cities.map((city) => ({
+            id: city.id,
+            name: city.name,
+            provinceName: city.province.name,
+            pending: city.pending,
+            playerCount: city._count.users,
+            aliases: city.aliases.map((alias) => alias.label),
+          }))}
+        />
+      </div>
     </main>
   );
 }

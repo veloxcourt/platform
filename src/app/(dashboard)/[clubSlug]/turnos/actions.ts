@@ -16,11 +16,17 @@ import {
   cancelBooking,
   cancelFixedBooking,
   confirmBooking,
+  releaseFixedOccurrence,
+  restoreFixedOccurrence,
+  updateFixedBooking,
   setBookingPayment,
   setBookingStatus,
   updateBooking,
 } from "@/modules/bookings/application/booking-commands";
-import type { UpdateBookingData } from "@/modules/bookings/domain/types";
+import type {
+  UpdateBookingData,
+  UpdateFixedBookingData,
+} from "@/modules/bookings/domain/types";
 import {
   createBookingSchema,
   type CreateBookingValues,
@@ -29,6 +35,7 @@ import {
   newPlayerSchema,
   type NewPlayerValues,
 } from "@/modules/bookings/domain/new-player-schema";
+import { catalogCityAssignment } from "@/modules/cities/application/city-catalog";
 import {
   createPlayer,
   getPlayerProfile,
@@ -63,6 +70,25 @@ export async function createBookingAction(
   return result;
 }
 
+async function withCatalogCity(
+  values: NewPlayerValues,
+): Promise<{ ok: true; values: NewPlayerValues } | { ok: false; error: string }> {
+  const id = values.catalogCityId?.trim();
+  if (!id) {
+    return { ok: true, values: { ...values, catalogCityId: "", city: "" } };
+  }
+  const assigned = await catalogCityAssignment(id);
+  if (!assigned.ok) return assigned;
+  return {
+    ok: true,
+    values: {
+      ...values,
+      catalogCityId: assigned.catalogCityId ?? "",
+      city: assigned.name ?? "",
+    },
+  };
+}
+
 export async function createPlayerAction(
   clubSlug: string,
   values: NewPlayerValues,
@@ -70,9 +96,11 @@ export async function createPlayerAction(
   await requireClubAnyModuleAccess(clubSlug, ["jugadores", "turnos"]);
   const parsed = newPlayerSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: "Datos del jugador inválidos" };
+  const located = await withCatalogCity(parsed.data);
+  if (!located.ok) return located;
 
   const repo = getBookingRepository();
-  const result = await createPlayer(repo, clubSlug, parsed.data);
+  const result = await createPlayer(repo, clubSlug, located.values);
   if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
   return result;
 }
@@ -149,8 +177,10 @@ export async function updatePlayerAction(
   await requireClubAnyModuleAccess(clubSlug, ["jugadores", "turnos"]);
   const parsed = newPlayerSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: "Datos del jugador inválidos" };
+  const located = await withCatalogCity(parsed.data);
+  if (!located.ok) return located;
   const repo = getBookingRepository();
-  const result = await updatePlayer(repo, clubSlug, userId, parsed.data);
+  const result = await updatePlayer(repo, clubSlug, userId, located.values);
   if (result.ok) {
     revalidatePath(`/${clubSlug}/jugadores`);
     revalidatePath(`/${clubSlug}/turnos`);
@@ -191,6 +221,52 @@ export async function cancelBookingAction(
   await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
   const result = await cancelBooking(repo, clubSlug, bookingId);
+  if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
+  return result;
+}
+
+export async function updateFixedBookingAction(
+  clubSlug: string,
+  fixedBookingId: string,
+  data: UpdateFixedBookingData,
+): Promise<CommandResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
+  const repo = getBookingRepository();
+  const result = await updateFixedBooking(repo, clubSlug, fixedBookingId, data);
+  if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
+  return result;
+}
+
+export async function releaseFixedOccurrenceAction(
+  clubSlug: string,
+  fixedBookingId: string,
+  date: string,
+): Promise<CommandResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
+  const repo = getBookingRepository();
+  const result = await releaseFixedOccurrence(
+    repo,
+    clubSlug,
+    fixedBookingId,
+    date,
+  );
+  if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
+  return result;
+}
+
+export async function restoreFixedOccurrenceAction(
+  clubSlug: string,
+  fixedBookingId: string,
+  date: string,
+): Promise<CommandResult> {
+  await requireClubModuleAccess(clubSlug, "turnos");
+  const repo = getBookingRepository();
+  const result = await restoreFixedOccurrence(
+    repo,
+    clubSlug,
+    fixedBookingId,
+    date,
+  );
   if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
   return result;
 }

@@ -16,7 +16,7 @@ export type WhatsAppStatusResult = {
 export async function getWhatsAppStatusAction(
   clubSlug: string,
 ): Promise<WhatsAppStatusResult> {
-  await requireClubModuleAccess(clubSlug, "turnos");
+  await requireClubModuleAccess(clubSlug, "turnos-config");
   return { apiConfigured: isWhatsAppApiConfigured() };
 }
 
@@ -25,7 +25,7 @@ export async function sendWhatsAppTestAction(
   playerId: string,
   options?: { forceApi?: boolean },
 ): Promise<WhatsAppSendResult> {
-  await requireClubModuleAccess(clubSlug, "turnos");
+  await requireClubModuleAccess(clubSlug, "turnos-config");
   const repo = getBookingRepository();
   const club = await repo.getClubBySlug(clubSlug);
   if (!club) return { ok: false, error: "Club no encontrado" };

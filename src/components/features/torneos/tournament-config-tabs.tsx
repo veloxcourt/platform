@@ -24,7 +24,10 @@ import {
   type MenuPoint,
 } from "./field-menu-trigger";
 import { TournamentCategoriesPanel } from "./tournament-categories-panel";
-import { TournamentConfigForm } from "./tournament-config-form";
+import {
+  TournamentConfigForm,
+  type ConfigFormGuard,
+} from "./tournament-config-form";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 
 const PARAMETERS_TAB = "parametros" as const;
@@ -50,6 +53,8 @@ export function TournamentConfigTabs({
   config,
   courtCount,
   header,
+  requestLeave,
+  onGuardReady,
 }: {
   clubSlug: string;
   tournamentId: string;
@@ -59,6 +64,9 @@ export function TournamentConfigTabs({
   courtCount: number;
   /// Título y pestañas principales: van fijos junto a esta subnavegación.
   header?: ReactNode;
+  /// Si hay edición sin guardar, confirma antes de cambiar de sección.
+  requestLeave: (next: () => void) => void;
+  onGuardReady: (guard: ConfigFormGuard | null) => void;
 }) {
   const readOnly = useTournamentReadOnly();
   const [subTab, setSubTab] = useState<ConfigSubTab>(CATEGORIES_TAB);
@@ -124,28 +132,36 @@ export function TournamentConfigTabs({
     return { x: rect.left, y: rect.bottom + 4 };
   }
 
-  function copyConfig(sourceCategoryId: string, targetCategoryId: string) {
-    if (isCopying) return;
-    const source = categories.find((c) => c.id === sourceCategoryId);
-    const target = categories.find((c) => c.id === targetCategoryId);
+  function goToSubTab(next: ConfigSubTab) {
     setMenu(null);
-    startCopy(async () => {
-      const result = await copyCategoryPhaseConfigAction(
-        clubSlug,
-        tournamentId,
-        sourceCategoryId,
-        targetCategoryId,
-      );
-      if (!result.ok) {
-        toast.error("No se pudo copiar la configuración", {
-          description: result.error,
-        });
-        return;
-      }
-      toast.success(
-        `Configuración de ${source?.name ?? "origen"} copiada a ${target?.name ?? "destino"}`,
-      );
-      setSubTab(targetCategoryId);
+    if (next === subTab) return;
+    requestLeave(() => setSubTab(next));
+  }
+
+  function copyConfig(sourceCategoryId: string, targetCategoryId: string) {
+    requestLeave(() => {
+      if (isCopying) return;
+      const source = categories.find((c) => c.id === sourceCategoryId);
+      const target = categories.find((c) => c.id === targetCategoryId);
+      setMenu(null);
+      startCopy(async () => {
+        const result = await copyCategoryPhaseConfigAction(
+          clubSlug,
+          tournamentId,
+          sourceCategoryId,
+          targetCategoryId,
+        );
+        if (!result.ok) {
+          toast.error("No se pudo copiar la configuración", {
+            description: result.error,
+          });
+          return;
+        }
+        toast.success(
+          `Configuración de ${source?.name ?? "origen"} copiada a ${target?.name ?? "destino"}`,
+        );
+        setSubTab(targetCategoryId);
+      });
     });
   }
 
@@ -170,20 +186,14 @@ export function TournamentConfigTabs({
       >
         <StableTabButton
           active={subTab === CATEGORIES_TAB}
-          onSelect={() => {
-            setMenu(null);
-            setSubTab(CATEGORIES_TAB);
-          }}
+          onSelect={() => goToSubTab(CATEGORIES_TAB)}
         >
           <Layers />
           Categorías
         </StableTabButton>
         <StableTabButton
           active={subTab === PARAMETERS_TAB}
-          onSelect={() => {
-            setMenu(null);
-            setSubTab(PARAMETERS_TAB);
-          }}
+          onSelect={() => goToSubTab(PARAMETERS_TAB)}
         >
           <SlidersHorizontal />
           Parámetros
@@ -210,8 +220,7 @@ export function TournamentConfigTabs({
                   openCategoryMenu(menuPointFromTab(event), category.id);
                   return;
                 }
-                setMenu(null);
-                setSubTab(category.id);
+                goToSubTab(category.id);
               }}
               {...bindFieldMenuTrigger(
                 canCopy,
@@ -244,6 +253,7 @@ export function TournamentConfigTabs({
             initial={config}
             categories={categories}
             panel="parameters"
+            onGuardReady={onGuardReady}
           />
         ) : (
           <Card>
@@ -280,6 +290,7 @@ export function TournamentConfigTabs({
           categories={categories}
           panel="category"
           focusCategoryId={subTab}
+          onGuardReady={onGuardReady}
         />
       ) : (
         <Card>

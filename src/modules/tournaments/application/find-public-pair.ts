@@ -42,6 +42,7 @@ function toManagedPlayer(user: {
   phone: string | null;
   gender: unknown;
   city: string | null;
+  catalogCityId: string | null;
 }): PublicManagedPlayer {
   const name = playerName(user);
   const [first = "", ...rest] = name.split(/\s+/);
@@ -52,6 +53,7 @@ function toManagedPlayer(user: {
     phone: user.phone,
     gender: asGender(user.gender),
     city: user.city,
+    catalogCityId: user.catalogCityId,
   };
 }
 
@@ -102,6 +104,7 @@ const PLAYER_SELECT = {
   phone: true,
   gender: true,
   city: true,
+  catalogCityId: true,
 } as const;
 
 export async function findPublicPairByManageToken(

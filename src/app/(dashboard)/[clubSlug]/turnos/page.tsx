@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Settings } from "lucide-react";
 
+import { getClubAccess } from "@/lib/auth/access";
 import { getBookingRepository } from "@/modules/bookings/infrastructure/repository";
 import { getDaySchedule } from "@/modules/bookings/application/get-day-schedule";
 import { getWeekSchedule } from "@/modules/bookings/application/get-week-schedule";
@@ -24,6 +25,15 @@ export default async function TurnosPage({
 }) {
   const { clubSlug } = await params;
   const { date, view } = await searchParams;
+
+  const access = await getClubAccess(clubSlug);
+  if (!access?.allowedModules.includes("turnos")) {
+    if (access?.allowedModules.includes("turnos-config")) {
+      redirect(`/${clubSlug}/turnos/configuracion`);
+    }
+    notFound();
+  }
+  const canConfigure = access.allowedModules.includes("turnos-config");
 
   const repo = getBookingRepository();
   const dateISO = normalizeDateISO(date);
@@ -48,13 +58,15 @@ export default async function TurnosPage({
             {isWeek ? "Ocupación semanal" : "Calendario diario de reservas"}
           </p>
         </div>
-        <Link
-          href={`/${clubSlug}/turnos/configuracion`}
-          className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-        >
-          <Settings className="size-4" />
-          Configuración
-        </Link>
+        {canConfigure ? (
+          <Link
+            href={`/${clubSlug}/turnos/configuracion`}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          >
+            <Settings className="size-4" />
+            Configuración
+          </Link>
+        ) : null}
       </div>
 
       {isWeek && weekSchedule ? (

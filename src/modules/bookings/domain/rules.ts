@@ -1,4 +1,10 @@
-import type { Booking, BookingSettings, FixedBookingTemplate } from "./types";
+import type {
+  Booking,
+  BookingSettings,
+  FixedBookingTemplate,
+  PlayerRef,
+  ReleasedFixedSlot,
+} from "./types";
 
 /// Convierte "HH:mm" a minutos desde la medianoche.
 export function timeToMinutes(time: string): number {
@@ -56,6 +62,18 @@ export function findBookingAt(
 /// Regla de negocio: máximo de jugadores por turno (responsable incluido).
 export const MAX_PLAYERS_PER_BOOKING = 4;
 
+/// Dos rangos horarios del mismo día se pisan.
+export function timeRangesOverlap(
+  startA: string,
+  durationAMin: number,
+  startB: string,
+  durationBMin: number,
+): boolean {
+  const a = timeToMinutes(startA);
+  const b = timeToMinutes(startB);
+  return a < b + durationBMin && b < a + durationAMin;
+}
+
 /// Indica si una pre-reserva está vencida respecto a un instante dado.
 export function isPreReservationExpired(
   expiresAt: Date | null | undefined,
@@ -88,18 +106,33 @@ export function templateIdFromOccurrence(id: string): string {
   return id.split(":")[1] ?? "";
 }
 
+/// Jugadores que se ven en el calendario. Hasta que el club los guarda,
+/// se muestra el responsable.
+export function visibleFixedPlayers(template: {
+  responsible: PlayerRef;
+  players?: PlayerRef[];
+  playersSet?: boolean;
+}): PlayerRef[] {
+  if (template.playersSet) return template.players ?? [];
+  if (template.players && template.players.length > 0) return template.players;
+  return [template.responsible];
+}
+
 /// Expande plantillas de turnos fijos en reservas "virtuales" para las fechas dadas.
 /// Cada plantilla aparece en las fechas cuyo día de semana coincide, desde su
 /// fecha de inicio en adelante (mientras la plantilla siga activa).
+/// Las fechas liberadas no ocupan el horario: la serie sigue, ese día está libre.
 export function expandFixedBookings(
   templates: FixedBookingTemplate[],
   dates: string[],
 ): Booking[] {
   const out: Booking[] = [];
   for (const t of templates) {
+    const released = new Set(t.releasedDates ?? []);
     for (const date of dates) {
       if (date < t.startDate) continue;
       if (dayOfWeekISO(date) !== t.dayOfWeek) continue;
+      if (released.has(date)) continue;
       out.push({
         id: fixedOccurrenceId(t.id, date),
         courtId: t.courtId,
@@ -112,9 +145,73 @@ export function expandFixedBookings(
         price: 0,
         impacted: false,
         responsible: t.responsible,
-        players: [t.responsible],
+        players: visibleFixedPlayers(t),
       });
     }
   }
   return out;
+}
+
+/// Fechas liberadas de turnos fijos que caen en el rango pedido.
+export function releasedFixedSlots(
+  templates: FixedBookingTemplate[],
+  dates: string[],
+): ReleasedFixedSlot[] {
+  const wanted = new Set(dates);
+  const out: ReleasedFixedSlot[] = [];
+  for (const t of templates) {
+    for (const date of t.releasedDates ?? []) {
+      if (!wanted.has(date)) continue;
+      if (date < t.startDate) continue;
+      if (dayOfWeekISO(date) !== t.dayOfWeek) continue;
+      out.push({
+        fixedBookingId: t.id,
+        courtId: t.courtId,
+        date,
+        startTime: t.startTime,
+        durationMin: t.durationMin,
+        responsible: t.responsible,
+      });
+    }
+  }
+  return out;
+}
+
+/// Liberación que cubre un (cancha, horario). Si hay fecha, sólo esa.
+export function findReleasedFixedAt(
+  releases: ReleasedFixedSlot[],
+  courtId: string,
+  slot: string,
+  date?: string,
+): ReleasedFixedSlot | undefined {
+  const slotStart = timeToMinutes(slot);
+  return releases.find((release) => {
+    if (release.courtId !== courtId) return false;
+    if (date && release.date !== date) return false;
+    const start = timeToMinutes(release.startTime);
+    return slotStart >= start && slotStart < start + release.durationMin;
+  });
+}
+
+/// Qué muestra una celda: la reserva, o el turno fijo liberado si el hueco está libre.
+/// Con "solo fijos", una reserva común oculta no deja ver una liberación que esté debajo.
+export function calendarCellAt(
+  bookings: Booking[],
+  releases: ReleasedFixedSlot[],
+  courtId: string,
+  slot: string,
+  options?: { date?: string; onlyFixed?: boolean },
+): { booking: Booking | null; released: ReleasedFixedSlot | null } {
+  const booking = findBookingAt(bookings, courtId, slot);
+  if (booking) {
+    if (options?.onlyFixed && booking.type !== "FIJO") {
+      return { booking: null, released: null };
+    }
+    return { booking, released: null };
+  }
+  return {
+    booking: null,
+    released:
+      findReleasedFixedAt(releases, courtId, slot, options?.date) ?? null,
+  };
 }

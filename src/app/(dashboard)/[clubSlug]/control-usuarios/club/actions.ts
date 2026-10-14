@@ -16,6 +16,7 @@ import {
   setClubLogoUrl,
   updateClubProfile,
 } from "@/modules/clubs/infrastructure/club-profile";
+import { catalogCityAssignment } from "@/modules/cities/application/city-catalog";
 
 function revalidate(clubSlug: string) {
   revalidatePath(`/${clubSlug}/control-usuarios/club`);
@@ -32,9 +33,12 @@ export async function saveClubProfileAction(
     if (!parsed.success) {
       return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
     }
+    const located = await catalogCityAssignment(parsed.data.catalogCityId);
+    if (!located.ok) return located;
     await updateClubProfile(access.club.id, {
       name: parsed.data.name,
-      locality: parsed.data.locality?.trim() || null,
+      locality: located.name,
+      catalogCityId: located.catalogCityId,
       address: parsed.data.address?.trim() || null,
     });
     revalidate(clubSlug);

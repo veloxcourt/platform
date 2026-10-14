@@ -2,14 +2,23 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarRange, ChevronLeft, ChevronRight, Repeat } from "lucide-react";
+import {
+  CalendarRange,
+  ChevronLeft,
+  ChevronRight,
+  Repeat,
+  Unlock,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { addDaysISO, formatShortDate, todayISO } from "@/lib/date";
-import type { WeekSchedule } from "@/modules/bookings/domain/types";
-import { findBookingAt } from "@/modules/bookings/domain/rules";
+import type {
+  ReleasedFixedSlot,
+  WeekSchedule,
+} from "@/modules/bookings/domain/types";
+import { calendarCellAt } from "@/modules/bookings/domain/rules";
 import { SLOT_STATUS_STYLES } from "./booking-status";
 import { ViewSwitch } from "./view-switch";
 import { BookingDialog, type BookingSelection } from "./booking-dialog";
@@ -178,7 +187,7 @@ export function WeeklySchedule({ schedule }: Props) {
                 className="grid border-b last:border-b-0"
                 style={gridTemplate}
               >
-                <div className="flex items-center justify-end px-2 py-1 text-xs font-medium tabular-nums text-muted-foreground">
+                <div className="flex items-center justify-center px-2 py-1 text-xs font-medium tabular-nums text-muted-foreground">
                   {slot}
                 </div>
                 {visibleDays.map((day) => {
@@ -186,20 +195,25 @@ export function WeeklySchedule({ schedule }: Props) {
                     (b) => b.date === day.date,
                   );
                   return visibleCourts.map((court, idx) => {
-                    let booking = findBookingAt(dayBookings, court.id, slot);
-                    if (booking && onlyFixed && booking.type !== "FIJO") {
-                      booking = undefined;
-                    }
+                    const cell = calendarCellAt(
+                      dayBookings,
+                      schedule.releasedSlots,
+                      court.id,
+                      slot,
+                      { date: day.date, onlyFixed },
+                    );
                   return (
                     <div
                       key={`${day.date}-${court.id}`}
                       className={cn("p-0.5", idx === 0 && "border-l")}
                     >
                       <WeekCell
-                        booking={booking}
+                        booking={cell.booking}
+                        released={cell.released}
                         onClick={() =>
                           setSelected({
-                            booking: booking ?? null,
+                            booking: cell.booking,
+                            released: cell.released,
                             courtName: court.name,
                             courtId: court.id,
                             slot,
@@ -237,9 +251,11 @@ export function WeeklySchedule({ schedule }: Props) {
 
 function WeekCell({
   booking,
+  released,
   onClick,
 }: {
-  booking: ReturnType<typeof findBookingAt>;
+  booking: ReturnType<typeof calendarCellAt>["booking"];
+  released: ReleasedFixedSlot | null;
   onClick: () => void;
 }) {
   const status = booking ? booking.status : "DISPONIBLE";
@@ -248,6 +264,11 @@ function WeekCell({
     <button
       type="button"
       onClick={onClick}
+      title={
+        released
+          ? `Turno fijo de ${released.responsible.name}, liberado este día`
+          : undefined
+      }
       className={cn(
         "flex h-9 w-full items-center gap-1 rounded border px-1 text-left text-[11px] transition-colors",
         style.cell,
@@ -259,6 +280,11 @@ function WeekCell({
           {booking.type === "FIJO" && (
             <Repeat className="ml-auto size-3 shrink-0 text-muted-foreground" />
           )}
+        </>
+      ) : released ? (
+        <>
+          <span className="truncate text-muted-foreground">Libre</span>
+          <Unlock className="ml-auto size-3 shrink-0 text-muted-foreground" />
         </>
       ) : (
         <span className="m-auto text-muted-foreground/40">—</span>
@@ -280,6 +306,9 @@ function Legend() {
       ))}
       <span className="flex items-center gap-1.5">
         <Repeat className="size-3" /> Turno fijo
+      </span>
+      <span className="flex items-center gap-1.5">
+        <Unlock className="size-3" /> Fijo liberado
       </span>
     </div>
   );

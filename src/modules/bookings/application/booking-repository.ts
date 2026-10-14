@@ -8,9 +8,11 @@ import type {
   CreateFixedBookingInput,
   FixedBookingTemplate,
   PaymentStatus,
+  ReleasedFixedSlot,
   PlayerListItem,
   PlayerRef,
   UpdateBookingData,
+  UpdateFixedBookingData,
 } from "../domain/types";
 import type { CourtInput } from "../domain/settings-schema";
 import type { NewPlayerValues } from "../domain/new-player-schema";
@@ -97,7 +99,30 @@ export interface BookingRepository {
     clubId: string,
     input: CreateFixedBookingInput,
   ): Promise<void>;
+  updateFixedBooking(
+    clubId: string,
+    fixedBookingId: string,
+    data: UpdateFixedBookingData,
+  ): Promise<MutationResult>;
   cancelFixedBooking(clubId: string, fixedBookingId: string): Promise<void>;
+  /// Fechas liberadas de turnos fijos activos entre startDate y endDate (inclusive).
+  getReleasedFixedSlots(
+    clubId: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<ReleasedFixedSlot[]>;
+  /// Libera una fecha del turno fijo. La serie sigue.
+  releaseFixedOccurrence(
+    clubId: string,
+    fixedBookingId: string,
+    date: string,
+  ): Promise<MutationResult>;
+  /// Vuelve a ocupar esa fecha, si nadie más reservó el horario.
+  restoreFixedOccurrence(
+    clubId: string,
+    fixedBookingId: string,
+    date: string,
+  ): Promise<MutationResult>;
 
   // Cuenta corriente del jugador
   getPlayerAccount(clubId: string, userId: string): Promise<PlayerAccount>;

@@ -22,6 +22,7 @@ import type {
   PlayerListItem,
   PlayerRef,
   UpdateBookingData,
+  UpdateFixedBookingData,
 } from "../domain/types";
 import type { CourtInput } from "../domain/settings-schema";
 import type { NewPlayerValues } from "../domain/new-player-schema";
@@ -32,8 +33,11 @@ import type {
   PlayerAccount,
 } from "@/modules/accounts/domain/types";
 import {
+  dayOfWeekISO,
   expandFixedBookings,
   generateTimeSlots,
+  releasedFixedSlots,
+  timeRangesOverlap,
   timeToMinutes,
 } from "../domain/rules";
 import { addDaysISO, todayISO } from "@/lib/date";
@@ -136,6 +140,7 @@ const DEFAULT_SETTINGS: BookingSettings = {
   preReservationMin: 15,
   requirePrePayment: false,
   turnoProductId: null,
+  availabilityIntro: "",
   bookingPrice: 0,
 };
 
@@ -320,6 +325,7 @@ export class MockBookingRepository implements BookingRepository {
       gender: "",
       birthDate: "",
       city: p.city ?? "",
+      catalogCityId: "",
       address: "",
       country: "",
       category: "",
@@ -503,7 +509,12 @@ export class MockBookingRepository implements BookingRepository {
   ): Promise<FixedBookingTemplate[]> {
     return getOrCreateRecord(clubId)
       .fixed.filter((f) => f.active)
-      .map(({ active: _active, ...t }) => t);
+      .map(({ active: _active, ...t }) => ({
+        ...t,
+        players: t.players ?? [],
+        playersSet: t.playersSet ?? false,
+        releasedDates: t.releasedDates ?? [],
+      }));
   }
 
   async createFixedBooking(
@@ -511,19 +522,40 @@ export class MockBookingRepository implements BookingRepository {
     input: CreateFixedBookingInput,
   ): Promise<void> {
     const record = getOrCreateRecord(clubId);
-    const responsible = record.players.find(
-      (p) => p.id === input.responsibleId,
-    ) ?? { id: input.responsibleId, name: "Jugador" };
+    const nameOf = (id: string) =>
+      record.players.find((p) => p.id === id) ?? { id, name: "Jugador" };
+    const playerIds = input.playerIds.filter(Boolean);
     record.fixed.push({
       id: `fx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       courtId: input.courtId,
       dayOfWeek: input.dayOfWeek,
       startTime: input.startTime,
       durationMin: input.durationMin,
-      responsible,
+      responsible: nameOf(input.responsibleId),
+      players: playerIds.map(nameOf),
+      playersSet: playerIds.length > 0,
       startDate: todayISO(),
+      releasedDates: [],
       active: true,
     });
+  }
+
+  async updateFixedBooking(
+    clubId: string,
+    fixedBookingId: string,
+    data: UpdateFixedBookingData,
+  ): Promise<MutationResult> {
+    const record = getOrCreateRecord(clubId);
+    const fixed = record.fixed.find(
+      (item) => item.id === fixedBookingId && item.active,
+    );
+    if (!fixed) return { ok: false, error: "No se encontró el turno fijo" };
+    const nameOf = (id: string) =>
+      record.players.find((p) => p.id === id) ?? { id, name: "Jugador" };
+    fixed.responsible = nameOf(data.responsibleId);
+    fixed.players = data.playerIds.filter(Boolean).map(nameOf);
+    fixed.playersSet = true;
+    return { ok: true };
   }
 
   async cancelFixedBooking(
@@ -533,6 +565,78 @@ export class MockBookingRepository implements BookingRepository {
     const record = getOrCreateRecord(clubId);
     const f = record.fixed.find((x) => x.id === fixedBookingId);
     if (f) f.active = false;
+  }
+
+  async getReleasedFixedSlots(
+    clubId: string,
+    startDate: string,
+    endDate: string,
+  ) {
+    const record = getOrCreateRecord(clubId);
+    const dates: string[] = [];
+    let cursor = startDate;
+    for (let i = 0; i < 60 && cursor <= endDate; i++) {
+      dates.push(cursor);
+      cursor = addDaysISO(cursor, 1);
+    }
+    return releasedFixedSlots(
+      record.fixed
+        .filter((f) => f.active)
+        .map(({ active: _active, ...template }) => ({
+          ...template,
+          players: template.players ?? [],
+          playersSet: template.playersSet ?? false,
+          releasedDates: template.releasedDates ?? [],
+        })),
+      dates,
+    );
+  }
+
+  async releaseFixedOccurrence(
+    clubId: string,
+    fixedBookingId: string,
+    date: string,
+  ): Promise<MutationResult> {
+    const record = getOrCreateRecord(clubId);
+    const fixed = record.fixed.find(
+      (item) => item.id === fixedBookingId && item.active,
+    );
+    if (!fixed) return { ok: false, error: "No se encontró el turno fijo" };
+    if (dayOfWeekISO(date) !== fixed.dayOfWeek) {
+      return { ok: false, error: "Ese día no corresponde al turno fijo" };
+    }
+    const released = fixed.releasedDates ?? [];
+    if (!released.includes(date)) released.push(date);
+    fixed.releasedDates = released;
+    return { ok: true };
+  }
+
+  async restoreFixedOccurrence(
+    clubId: string,
+    fixedBookingId: string,
+    date: string,
+  ): Promise<MutationResult> {
+    const record = getOrCreateRecord(clubId);
+    const fixed = record.fixed.find(
+      (item) => item.id === fixedBookingId && item.active,
+    );
+    if (!fixed) return { ok: false, error: "No se encontró el turno fijo" };
+    const taken = record.stored.some(
+      (booking) =>
+        booking.date === date &&
+        booking.courtId === fixed.courtId &&
+        timeRangesOverlap(
+          booking.startTime,
+          booking.durationMin,
+          fixed.startTime,
+          fixed.durationMin,
+        ),
+    );
+    if (taken) return { ok: false, error: "Ese horario ya está ocupado" };
+    fixed.releasedDates = (fixed.releasedDates ?? []).filter(
+      (item) => item !== date,
+    );
+    return { ok: true };
   }
 
   async getPlayerAccount(

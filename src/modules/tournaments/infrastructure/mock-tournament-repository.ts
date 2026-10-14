@@ -29,6 +29,7 @@ import {
   type UpdateTournamentValues,
 } from "../domain/tournament-schema";
 import { buildTournamentPublicSlug } from "../domain/slug";
+import { zonesCategoriesReadyForPublicLink } from "../domain/zones-public-link";
 import type {
   PairListItem,
   PairPaymentMethod,
@@ -174,6 +175,7 @@ function demoTournaments(): TournamentListItem[] {
       publicSlug: "torneo-verano-2026",
       registrationCount: 3,
       confirmedCount: 2,
+      zonesDaysReady: false,
     },
     {
       id: "demo-t2",
@@ -187,6 +189,7 @@ function demoTournaments(): TournamentListItem[] {
       publicSlug: "copa-invierno-demo",
       registrationCount: 0,
       confirmedCount: 0,
+      zonesDaysReady: true,
     },
   ];
 }
@@ -369,6 +372,22 @@ function demoConfigs(): Map<string, TournamentConfig> {
   ]);
 }
 
+function zonesDaysReadyForTournament(
+  type: string,
+  categories: { id: string }[],
+  config: TournamentConfig | undefined,
+): boolean {
+  if (type !== "ZONAS") return true;
+  return zonesCategoriesReadyForPublicLink(
+    categories.map((category) => {
+      const saved = config?.categories.find(
+        (item) => item.categoryId === category.id,
+      );
+      return saved?.phases.zones.playDates ?? [];
+    }),
+  );
+}
+
 function buildTournamentConfig(
   tournament: TournamentListItem,
   categories: TournamentCategoryItem[],
@@ -472,9 +491,16 @@ export class MockTournamentRepository implements TournamentRepository {
   async listTournaments(clubId: string): Promise<TournamentListItem[]> {
     for (const record of store.values()) {
       if (record.club.id === clubId) {
-        return [...record.tournaments].sort((a, b) =>
-          b.startDate.localeCompare(a.startDate),
-        );
+        return [...record.tournaments]
+          .sort((a, b) => b.startDate.localeCompare(a.startDate))
+          .map((tournament) => ({
+            ...tournament,
+            zonesDaysReady: zonesDaysReadyForTournament(
+              tournament.type,
+              record.categories.get(tournament.id) ?? [],
+              record.configs.get(tournament.id),
+            ),
+          }));
       }
     }
     return [];
@@ -780,6 +806,7 @@ export class MockTournamentRepository implements TournamentRepository {
         publicSlug: buildTournamentPublicSlug(input.name),
         registrationCount: 0,
         confirmedCount: 0,
+        zonesDaysReady: input.type !== "ZONAS",
       };
       record.tournaments.unshift(item);
       record.pairs.set(id, []);

@@ -24,6 +24,8 @@ export interface BookingSettings {
   preReservationMin: number;
   requirePrePayment: boolean;
   turnoProductId: string | null; // producto del catálogo que define el precio
+  /// Primera línea del texto que se copia para WhatsApp.
+  availabilityIntro: string;
   bookingPrice: number; // precio efectivo del turno (derivado del producto), solo lectura
 }
 
@@ -89,6 +91,8 @@ export interface DaySchedule {
   courts: Court[];
   slots: string[]; // horarios "HH:mm" generados según settings
   bookings: Booking[];
+  /// Turnos fijos liberados ese día: el horario queda libre, la serie sigue.
+  releasedSlots: ReleasedFixedSlot[];
   players: PlayerRef[]; // jugadores del club (para crear reservas)
   categories: string[]; // categorías de jugadores del club
 }
@@ -118,7 +122,22 @@ export interface FixedBookingTemplate {
   startTime: string; // "HH:mm"
   durationMin: number;
   responsible: PlayerRef;
+  /// Jugadores en cancha. Si playersSet es false y esta lista está vacía,
+  /// el calendario muestra al responsable.
+  players: PlayerRef[];
+  playersSet: boolean;
   startDate: string; // "YYYY-MM-DD" desde cuándo aplica
+  releasedDates: string[]; // "YYYY-MM-DD" en las que el dueño no lo usa
+}
+
+/// Una fecha de un turno fijo que quedó libre sin cancelar la serie.
+export interface ReleasedFixedSlot {
+  fixedBookingId: string;
+  courtId: string;
+  date: string; // "YYYY-MM-DD"
+  startTime: string; // "HH:mm"
+  durationMin: number;
+  responsible: PlayerRef;
 }
 
 /// Datos para crear una plantilla de turno fijo.
@@ -128,6 +147,13 @@ export interface CreateFixedBookingInput {
   startTime: string;
   durationMin: number;
   responsibleId: string;
+  playerIds: string[];
+}
+
+/// Edición de un turno fijo. Aplica a todas las semanas de la serie.
+export interface UpdateFixedBookingData {
+  responsibleId: string;
+  playerIds: string[];
 }
 
 /// Datos para editar una reserva existente (tipo, responsable, jugadores, estado, pago).
@@ -157,6 +183,7 @@ export interface WeekSchedule {
   slots: string[];
   courts: Court[]; // canchas activas
   bookings: Booking[]; // reservas de la semana
+  releasedSlots: ReleasedFixedSlot[];
   players: PlayerRef[]; // jugadores del club (para crear reservas)
   categories: string[]; // categorías de jugadores del club
   requirePrePayment: boolean;

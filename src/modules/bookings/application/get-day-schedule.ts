@@ -12,13 +12,15 @@ export async function getDaySchedule(
   const club = await repo.getClubBySlug(clubSlug);
   if (!club) return null;
 
-  const [courts, settings, bookings, players, categories] = await Promise.all([
-    repo.getCourts(club.id),
-    repo.getSettings(club.id),
-    repo.getBookingsForDate(club.id, date),
-    repo.getPlayers(club.id),
-    repo.getClubCategories(club.id),
-  ]);
+  const [courts, settings, bookings, releasedSlots, players, categories] =
+    await Promise.all([
+      repo.getCourts(club.id),
+      repo.getSettings(club.id),
+      repo.getBookingsForDate(club.id, date),
+      repo.getReleasedFixedSlots(club.id, date, date),
+      repo.getPlayers(club.id),
+      repo.getClubCategories(club.id),
+    ]);
 
   return {
     club,
@@ -27,6 +29,7 @@ export async function getDaySchedule(
     courts: courts.filter((c) => c.active).sort((a, b) => a.order - b.order),
     slots: generateTimeSlots(settings),
     bookings,
+    releasedSlots,
     players,
     categories,
   };

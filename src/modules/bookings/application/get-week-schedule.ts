@@ -35,11 +35,10 @@ export async function getWeekSchedule(
     };
   });
 
-  const bookings = await repo.getBookingsForRange(
-    club.id,
-    days[0].date,
-    days[6].date,
-  );
+  const [bookings, releasedSlots] = await Promise.all([
+    repo.getBookingsForRange(club.id, days[0].date, days[6].date),
+    repo.getReleasedFixedSlots(club.id, days[0].date, days[6].date),
+  ]);
 
   return {
     club,
@@ -48,6 +47,7 @@ export async function getWeekSchedule(
     slots: generateTimeSlots(settings),
     courts: activeCourts,
     bookings,
+    releasedSlots,
     players,
     categories,
     requirePrePayment: settings.requirePrePayment,

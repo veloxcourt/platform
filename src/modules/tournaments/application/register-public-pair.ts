@@ -18,6 +18,7 @@ import {
 } from "@/modules/tournaments/application/find-public-pair";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
 import { defaultPreferenceSlotsForCategory } from "@/modules/tournaments/domain/zones-slot-registration";
+import { catalogCityAssignment } from "@/modules/cities/application/city-catalog";
 
 type PlayerInput = PublicInscriptionValues["player1"];
 
@@ -26,10 +27,17 @@ async function ensureClubPlayer(
   input: PlayerInput,
   options?: { forceUserId?: string },
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const located = await catalogCityAssignment(input.catalogCityId);
+  if (!located.ok || !located.catalogCityId || !located.name) {
+    return { ok: false, error: located.ok ? "Elegí la localidad" : located.error };
+  }
+  const cityName = located.name;
+  const catalogCityId = located.catalogCityId;
+
   if (options?.forceUserId) {
     const existing = await prisma.user.findFirst({
       where: { id: options.forceUserId },
-      select: { id: true, gender: true, phone: true, city: true },
+      select: { id: true, gender: true, phone: true, city: true, catalogCityId: true },
     });
     if (!existing) return { ok: false, error: "Usuario no encontrado." };
 
@@ -46,15 +54,20 @@ async function ensureClubPlayer(
     const phone = input.phone
       ? normalizeToE164(input.phone, DEFAULT_PHONE_DIAL)
       : null;
-    const city = input.city.trim();
     const patch: {
       gender?: typeof input.gender;
       phone?: string;
       city?: string;
+      catalogCityId?: string;
     } = {};
     if (!existing.gender && input.gender) patch.gender = input.gender;
     if (!existing.phone && phone) patch.phone = phone;
-    if (!existing.city && city) patch.city = city;
+    if (!existing.catalogCityId) {
+      patch.catalogCityId = catalogCityId;
+      if (!existing.city) patch.city = cityName;
+    } else if (!existing.city) {
+      patch.city = cityName;
+    }
     if (Object.keys(patch).length > 0) {
       await prisma.user.update({ where: { id: existing.id }, data: patch });
     }
@@ -69,14 +82,22 @@ async function ensureClubPlayer(
       phone,
       memberships: { some: { clubId } },
     },
-    select: { id: true, gender: true, city: true },
+    select: { id: true, gender: true, city: true, catalogCityId: true },
   });
 
   if (existing) {
-    const city = input.city.trim();
-    const patch: { gender?: typeof input.gender; city?: string } = {};
+    const patch: {
+      gender?: typeof input.gender;
+      city?: string;
+      catalogCityId?: string;
+    } = {};
     if (!existing.gender) patch.gender = input.gender;
-    if (!existing.city && city) patch.city = city;
+    if (!existing.catalogCityId) {
+      patch.catalogCityId = catalogCityId;
+      if (!existing.city) patch.city = cityName;
+    } else if (!existing.city) {
+      patch.city = cityName;
+    }
     if (Object.keys(patch).length > 0) {
       await prisma.user.update({
         where: { id: existing.id },
@@ -93,7 +114,8 @@ async function ensureClubPlayer(
       lastName: input.lastName,
       phone,
       gender: input.gender,
-      city: input.city.trim(),
+      city: cityName,
+      catalogCityId,
       memberships: { create: { clubId, role: "PLAYER" } },
     },
     select: { id: true },

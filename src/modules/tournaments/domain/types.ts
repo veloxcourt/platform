@@ -41,6 +41,8 @@ export interface TournamentListItem {
   publicSlug: string;
   registrationCount: number;
   confirmedCount: number;
+  /// False en torneos por zonas si alguna categoría no tiene días de fase de zonas.
+  zonesDaysReady: boolean;
 }
 
 /// Categoría de un torneo con los IDs de jugadores inscriptos (parejas no canceladas).

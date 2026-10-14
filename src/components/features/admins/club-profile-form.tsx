@@ -20,6 +20,7 @@ import {
   saveClubProfileAction,
   uploadClubLogoAction,
 } from "@/app/(dashboard)/[clubSlug]/control-usuarios/club/actions";
+import { CityCombobox } from "@/components/features/cities/city-combobox";
 
 export function ClubProfileForm({
   clubSlug,
@@ -30,7 +31,7 @@ export function ClubProfileForm({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(initial.name);
-  const [locality, setLocality] = useState(initial.locality ?? "");
+  const [catalogCityId, setCatalogCityId] = useState(initial.catalogCityId ?? "");
   const [address, setAddress] = useState(initial.address ?? "");
   const [logoUrl, setLogoUrl] = useState(initial.logoUrl);
   const [isSaving, startSave] = useTransition();
@@ -40,7 +41,7 @@ export function ClubProfileForm({
     startSave(async () => {
       const result = await saveClubProfileAction(clubSlug, {
         name,
-        locality,
+        catalogCityId,
         address,
       });
       if (!result.ok) {
@@ -164,11 +165,12 @@ export function ClubProfileForm({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="club-locality">Localidad</Label>
-            <Input
+            <CityCombobox
               id="club-locality"
-              value={locality}
-              onChange={(event) => setLocality(event.target.value)}
-              maxLength={80}
+              value={catalogCityId}
+              allowCreate
+              clubSlug={clubSlug}
+              onChange={(cityId) => setCatalogCityId(cityId)}
               placeholder="Ciudad o barrio"
             />
           </div>

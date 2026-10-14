@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 57;
+const PRISMA_SCHEMA_REVISION = 61;
 
 /** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
 const PG_POOL_MAX = 1;
@@ -70,12 +70,14 @@ function schemaFingerprint(): string {
     "TOOLS_ECO_TORNEO" in $Enums.AdminModule ? "1" : "0",
     "TOOLS_CALENDARIO" in $Enums.AdminModule ? "1" : "0",
     "QUE_MEJORO" in $Enums.AdminModule ? "1" : "0",
+    "BOOKINGS_CONFIG" in $Enums.AdminModule ? "1" : "0",
     "clubImprovement" in Prisma.ModelName ? "1" : "0",
     "playerEvent" in Prisma.ModelName ? "1" : "0",
     "inviteSentAt" in Prisma.MembershipScalarFieldEnum ? "1" : "0",
     "inviteNote" in Prisma.MembershipScalarFieldEnum ? "1" : "0",
     "instagram" in Prisma.UserScalarFieldEnum ? "1" : "0",
     "showInClientMenu" in Prisma.ProductScalarFieldEnum ? "1" : "0",
+    "catalogCityId" in Prisma.UserScalarFieldEnum ? "1" : "0",
   ].join(":");
 }
 
@@ -107,6 +109,12 @@ function clientHasCurrentDelegates(client: PrismaClient): boolean {
       .clubImprovement?.findMany === "function" &&
     "playerEvent" in client &&
     typeof (client as { playerEvent?: { findMany?: unknown } }).playerEvent
+      ?.findMany === "function" &&
+    "city" in client &&
+    typeof (client as { city?: { findMany?: unknown } }).city?.findMany ===
+      "function" &&
+    "province" in client &&
+    typeof (client as { province?: { findMany?: unknown } }).province
       ?.findMany === "function"
   );
 }
@@ -194,6 +202,7 @@ async function applyRuntimeSchema() {
 
   const statements = [
     `ALTER TYPE "AdminModule" ADD VALUE IF NOT EXISTS 'QUE_MEJORO'`,
+    `ALTER TYPE "AdminModule" ADD VALUE IF NOT EXISTS 'BOOKINGS_CONFIG'`,
     `DO $$ BEGIN CREATE TYPE "ImprovementKind" AS ENUM ('IMPROVE', 'ADD'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
     `DO $$ BEGIN CREATE TYPE "ImprovementStatus" AS ENUM ('PENDING', 'IN_PROGRESS', 'DONE'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
     `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "zoneQualification" JSONB`,
@@ -263,6 +272,7 @@ async function applyRuntimeSchema() {
     `ALTER TABLE "memberships" ADD COLUMN IF NOT EXISTS "inviteForTournamentId" TEXT`,
     `ALTER TABLE "memberships" ADD COLUMN IF NOT EXISTS "inviteNote" TEXT`,
     `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "instagram" TEXT`,
+    `ALTER TABLE "booking_settings" ADD COLUMN IF NOT EXISTS "availabilityIntro" TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE "tournament_pairs" ADD COLUMN IF NOT EXISTS "player1PaymentMethod" TEXT NOT NULL DEFAULT 'UNPAID'`,
     `ALTER TABLE "tournament_pairs" ADD COLUMN IF NOT EXISTS "player2PaymentMethod" TEXT NOT NULL DEFAULT 'UNPAID'`,
     `UPDATE "tournament_pairs" SET "player1PaymentMethod" = CASE "player1PaymentStatus"::text
@@ -281,6 +291,124 @@ async function applyRuntimeSchema() {
       END`,
     `UPDATE "tournament_pairs" SET "player1PaymentStatus" = 'PAID' WHERE "player1PaymentStatus"::text IN ('CASH', 'TRANSFER')`,
     `UPDATE "tournament_pairs" SET "player2PaymentStatus" = 'PAID' WHERE "player2PaymentStatus"::text IN ('CASH', 'TRANSFER')`,
+    // Catálogo global de localidades. Todo aditivo: las columnas nuevas admiten
+    // null, así que una versión anterior de la app sigue andando igual.
+    `CREATE TABLE IF NOT EXISTS "provinces" (
+      "id" TEXT NOT NULL,
+      "country" TEXT NOT NULL DEFAULT 'AR',
+      "name" TEXT NOT NULL,
+      "searchName" TEXT NOT NULL,
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL,
+      CONSTRAINT "provinces_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "provinces_country_searchName_key" ON "provinces"("country", "searchName")`,
+    `CREATE TABLE IF NOT EXISTS "cities" (
+      "id" TEXT NOT NULL,
+      "provinceId" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "searchName" TEXT NOT NULL,
+      "pending" BOOLEAN NOT NULL DEFAULT false,
+      "active" BOOLEAN NOT NULL DEFAULT true,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL,
+      CONSTRAINT "cities_pkey" PRIMARY KEY ("id")
+    )`,
+    `DO $$ BEGIN
+      ALTER TABLE "cities"
+        ADD CONSTRAINT "cities_provinceId_fkey"
+        FOREIGN KEY ("provinceId") REFERENCES "provinces"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "cities_provinceId_searchName_key" ON "cities"("provinceId", "searchName")`,
+    `CREATE INDEX IF NOT EXISTS "cities_searchName_idx" ON "cities"("searchName")`,
+    `CREATE TABLE IF NOT EXISTS "city_aliases" (
+      "id" TEXT NOT NULL,
+      "cityId" TEXT NOT NULL,
+      "label" TEXT NOT NULL,
+      "searchName" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "city_aliases_pkey" PRIMARY KEY ("id")
+    )`,
+    `DO $$ BEGIN
+      ALTER TABLE "city_aliases"
+        ADD CONSTRAINT "city_aliases_cityId_fkey"
+        FOREIGN KEY ("cityId") REFERENCES "cities"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "city_aliases_searchName_key" ON "city_aliases"("searchName")`,
+    `CREATE INDEX IF NOT EXISTS "city_aliases_cityId_idx" ON "city_aliases"("cityId")`,
+    `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "catalogCityId" TEXT`,
+    `DO $$ BEGIN
+      ALTER TABLE "users"
+        ADD CONSTRAINT "users_catalogCityId_fkey"
+        FOREIGN KEY ("catalogCityId") REFERENCES "cities"("id")
+        ON DELETE SET NULL ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `CREATE INDEX IF NOT EXISTS "users_catalogCityId_idx" ON "users"("catalogCityId")`,
+    `ALTER TABLE "clubs" ADD COLUMN IF NOT EXISTS "catalogCityId" TEXT`,
+    `DO $$ BEGIN
+      ALTER TABLE "clubs"
+        ADD CONSTRAINT "clubs_catalogCityId_fkey"
+        FOREIGN KEY ("catalogCityId") REFERENCES "cities"("id")
+        ON DELETE SET NULL ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `CREATE INDEX IF NOT EXISTS "clubs_catalogCityId_idx" ON "clubs"("catalogCityId")`,
+    `ALTER TABLE "club_requests" ADD COLUMN IF NOT EXISTS "catalogCityId" TEXT`,
+    `DO $$ BEGIN
+      ALTER TABLE "club_requests"
+        ADD CONSTRAINT "club_requests_catalogCityId_fkey"
+        FOREIGN KEY ("catalogCityId") REFERENCES "cities"("id")
+        ON DELETE SET NULL ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `CREATE INDEX IF NOT EXISTS "club_requests_catalogCityId_idx" ON "club_requests"("catalogCityId")`,
+    `CREATE TABLE IF NOT EXISTS "fixed_booking_releases" (
+      "id" TEXT NOT NULL,
+      "fixedBookingId" TEXT NOT NULL,
+      "date" DATE NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "fixed_booking_releases_pkey" PRIMARY KEY ("id")
+    )`,
+    `DO $$ BEGIN
+      ALTER TABLE "fixed_booking_releases"
+        ADD CONSTRAINT "fixed_booking_releases_fixedBookingId_fkey"
+        FOREIGN KEY ("fixedBookingId") REFERENCES "fixed_bookings"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "fixed_booking_releases_fixedBookingId_date_key" ON "fixed_booking_releases"("fixedBookingId", "date")`,
+    `CREATE INDEX IF NOT EXISTS "fixed_booking_releases_date_idx" ON "fixed_booking_releases"("date")`,
+    `ALTER TABLE "fixed_bookings" ADD COLUMN IF NOT EXISTS "playersSet" BOOLEAN NOT NULL DEFAULT false`,
+    `CREATE TABLE IF NOT EXISTS "fixed_booking_players" (
+      "id" TEXT NOT NULL,
+      "fixedBookingId" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "position" INTEGER NOT NULL,
+      CONSTRAINT "fixed_booking_players_pkey" PRIMARY KEY ("id")
+    )`,
+    `DO $$ BEGIN
+      ALTER TABLE "fixed_booking_players"
+        ADD CONSTRAINT "fixed_booking_players_fixedBookingId_fkey"
+        FOREIGN KEY ("fixedBookingId") REFERENCES "fixed_bookings"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `DO $$ BEGIN
+      ALTER TABLE "fixed_booking_players"
+        ADD CONSTRAINT "fixed_booking_players_userId_fkey"
+        FOREIGN KEY ("userId") REFERENCES "users"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "fixed_booking_players_fixedBookingId_userId_key" ON "fixed_booking_players"("fixedBookingId", "userId")`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "fixed_booking_players_fixedBookingId_position_key" ON "fixed_booking_players"("fixedBookingId", "position")`,
+    `CREATE INDEX IF NOT EXISTS "fixed_booking_players_userId_idx" ON "fixed_booking_players"("userId")`,
   ];
 
   const pool = new Pool({

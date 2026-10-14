@@ -20,7 +20,7 @@ export async function saveTurnosConfig(
   clubSlug: string,
   values: TurnosConfigValues,
 ): Promise<SaveConfigResult> {
-  await requireClubModuleAccess(clubSlug, "turnos");
+  await requireClubModuleAccess(clubSlug, "turnos-config");
   const parsed = turnosConfigSchema.safeParse(values);
   if (!parsed.success) {
     return { ok: false, error: "Datos de configuración inválidos" };
@@ -46,7 +46,7 @@ export async function saveCategoriesAction(
   clubSlug: string,
   categories: string[],
 ): Promise<SaveConfigResult> {
-  await requireClubModuleAccess(clubSlug, "turnos");
+  await requireClubModuleAccess(clubSlug, "turnos-config");
   const repo = getBookingRepository();
   const result = await saveClubCategories(repo, clubSlug, categories);
   if (result.ok) {

@@ -512,7 +512,7 @@ export function PairZonesSlotPicker({
         <p className="text-sm font-medium">{title}</p>
         <p className="text-xs text-muted-foreground">
           {hint ??
-            "Solo días de la fase de zonas. Marcá en azul los horarios en los que la pareja podría jugar (indistinto de cancha). El verde son horarios libres. Los tramos de intermedia en días compartidos aparecen bloqueados."}
+            "Solo días de la fase de zonas. Marcá en verde (Sí puedo) los horarios en los que la pareja podría jugar (indistinto de cancha). Los rojos quedan como No puedo. Los tramos de intermedia en días compartidos aparecen bloqueados."}
         </p>
       </div>
 
@@ -544,21 +544,21 @@ export function PairZonesSlotPicker({
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
-            variant="outline"
             size="sm"
+            className="bg-emerald-600 px-3 font-semibold text-white hover:bg-emerald-700"
             onClick={onMarkAll}
             disabled={bulkPending || pendingToggles > 0 || allMarked}
           >
-            Marcar todas
+            Siempre
           </Button>
           <Button
             type="button"
-            variant="outline"
             size="sm"
+            className="bg-rose-600 px-3 font-semibold text-white hover:bg-rose-700"
             onClick={onClearAll}
             disabled={bulkPending || pendingToggles > 0 || noneMarked}
           >
-            Desmarcar todas
+            Nunca
           </Button>
         </div>
       </div>

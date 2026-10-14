@@ -41,6 +41,9 @@ export const newPlayerSchema = z.object({
     .optional()
     .or(z.literal("")),
   city: optionalText(80),
+  /// Id del catálogo. El servidor ignora `city` si este viene y guarda el
+  /// nombre canónico. Vacío = sin localidad.
+  catalogCityId: z.string().max(40).optional().or(z.literal("")),
   address: optionalText(120),
   country: optionalText(80),
   category: optionalText(40),

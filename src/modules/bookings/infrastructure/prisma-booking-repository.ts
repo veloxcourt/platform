@@ -22,9 +22,11 @@ import type {
   CreateFixedBookingInput,
   FixedBookingTemplate,
   PaymentStatus,
+  ReleasedFixedSlot,
   PlayerListItem,
   PlayerRef,
   UpdateBookingData,
+  UpdateFixedBookingData,
 } from "../domain/types";
 import type { CourtInput } from "../domain/settings-schema";
 import type { NewPlayerValues } from "../domain/new-player-schema";
@@ -42,7 +44,11 @@ import type {
   AddMovementData,
   PlayerAccount,
 } from "@/modules/accounts/domain/types";
-import { expandFixedBookings } from "../domain/rules";
+import {
+  dayOfWeekISO,
+  expandFixedBookings,
+  timeRangesOverlap,
+} from "../domain/rules";
 import { addDaysISO } from "@/lib/date";
 import { formatQuantity } from "@/lib/quantity";
 
@@ -89,6 +95,28 @@ async function readManyUsersInstagram(
   return map;
 }
 
+/// El proceso de Next puede seguir con un cliente Prisma anterior a esta columna.
+/// Leer y escribir por SQL evita el error "Unknown argument availabilityIntro".
+async function readAvailabilityIntro(clubId: string): Promise<string> {
+  await ensureRuntimeSchema();
+  const rows = await prisma.$queryRawUnsafe<
+    Array<{ availabilityIntro: string | null }>
+  >(
+    `SELECT "availabilityIntro" FROM "booking_settings" WHERE "clubId" = $1`,
+    clubId,
+  );
+  return rows[0]?.availabilityIntro ?? "";
+}
+
+async function writeAvailabilityIntro(clubId: string, intro: string) {
+  await ensureRuntimeSchema();
+  await prisma.$executeRawUnsafe(
+    `UPDATE "booking_settings" SET "availabilityIntro" = $1 WHERE "clubId" = $2`,
+    intro,
+    clubId,
+  );
+}
+
 const DEFAULT_SETTINGS: BookingSettings = {
   openTime: "08:00",
   closeTime: "23:00",
@@ -97,6 +125,7 @@ const DEFAULT_SETTINGS: BookingSettings = {
   preReservationMin: 15,
   requirePrePayment: false,
   turnoProductId: null,
+  availabilityIntro: "",
   bookingPrice: 0,
 };
 
@@ -187,6 +216,120 @@ function toDbDate(dateISO: string): Date {
   return new Date(`${dateISO}T00:00:00.000Z`);
 }
 
+function rawDateToISO(value: Date | string): string {
+  if (typeof value === "string") return value.slice(0, 10);
+  const year = value.getUTCFullYear();
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+type FixedReleaseRow = {
+  fixedBookingId: string;
+  date: Date | string;
+  courtId: string;
+  startTime: string;
+  durationMin: number;
+  userId: string;
+  fullName: string;
+};
+
+/// La tabla se crea en caliente. El proceso de Next puede seguir con un cliente
+/// de Prisma generado antes del modelo, así que no usamos ese delegate.
+async function queryFixedReleases(
+  clubId: string,
+  range?: { start: string; end: string },
+): Promise<FixedReleaseRow[]> {
+  await ensureRuntimeSchema();
+  const rows = range
+    ? await prisma.$queryRawUnsafe<FixedReleaseRow[]>(
+      `SELECT r."fixedBookingId", r."date", f."courtId", f."startTime", f."durationMin",
+              u."id" AS "userId", u."fullName"
+       FROM "fixed_booking_releases" r
+       INNER JOIN "fixed_bookings" f ON f."id" = r."fixedBookingId"
+       INNER JOIN "users" u ON u."id" = f."responsibleId"
+       WHERE f."clubId" = $1
+         AND f."active" = true
+         AND r."date" >= $2::date
+         AND r."date" <= $3::date`,
+      clubId,
+      range.start,
+      range.end,
+    )
+    : await prisma.$queryRawUnsafe<FixedReleaseRow[]>(
+        `SELECT r."fixedBookingId", r."date", f."courtId", f."startTime", f."durationMin",
+                u."id" AS "userId", u."fullName"
+         FROM "fixed_booking_releases" r
+         INNER JOIN "fixed_bookings" f ON f."id" = r."fixedBookingId"
+         INNER JOIN "users" u ON u."id" = f."responsibleId"
+         WHERE f."clubId" = $1 AND f."active" = true`,
+        clubId,
+      );
+  return rows.map((row) => ({
+    ...row,
+    durationMin: Number(row.durationMin),
+  }));
+}
+
+type FixedPlayerRow = {
+  fixedBookingId: string;
+  playersSet: boolean;
+  userId: string | null;
+  fullName: string | null;
+  position: number | null;
+};
+
+async function queryFixedPlayers(clubId: string): Promise<FixedPlayerRow[]> {
+  await ensureRuntimeSchema();
+  return prisma.$queryRawUnsafe<FixedPlayerRow[]>(
+    `SELECT f."id" AS "fixedBookingId",
+            f."playersSet",
+            p."userId",
+            u."fullName",
+            p."position"
+     FROM "fixed_bookings" f
+     LEFT JOIN "fixed_booking_players" p ON p."fixedBookingId" = f."id"
+     LEFT JOIN "users" u ON u."id" = p."userId"
+     WHERE f."clubId" = $1 AND f."active" = true
+     ORDER BY p."position"`,
+    clubId,
+  );
+}
+
+async function writeFixedPlayers(
+  fixedBookingId: string,
+  clubId: string,
+  playerIds: string[],
+): Promise<void> {
+  await ensureRuntimeSchema();
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.$executeRawUnsafe(
+      `UPDATE "fixed_bookings"
+       SET "playersSet" = true
+       WHERE "id" = $1 AND "clubId" = $2`,
+      fixedBookingId,
+      clubId,
+    );
+    if (Number(updated) === 0) {
+      throw new Error("No se encontró el turno fijo");
+    }
+    await tx.$executeRawUnsafe(
+      `DELETE FROM "fixed_booking_players" WHERE "fixedBookingId" = $1`,
+      fixedBookingId,
+    );
+    for (let position = 0; position < playerIds.length; position++) {
+      await tx.$executeRawUnsafe(
+        `INSERT INTO "fixed_booking_players" ("id", "fixedBookingId", "userId", "position")
+         VALUES ($1, $2, $3, $4)`,
+        crypto.randomUUID(),
+        fixedBookingId,
+        playerIds[position],
+        position,
+      );
+    }
+  });
+}
+
 /// Forma del booking con relaciones incluidas (para el mapeo a dominio).
 type BookingRow = {
   id: string;
@@ -263,6 +406,7 @@ export class PrismaBookingRepository implements BookingRepository {
   }
 
   async getSettings(clubId: string): Promise<BookingSettings> {
+    await ensureRuntimeSchema();
     const s = await prisma.bookingSettings.findUnique({ where: { clubId } });
     if (!s) return { ...DEFAULT_SETTINGS };
     return {
@@ -273,6 +417,7 @@ export class PrismaBookingRepository implements BookingRepository {
       preReservationMin: s.preReservationMin,
       requirePrePayment: s.requirePrePayment,
       turnoProductId: s.turnoProductId,
+      availabilityIntro: await readAvailabilityIntro(clubId),
       bookingPrice: await resolveTurnoPrice(clubId, s.turnoProductId),
     };
   }
@@ -281,12 +426,13 @@ export class PrismaBookingRepository implements BookingRepository {
     const users = await prisma.user.findMany({
       where: { memberships: { some: { clubId, role: "PLAYER" } } },
       orderBy: { fullName: "asc" },
+      include: { catalogCity: { select: { name: true } } },
     });
     return users.map((u) => ({
       id: u.id,
       name: u.fullName,
       gender: u.gender,
-      city: u.city,
+      city: u.catalogCity?.name ?? u.city,
     }));
   }
 
@@ -296,6 +442,7 @@ export class PrismaBookingRepository implements BookingRepository {
         where: { memberships: { some: { clubId, role: "PLAYER" } } },
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { fullName: "asc" }],
         include: {
+          catalogCity: { select: { name: true } },
           memberships: {
             where: { clubId, role: "PLAYER" },
             select: {
@@ -332,7 +479,7 @@ export class PrismaBookingRepository implements BookingRepository {
       instagram:
         (instagramMap ? instagramMap.get(u.id) : u.instagram?.trim()) || null,
       gender: u.gender,
-      city: u.city,
+      city: u.catalogCity?.name ?? u.city,
       category: u.category ? normalizeCategoryLevel(u.category) : null,
       courtPosition: u.courtPosition,
       ranking: u.ranking,
@@ -375,6 +522,7 @@ export class PrismaBookingRepository implements BookingRepository {
         memberships: { some: { clubId, role: "PLAYER" } },
       },
       include: {
+        catalogCity: { select: { name: true } },
         memberships: {
           where: { clubId, role: "PLAYER" },
           select: { inviteNote: true, inviteForTournamentId: true },
@@ -400,7 +548,8 @@ export class PrismaBookingRepository implements BookingRepository {
       ),
       gender: u.gender ?? "",
       birthDate: u.birthDate ? u.birthDate.toISOString().slice(0, 10) : "",
-      city: u.city ?? "",
+      city: u.catalogCity?.name ?? u.city ?? "",
+      catalogCityId: u.catalogCityId ?? "",
       address: u.address ?? "",
       country: u.country ?? "",
       category: u.category ? normalizeCategoryLevel(u.category) : "",
@@ -431,6 +580,7 @@ export class PrismaBookingRepository implements BookingRepository {
         gender: input.gender ? input.gender : null,
         birthDate: input.birthDate ? new Date(input.birthDate) : null,
         city: input.city ? input.city : null,
+        catalogCityId: input.catalogCityId ? input.catalogCityId : null,
         address: input.address ? input.address : null,
         country: input.country ? input.country : null,
         category: input.category
@@ -487,6 +637,7 @@ export class PrismaBookingRepository implements BookingRepository {
         gender: input.gender ? input.gender : null,
         birthDate: input.birthDate ? new Date(input.birthDate) : null,
         city: input.city ? input.city : null,
+        catalogCityId: input.catalogCityId ? input.catalogCityId : null,
         address: input.address ? input.address : null,
         country: input.country ? input.country : null,
         category: input.category
@@ -658,11 +809,14 @@ export class PrismaBookingRepository implements BookingRepository {
     clubId: string,
     settings: WritableBookingSettings,
   ): Promise<BookingSettings> {
+    await ensureRuntimeSchema();
+    const { availabilityIntro, ...rest } = settings;
     const s = await prisma.bookingSettings.upsert({
       where: { clubId },
-      update: settings,
-      create: { clubId, ...settings },
+      update: rest,
+      create: { clubId, ...rest },
     });
+    await writeAvailabilityIntro(clubId, availabilityIntro);
     return {
       openTime: s.openTime,
       closeTime: s.closeTime,
@@ -671,6 +825,7 @@ export class PrismaBookingRepository implements BookingRepository {
       preReservationMin: s.preReservationMin,
       requirePrePayment: s.requirePrePayment,
       turnoProductId: s.turnoProductId,
+      availabilityIntro,
       bookingPrice: await resolveTurnoPrice(clubId, s.turnoProductId),
     };
   }
@@ -811,26 +966,57 @@ export class PrismaBookingRepository implements BookingRepository {
   async getActiveFixedBookings(
     clubId: string,
   ): Promise<FixedBookingTemplate[]> {
-    const rows = await prisma.fixedBooking.findMany({
-      where: { clubId, active: true },
-      include: { responsible: true },
+    const [rows, releases, playerRows] = await Promise.all([
+      prisma.fixedBooking.findMany({
+        where: { clubId, active: true },
+        include: { responsible: true },
+      }),
+      queryFixedReleases(clubId),
+      queryFixedPlayers(clubId),
+    ]);
+    const releasedDates = new Map<string, string[]>();
+    for (const release of releases) {
+      const date = rawDateToISO(release.date);
+      const dates = releasedDates.get(release.fixedBookingId);
+      if (dates) dates.push(date);
+      else releasedDates.set(release.fixedBookingId, [date]);
+    }
+    const playersByFixed = new Map<
+      string,
+      { playersSet: boolean; players: PlayerRef[] }
+    >();
+    for (const row of playerRows) {
+      let entry = playersByFixed.get(row.fixedBookingId);
+      if (!entry) {
+        entry = { playersSet: Boolean(row.playersSet), players: [] };
+        playersByFixed.set(row.fixedBookingId, entry);
+      }
+      if (row.userId && row.fullName) {
+        entry.players.push({ id: row.userId, name: row.fullName });
+      }
+    }
+    return rows.map((f) => {
+      const stored = playersByFixed.get(f.id);
+      return {
+        id: f.id,
+        courtId: f.courtId,
+        dayOfWeek: f.dayOfWeek,
+        startTime: f.startTime,
+        durationMin: f.durationMin,
+        responsible: { id: f.responsible.id, name: f.responsible.fullName },
+        players: stored?.players ?? [],
+        playersSet: stored?.playersSet ?? false,
+        startDate: f.createdAt.toISOString().slice(0, 10),
+        releasedDates: releasedDates.get(f.id) ?? [],
+      };
     });
-    return rows.map((f) => ({
-      id: f.id,
-      courtId: f.courtId,
-      dayOfWeek: f.dayOfWeek,
-      startTime: f.startTime,
-      durationMin: f.durationMin,
-      responsible: { id: f.responsible.id, name: f.responsible.fullName },
-      startDate: f.createdAt.toISOString().slice(0, 10),
-    }));
   }
 
   async createFixedBooking(
     clubId: string,
     input: CreateFixedBookingInput,
   ): Promise<void> {
-    await prisma.fixedBooking.create({
+    const created = await prisma.fixedBooking.create({
       data: {
         clubId,
         courtId: input.courtId,
@@ -839,7 +1025,35 @@ export class PrismaBookingRepository implements BookingRepository {
         durationMin: input.durationMin,
         responsibleId: input.responsibleId,
       },
+      select: { id: true },
     });
+    if (input.playerIds.length > 0) {
+      await writeFixedPlayers(created.id, clubId, input.playerIds);
+    }
+  }
+
+  async updateFixedBooking(
+    clubId: string,
+    fixedBookingId: string,
+    data: UpdateFixedBookingData,
+  ): Promise<MutationResult> {
+    const fixed = await prisma.fixedBooking.findFirst({
+      where: { id: fixedBookingId, clubId, active: true },
+      select: { id: true },
+    });
+    if (!fixed) return { ok: false, error: "No se encontró el turno fijo" };
+
+    try {
+      await prisma.fixedBooking.updateMany({
+        where: { id: fixedBookingId, clubId },
+        data: { responsibleId: data.responsibleId },
+      });
+      await writeFixedPlayers(fixedBookingId, clubId, data.playerIds);
+    } catch (error) {
+      console.error("[turnos] updateFixedBooking", error);
+      return { ok: false, error: "No se pudieron guardar los jugadores" };
+    }
+    return { ok: true };
   }
 
   async cancelFixedBooking(
@@ -850,6 +1064,95 @@ export class PrismaBookingRepository implements BookingRepository {
       where: { id: fixedBookingId, clubId },
       data: { active: false },
     });
+  }
+
+  async getReleasedFixedSlots(
+    clubId: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<ReleasedFixedSlot[]> {
+    const rows = await queryFixedReleases(clubId, {
+      start: startDate,
+      end: endDate,
+    });
+    return rows.map((row) => ({
+      fixedBookingId: row.fixedBookingId,
+      courtId: row.courtId,
+      date: rawDateToISO(row.date),
+      startTime: row.startTime,
+      durationMin: row.durationMin,
+      responsible: { id: row.userId, name: row.fullName },
+    }));
+  }
+
+  async releaseFixedOccurrence(
+    clubId: string,
+    fixedBookingId: string,
+    date: string,
+  ): Promise<MutationResult> {
+    await ensureRuntimeSchema();
+    const fixed = await prisma.fixedBooking.findFirst({
+      where: { id: fixedBookingId, clubId, active: true },
+      select: { id: true, dayOfWeek: true },
+    });
+    if (!fixed) return { ok: false, error: "No se encontró el turno fijo" };
+    if (dayOfWeekISO(date) !== fixed.dayOfWeek) {
+      return { ok: false, error: "Ese día no corresponde al turno fijo" };
+    }
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "fixed_booking_releases" ("id", "fixedBookingId", "date")
+       VALUES ($1, $2, $3::date)
+       ON CONFLICT ("fixedBookingId", "date") DO NOTHING`,
+      crypto.randomUUID(),
+      fixedBookingId,
+      date,
+    );
+    return { ok: true };
+  }
+
+  async restoreFixedOccurrence(
+    clubId: string,
+    fixedBookingId: string,
+    date: string,
+  ): Promise<MutationResult> {
+    await ensureRuntimeSchema();
+    const fixed = await prisma.fixedBooking.findFirst({
+      where: { id: fixedBookingId, clubId, active: true },
+      select: {
+        id: true,
+        courtId: true,
+        startTime: true,
+        durationMin: true,
+      },
+    });
+    if (!fixed) return { ok: false, error: "No se encontró el turno fijo" };
+
+    const rows = await prisma.booking.findMany({
+      where: {
+        clubId,
+        courtId: fixed.courtId,
+        date: toDbDate(date),
+        status: { not: "CANCELLED" },
+      },
+      select: { startTime: true, durationMin: true },
+    });
+    const taken = rows.some((row) =>
+      timeRangesOverlap(
+        row.startTime,
+        row.durationMin,
+        fixed.startTime,
+        fixed.durationMin,
+      ),
+    );
+    if (taken) return { ok: false, error: "Ese horario ya está ocupado" };
+
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM "fixed_booking_releases"
+       WHERE "fixedBookingId" = $1 AND "date" = $2::date`,
+      fixedBookingId,
+      date,
+    );
+    return { ok: true };
   }
 
   async getPlayerAccount(

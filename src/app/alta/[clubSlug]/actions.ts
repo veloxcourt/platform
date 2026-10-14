@@ -22,7 +22,8 @@ export async function submitPublicPlayerSignupAction(
     email: String(formData.get("email") ?? ""),
     instagram: String(formData.get("instagram") ?? ""),
     gender: String(formData.get("gender") ?? ""),
-    city: String(formData.get("city") ?? ""),
+    city: "",
+    catalogCityId: String(formData.get("catalogCityId") ?? ""),
     category: String(formData.get("category") ?? ""),
     courtPosition: String(formData.get("courtPosition") ?? ""),
   });

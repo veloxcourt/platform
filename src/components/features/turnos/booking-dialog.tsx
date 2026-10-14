@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { UserPlus, Wallet, X } from "lucide-react";
+import { Unlock, UserPlus, Wallet, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,11 +16,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { formatLongDate } from "@/lib/date";
 import type {
   Booking,
   PaymentStatus,
   PlayerRef,
+  ReleasedFixedSlot,
 } from "@/modules/bookings/domain/types";
 import {
   isFixedOccurrenceId,
@@ -32,7 +33,10 @@ import {
   cancelBookingAction,
   cancelFixedBookingAction,
   confirmBookingAction,
+  releaseFixedOccurrenceAction,
+  restoreFixedOccurrenceAction,
   updateBookingAction,
+  updateFixedBookingAction,
 } from "@/app/(dashboard)/[clubSlug]/turnos/actions";
 import { PAYMENT_STATUS_META, SLOT_STATUS_STYLES } from "./booking-status";
 import { PlayerCombobox } from "./player-combobox";
@@ -45,6 +49,7 @@ const SELECT_CLASS =
 /// Celda seleccionada en el calendario (día o semana). Incluye la fecha.
 export type BookingSelection = {
   booking: Booking | null;
+  released: ReleasedFixedSlot | null;
   courtId: string;
   courtName: string;
   slot: string;
@@ -73,48 +78,98 @@ export function BookingDialog({
   onDone: () => void;
 }) {
   const open = selected !== null;
-  const booking = selected?.booking ?? null;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         {selected && (
-          <>
-            <DialogHeader>
-              <DialogTitle>
-                {booking ? "Detalle del turno" : "Nueva reserva"}
-              </DialogTitle>
-              <DialogDescription>
-                {selected.courtName} · {selected.slot} hs
-              </DialogDescription>
-            </DialogHeader>
-
-            {booking ? (
-              <BookingDetail
-                clubSlug={clubSlug}
-                booking={booking}
-                players={players}
-                categories={categories}
-                currency={currency}
-                onDone={onDone}
-              />
-            ) : (
-              <CreateBookingForm
-                clubSlug={clubSlug}
-                date={selected.date}
-                courtId={selected.courtId}
-                startTime={selected.slot}
-                initialPlayers={players}
-                categories={categories}
-                requirePrePayment={requirePrePayment}
-                defaultPrice={defaultPrice}
-                onDone={onDone}
-              />
-            )}
-          </>
+          <BookingDialogBody
+            key={`${selected.date}|${selected.courtId}|${selected.slot}|${selected.booking?.id ?? ""}|${selected.released?.fixedBookingId ?? ""}`}
+            clubSlug={clubSlug}
+            players={players}
+            categories={categories}
+            requirePrePayment={requirePrePayment}
+            defaultPrice={defaultPrice}
+            currency={currency}
+            selected={selected}
+            onDone={onDone}
+          />
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function BookingDialogBody({
+  clubSlug,
+  players,
+  categories,
+  requirePrePayment,
+  defaultPrice,
+  currency,
+  selected,
+  onDone,
+}: {
+  clubSlug: string;
+  players: PlayerRef[];
+  categories: string[];
+  requirePrePayment: boolean;
+  defaultPrice: number;
+  currency: string;
+  selected: NonNullable<BookingSelection>;
+  onDone: () => void;
+}) {
+  const booking = selected.booking;
+  const released = selected.released;
+  const [creatingOnRelease, setCreatingOnRelease] = useState(false);
+  const showReleased = released !== null && !booking && !creatingOnRelease;
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>
+          {booking
+            ? "Detalle del turno"
+            : showReleased
+              ? "Turno fijo liberado"
+              : "Nueva reserva"}
+        </DialogTitle>
+        <DialogDescription>
+          {selected.courtName} · {selected.slot} hs
+        </DialogDescription>
+      </DialogHeader>
+
+      {booking ? (
+        <BookingDetail
+          clubSlug={clubSlug}
+          booking={booking}
+          players={players}
+          categories={categories}
+          currency={currency}
+          onDone={onDone}
+        />
+      ) : showReleased && released ? (
+        <ReleasedFixedDetail
+          clubSlug={clubSlug}
+          released={released}
+          onBookSomeone={() => setCreatingOnRelease(true)}
+          onDone={onDone}
+        />
+      ) : (
+        <CreateBookingForm
+          clubSlug={clubSlug}
+          date={selected.date}
+          courtId={selected.courtId}
+          startTime={selected.slot}
+          initialPlayers={players}
+          categories={categories}
+          requirePrePayment={requirePrePayment}
+          defaultPrice={defaultPrice}
+          singleDateOnly={released !== null}
+          onDone={onDone}
+        />
+      )}
+    </>
   );
 }
 
@@ -127,6 +182,7 @@ function CreateBookingForm({
   categories,
   requirePrePayment,
   defaultPrice,
+  singleDateOnly = false,
   onDone,
 }: {
   clubSlug: string;
@@ -137,6 +193,7 @@ function CreateBookingForm({
   categories: string[];
   requirePrePayment: boolean;
   defaultPrice: number;
+  singleDateOnly?: boolean;
   onDone: () => void;
 }) {
   const [players, setPlayers] = useState<PlayerRef[]>(initialPlayers);
@@ -182,7 +239,7 @@ function CreateBookingForm({
         courtId,
         date,
         startTime,
-        type,
+        type: singleDateOnly ? "NO_FIJO" : type,
         responsibleId,
         playerIds: slots.filter(Boolean),
         paymentStatus: payment,
@@ -280,18 +337,27 @@ function CreateBookingForm({
         onCreated={onPlayerCreated}
       />
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label>Tipo</Label>
-          <select
-            className={SELECT_CLASS}
-            value={type}
-            onChange={(e) => setType(e.target.value as "FIJO" | "NO_FIJO")}
-          >
-            <option value="NO_FIJO">No fijo</option>
-            <option value="FIJO">Fijo (semanal)</option>
-          </select>
-        </div>
+      {singleDateOnly && (
+        <p className="text-xs text-muted-foreground">
+          La reserva es solo para este día. El turno fijo sigue las demás
+          semanas.
+        </p>
+      )}
+
+      <div className={singleDateOnly ? "flex flex-col gap-3" : "grid grid-cols-2 gap-3"}>
+        {singleDateOnly ? null : (
+          <div className="flex flex-col gap-1.5">
+            <Label>Tipo</Label>
+            <select
+              className={SELECT_CLASS}
+              value={type}
+              onChange={(e) => setType(e.target.value as "FIJO" | "NO_FIJO")}
+            >
+              <option value="NO_FIJO">No fijo</option>
+              <option value="FIJO">Fijo (semanal)</option>
+            </select>
+          </div>
+        )}
         <div className="flex flex-col gap-1.5">
           <Label>Pago</Label>
           <select
@@ -354,6 +420,7 @@ function BookingDetail({
     number | "resp" | null
   >(null);
   const [accountPlayer, setAccountPlayer] = useState<PlayerRef | null>(null);
+  const [confirmRelease, setConfirmRelease] = useState(false);
 
   function run(
     action: () => Promise<{ ok: boolean; error?: string }>,
@@ -370,6 +437,29 @@ function BookingDetail({
     });
   }
 
+  function saveFixed() {
+    if (!responsibleId) {
+      toast.error("Elegí un responsable");
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateFixedBookingAction(
+        clubSlug,
+        templateIdFromOccurrence(booking.id),
+        {
+          responsibleId,
+          playerIds: slots.filter(Boolean),
+        },
+      );
+      if (result.ok) {
+        toast.success("Turno fijo actualizado");
+        onDone();
+      } else {
+        toast.error("No se pudo guardar", { description: result.error });
+      }
+    });
+  }
+
   if (isFixedOccurrenceId(booking.id)) {
     return (
       <div className="flex flex-col gap-3 text-sm">
@@ -377,30 +467,194 @@ function BookingDetail({
           <Badge>{SLOT_STATUS_STYLES.RESERVADO.label}</Badge>
           <Badge variant="outline">Turno fijo</Badge>
         </div>
-        <div>
-          <p className="text-muted-foreground">Responsable</p>
-          <p className="font-medium">{booking.responsible.name}</p>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Se repite todas las semanas en este día y horario. Duración{" "}
-          {booking.durationMin} min.
-        </p>
-        <Button
-          variant="destructive"
-          disabled={isPending}
-          onClick={() =>
-            run(
-              () =>
-                cancelFixedBookingAction(
-                  clubSlug,
-                  templateIdFromOccurrence(booking.id),
-                ),
-              "Turno fijo cancelado",
-            )
-          }
-        >
-          Cancelar turno fijo (toda la serie)
-        </Button>
+        <label className="flex w-fit items-center gap-2 text-sm">
+          <Checkbox
+            checked={editing}
+            onCheckedChange={(v) => setEditing(v === true)}
+          />
+          Editar información
+        </label>
+        {editing ? (
+          <>
+            <div className="flex flex-col gap-1.5">
+              <Label>Responsable</Label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <PlayerCombobox
+                    players={localPlayers}
+                    value={responsibleId}
+                    onChange={setResponsibleId}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openNewPlayer("resp")}
+                >
+                  <UserPlus className="size-4" />
+                  Nuevo
+                </Button>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Jugadores en cancha (4)</Label>
+              <div className="flex flex-col gap-2">
+                {slots.map((slotId, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <div className="flex-1">
+                      <PlayerCombobox
+                        players={localPlayers}
+                        value={slotId}
+                        onChange={(id) => setSlot(i, id)}
+                        placeholder={`Jugador ${i + 1}...`}
+                        exclude={slots.filter((s, j) => j !== i && s !== "")}
+                      />
+                    </div>
+                    {slotId && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => setSlot(i, "")}
+                        aria-label="Quitar jugador"
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      onClick={() => openNewPlayer(i)}
+                      aria-label="Nuevo jugador"
+                    >
+                      <UserPlus className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                El responsable puede no jugar. Estos cambios valen para todas
+                las semanas de este turno fijo.
+              </p>
+            </div>
+            <Button disabled={isPending} onClick={saveFixed}>
+              {isPending ? "Guardando..." : "Guardar cambios"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <div>
+              <p className="text-muted-foreground">Responsable</p>
+              <NameRow
+                name={booking.responsible.name}
+                bold
+                onAccount={() => setAccountPlayer(booking.responsible)}
+              />
+            </div>
+            <div>
+              <p className="text-muted-foreground">
+                Jugadores ({booking.players.length}/{MAX_PLAYERS_PER_BOOKING})
+              </p>
+              {booking.players.length === 0 ? (
+                <p className="text-muted-foreground/60">Sin jugadores cargados</p>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {booking.players.map((p) => (
+                    <NameRow
+                      key={p.id}
+                      name={p.name}
+                      onAccount={() => setAccountPlayer(p)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Se repite todas las semanas en este día y horario. Duración{" "}
+              {booking.durationMin} min. Si el dueño no puede usarlo esta vez,
+              se libera solo esa fecha y el turno sigue fijo.
+            </p>
+          </>
+        )}
+        {!editing &&
+          (confirmRelease ? (
+            <div className="flex flex-col gap-2 rounded-lg border p-3">
+              <p>
+                {formatLongDate(booking.date)} queda libre. El turno fijo de{" "}
+                {booking.responsible.name} sigue las demás semanas.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  disabled={isPending}
+                  onClick={() => setConfirmRelease(false)}
+                >
+                  Volver
+                </Button>
+                <Button
+                  className="flex-1"
+                  disabled={isPending}
+                  onClick={() =>
+                    run(
+                      () =>
+                        releaseFixedOccurrenceAction(
+                          clubSlug,
+                          templateIdFromOccurrence(booking.id),
+                          booking.date,
+                        ),
+                      "Día liberado",
+                    )
+                  }
+                >
+                  {isPending ? "Liberando..." : "Liberar este día"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                disabled={isPending}
+                onClick={() => setConfirmRelease(true)}
+              >
+                <Unlock className="size-4" />
+                Liberar momentáneamente
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={isPending}
+                onClick={() =>
+                  run(
+                    () =>
+                      cancelFixedBookingAction(
+                        clubSlug,
+                        templateIdFromOccurrence(booking.id),
+                      ),
+                    "Turno fijo cancelado",
+                  )
+                }
+              >
+                Cancelar turno fijo (toda la serie)
+              </Button>
+            </>
+          ))}
+        <NewPlayerDialog
+          clubSlug={clubSlug}
+          categories={categories}
+          open={newPlayerOpen}
+          onOpenChange={setNewPlayerOpen}
+          onCreated={onPlayerCreated}
+        />
+        <AccountDialog
+          clubSlug={clubSlug}
+          player={accountPlayer}
+          currency={currency}
+          open={accountPlayer !== null}
+          onOpenChange={(o) => !o && setAccountPlayer(null)}
+        />
       </div>
     );
   }
@@ -661,6 +915,57 @@ function BookingDetail({
         open={accountPlayer !== null}
         onOpenChange={(o) => !o && setAccountPlayer(null)}
       />
+    </div>
+  );
+}
+
+function ReleasedFixedDetail({
+  clubSlug,
+  released,
+  onBookSomeone,
+  onDone,
+}: {
+  clubSlug: string;
+  released: ReleasedFixedSlot;
+  onBookSomeone: () => void;
+  onDone: () => void;
+}) {
+  const [isPending, startTransition] = useTransition();
+
+  function restore() {
+    startTransition(async () => {
+      const result = await restoreFixedOccurrenceAction(
+        clubSlug,
+        released.fixedBookingId,
+        released.date,
+      );
+      if (result.ok) {
+        toast.success("Turno devuelto al dueño");
+        onDone();
+      } else {
+        toast.error("No se pudo devolver", { description: result.error });
+      }
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <div className="flex items-center gap-2">
+        <Badge variant="outline">Disponible</Badge>
+        <Badge variant="outline">Turno fijo liberado</Badge>
+      </div>
+      <div>
+        <p className="text-muted-foreground">Dueño del turno fijo</p>
+        <p className="font-medium">{released.responsible.name}</p>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Sigue siendo su turno fijo. {formatLongDate(released.date)} está libre
+        porque no lo puede usar. Las demás semanas no cambian.
+      </p>
+      <Button onClick={onBookSomeone}>Reservar para otra persona</Button>
+      <Button variant="outline" disabled={isPending} onClick={restore}>
+        {isPending ? "Devolviendo..." : "Devolver al dueño"}
+      </Button>
     </div>
   );
 }

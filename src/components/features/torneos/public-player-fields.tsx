@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { GENDER_LABELS, GENDERS, type Gender } from "@/modules/bookings/domain/new-player-schema";
 import type { PublicClubPlayerMatch } from "@/modules/tournaments/application/search-public-club-players";
 import { requiredGenderFromCategoryName } from "@/modules/tournaments/domain/category-player-filter";
+import { CityCombobox } from "@/components/features/cities/city-combobox";
 
 const FIELD_CLASS = "bg-white dark:bg-background";
 const SELECT_CLASS =
@@ -21,6 +22,7 @@ export type PublicPlayerDefaults = {
   phone: string;
   gender?: Gender | "";
   city?: string;
+  catalogCityId?: string;
 };
 
 export function PublicPlayerFields({
@@ -48,7 +50,7 @@ export function PublicPlayerFields({
   const [lastName, setLastName] = useState(defaults?.lastName ?? "");
   const [phone, setPhone] = useState(defaults?.phone ?? "");
   const [gender, setGender] = useState(defaults?.gender ?? requiredGender ?? "");
-  const [city, setCity] = useState(defaults?.city ?? "");
+  const [catalogCityId, setCatalogCityId] = useState(defaults?.catalogCityId ?? "");
   const [matches, setMatches] = useState<PublicClubPlayerMatch[]>([]);
   const [open, setOpen] = useState(false);
   const [matched, setMatched] = useState(Boolean(defaults?.id));
@@ -71,7 +73,7 @@ export function PublicPlayerFields({
     setFirstName("");
     setLastName("");
     setPhone("");
-    setCity("");
+    setCatalogCityId("");
     setMatched(false);
     onMatchedIdChange?.("");
   }, [requiredGender, matched, onMatchedIdChange, locked]);
@@ -115,7 +117,7 @@ export function PublicPlayerFields({
     setLastName(match.lastName);
     setPhone(match.phone);
     setGender(match.gender ?? requiredGender ?? "");
-    setCity(match.city ?? "");
+    setCatalogCityId(match.catalogCityId ?? "");
     setMatched(true);
     setOpen(false);
     setMatches([]);
@@ -130,7 +132,7 @@ export function PublicPlayerFields({
   }
 
   const phoneLocked = locked && Boolean(defaults?.phone?.trim());
-  const cityLocked = locked && Boolean(defaults?.city?.trim());
+  const cityLocked = locked && Boolean(defaults?.catalogCityId?.trim());
   const showList = !locked && open && (searching || matches.length > 0);
 
   return (
@@ -295,18 +297,15 @@ export function PublicPlayerFields({
           </div>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor={`${prefix}City`}>Localidad</Label>
-          <Input
-            id={`${prefix}City`}
-            name={`${prefix}City`}
-            autoComplete="address-level2"
+          <Label htmlFor={`${prefix}CatalogCityId`}>Localidad</Label>
+          <CityCombobox
+            id={`${prefix}CatalogCityId`}
+            name={`${prefix}CatalogCityId`}
             required
-            readOnly={cityLocked}
-            className={FIELD_CLASS}
-            value={city}
-            onChange={(event) => {
-              setCity(event.target.value);
-            }}
+            disabled={cityLocked}
+            inputClassName={FIELD_CLASS}
+            value={catalogCityId}
+            onChange={(cityId) => setCatalogCityId(cityId)}
           />
         </div>
       </div>

@@ -26,6 +26,10 @@ export const bookingSettingsSchema = z
       .max(120, "Máximo 120 minutos"),
     requirePrePayment: z.boolean(),
     turnoProductId: z.string().min(1).nullable(),
+    availabilityIntro: z
+      .string()
+      .trim()
+      .max(400, "Máximo 400 caracteres"),
   })
   .refine(
     (d) => closingMinutes(d.openTime, d.closeTime) > timeToMinutes(d.openTime),

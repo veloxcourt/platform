@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useEffect, useTransition } from "react";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -52,7 +52,8 @@ export function SettingsForm({
     register,
     handleSubmit,
     watch,
-    formState: { errors },
+    reset,
+    formState: { errors, isDirty },
   } = useForm<TurnosConfigValues>({
     resolver: zodResolver(turnosConfigSchema),
     defaultValues: {
@@ -64,6 +65,7 @@ export function SettingsForm({
         preReservationMin: initialSettings.preReservationMin,
         requirePrePayment: initialSettings.requirePrePayment,
         turnoProductId: initialSettings.turnoProductId,
+        availabilityIntro: initialSettings.availabilityIntro,
       },
       courts: initialCourts.map((c) => ({
         id: c.id,
@@ -72,6 +74,40 @@ export function SettingsForm({
       })),
     },
   });
+
+  useEffect(() => {
+    if (!isDirty) return;
+
+    function onBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    function onClick(event: MouseEvent) {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest("a");
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#")) return;
+      const leave = window.confirm(
+        "Hay cambios sin guardar. Si salís, se pierde lo que escribiste.",
+      );
+      if (!leave) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [isDirty]);
 
   const selectedProductId = watch("settings.turnoProductId");
   const selectedProduct = products.find((p) => p.id === selectedProductId);
@@ -99,6 +135,7 @@ export function SettingsForm({
     startTransition(async () => {
       const result = await saveTurnosConfig(clubSlug, values);
       if (result.ok) {
+        reset(values);
         toast.success("Configuración guardada", {
           description: "El calendario ya refleja los cambios.",
         });
@@ -209,6 +246,21 @@ export function SettingsForm({
               )}
             />
           </div>
+          <div className="sm:col-span-2">
+            <Field
+              label="Texto inicial al copiar disponibles"
+              error={errors.settings?.availabilityIntro?.message}
+              hint="Es la primera línea del mensaje que se copia para WhatsApp. Debajo se agregan los horarios de inicio, sin separar por cancha."
+            >
+              <textarea
+                rows={2}
+                maxLength={400}
+                placeholder="Hola! Estos son los turnos que quedan:"
+                className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                {...register("settings.availabilityIntro")}
+              />
+            </Field>
+          </div>
         </CardContent>
       </Card>
 
@@ -292,7 +344,12 @@ export function SettingsForm({
         </CardContent>
       </Card>
 
-      <div className="flex justify-end">
+      <div className="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t bg-background py-3">
+        {isDirty ? (
+          <p className="mr-auto text-sm text-muted-foreground">
+            Hay cambios sin guardar
+          </p>
+        ) : null}
         <Button type="submit" disabled={isPending}>
           {isPending ? "Guardando..." : "Guardar configuración"}
         </Button>

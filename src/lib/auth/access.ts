@@ -218,7 +218,8 @@ export async function enforceClubModulePage(
         item !== "menu-precios" &&
         item !== "eco-torneo" &&
         item !== "calendario" &&
-        item !== "que-mejoro",
+        item !== "que-mejoro" &&
+        item !== "turnos-config",
     );
     if (fallback) redirect(`/${clubSlug}/${fallback}`);
     if (access.allowedModules.includes("menu-precios")) {

@@ -31,6 +31,16 @@ export function visibleNavTabs(
       continue;
     }
 
+    if (id === "turnos") {
+      if (
+        allowedModules.includes("turnos") ||
+        allowedModules.includes("turnos-config")
+      ) {
+        items.push({ id, enabled: true });
+      }
+      continue;
+    }
+
     if (id === "catalogo") {
       if (
         allowedModules.includes("catalogo") ||

@@ -12,6 +12,7 @@ export const MODULE_TO_DATABASE: Record<AdminModuleKey, AdminModule> = {
   catalogo: "CATALOG",
   "menu-precios": "PRICE_MENU",
   turnos: "BOOKINGS",
+  "turnos-config": "BOOKINGS_CONFIG",
   torneos: "TOURNAMENTS",
   "eco-torneo": "TOOLS_ECO_TORNEO",
   calendario: "TOOLS_CALENDARIO",
@@ -25,6 +26,7 @@ const DATABASE_TO_MODULE: Partial<Record<AdminModule, AdminModuleKey>> = {
   CATALOG: "catalogo",
   PRICE_MENU: "menu-precios",
   BOOKINGS: "turnos",
+  BOOKINGS_CONFIG: "turnos-config",
   TOURNAMENTS: "torneos",
   TOOLS_ECO_TORNEO: "eco-torneo",
   TOOLS_CALENDARIO: "calendario",
@@ -75,6 +77,7 @@ const NESTED_PRIVILEGES = new Set<AdminModuleKey>([
   "menu-precios",
   "eco-torneo",
   "calendario",
+  "turnos-config",
 ]);
 
 /** Primera solapa navegable tras login. */

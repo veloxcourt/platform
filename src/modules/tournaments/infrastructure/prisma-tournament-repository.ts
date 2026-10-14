@@ -44,6 +44,7 @@ import {
   type UpdateTournamentValues,
 } from "../domain/tournament-schema";
 import { buildTournamentPublicSlug } from "../domain/slug";
+import { zonesCategoriesReadyForPublicLink } from "../domain/zones-public-link";
 import type {
   CategoryPhaseConfig,
   PairListItem,
@@ -529,6 +530,7 @@ function mapTournament(row: {
   fee: number;
   publicSlug: string;
   pairs: { status: string }[];
+  zonesPlayDatesByCategory: string[][];
 }): TournamentListItem {
   const activePairs = row.pairs;
   return {
@@ -543,6 +545,9 @@ function mapTournament(row: {
     publicSlug: row.publicSlug,
     registrationCount: activePairs.length,
     confirmedCount: activePairs.filter((p) => p.status === "CONFIRMED").length,
+    zonesDaysReady:
+      row.type !== "ZONAS" ||
+      zonesCategoriesReadyForPublicLink(row.zonesPlayDatesByCategory),
   };
 }
 
@@ -758,8 +763,26 @@ export class PrismaTournamentRepository implements TournamentRepository {
       pairsByTournament.set(pair.tournamentId, list);
     }
 
+    const categories = await prisma.tournamentCategory.findMany({
+      where: { tournamentId: { in: rows.map((row) => row.id) } },
+      select: {
+        tournamentId: true,
+        settings: { select: { zonesPlayDates: true } },
+      },
+    });
+    const zonesDatesByTournament = new Map<string, string[][]>();
+    for (const category of categories) {
+      const list = zonesDatesByTournament.get(category.tournamentId) ?? [];
+      list.push(category.settings?.zonesPlayDates ?? []);
+      zonesDatesByTournament.set(category.tournamentId, list);
+    }
+
     return rows.map((row) =>
-      mapTournament({ ...row, pairs: pairsByTournament.get(row.id) ?? [] }),
+      mapTournament({
+        ...row,
+        pairs: pairsByTournament.get(row.id) ?? [],
+        zonesPlayDatesByCategory: zonesDatesByTournament.get(row.id) ?? [],
+      }),
     );
   }
 

@@ -8,6 +8,7 @@ import {
 import type { CourtPosition, Gender } from "@/modules/bookings/domain/new-player-schema";
 import { normalizeCategoryLevel } from "@/modules/tournaments/domain/category-level";
 import { publicPlayerSignupSchema } from "@/modules/players/domain/public-signup-schema";
+import { catalogCityAssignment } from "@/modules/cities/application/city-catalog";
 
 export type RegisterPublicPlayerResult =
   | { ok: true; already: boolean; clubName: string }
@@ -17,6 +18,7 @@ type BlankPatch = {
   email?: string | null;
   gender?: Gender | null;
   city?: string | null;
+  catalogCityId?: string | null;
   category?: string | null;
   courtPosition?: CourtPosition | null;
 };
@@ -47,7 +49,10 @@ export async function registerPublicPlayer(
   const email = data.email?.trim().toLowerCase() || null;
   const instagram = normalizeInstagram(data.instagram);
   const gender = (data.gender || null) as Gender | null;
-  const city = data.city?.trim() || null;
+  const located = await catalogCityAssignment(data.catalogCityId);
+  if (!located.ok) return located;
+  const city = located.name;
+  const catalogCityId = located.catalogCityId;
   const courtPosition = (data.courtPosition || null) as CourtPosition | null;
   const categoryRaw = data.category?.trim() ?? "";
   const category = categoryRaw ? normalizeCategoryLevel(categoryRaw) : null;
@@ -66,6 +71,7 @@ export async function registerPublicPlayer(
       email: true,
       gender: true,
       city: true,
+      catalogCityId: true,
       category: true,
       courtPosition: true,
       memberships: {
@@ -83,7 +89,14 @@ export async function registerPublicPlayer(
         data: { clubId: club.id, userId: existing.id, role: "PLAYER" },
       });
     }
-    await fillBlankProfile(existing, { email, gender, city, category, courtPosition });
+    await fillBlankProfile(existing, {
+      email,
+      gender,
+      city,
+      catalogCityId,
+      category,
+      courtPosition,
+    });
     await fillBlankInstagram(existing.id, instagram);
     revalidateClubPlayers(club.slug);
     return { ok: true, already, clubName: club.name };
@@ -112,6 +125,7 @@ export async function registerPublicPlayer(
         phone,
         gender,
         city,
+        catalogCityId,
         category,
         courtPosition,
         ranking: null,
@@ -143,6 +157,7 @@ async function fillBlankProfile(
     email: string | null;
     gender: Gender | null;
     city: string | null;
+    catalogCityId: string | null;
     category: string | null;
     courtPosition: CourtPosition | null;
   },
@@ -150,7 +165,12 @@ async function fillBlankProfile(
 ) {
   const patch: BlankPatch = {};
   if (!existing.gender && incoming.gender) patch.gender = incoming.gender;
-  if (!existing.city && incoming.city) patch.city = incoming.city;
+  if (!existing.catalogCityId && incoming.catalogCityId) {
+    patch.catalogCityId = incoming.catalogCityId;
+    if (!existing.city && incoming.city) patch.city = incoming.city;
+  } else if (!existing.city && incoming.city) {
+    patch.city = incoming.city;
+  }
   if (!existing.category && incoming.category) patch.category = incoming.category;
   if (!existing.courtPosition && incoming.courtPosition) {
     patch.courtPosition = incoming.courtPosition;

@@ -41,6 +41,7 @@ import { CloneTournamentDialog } from "./clone-tournament-dialog";
 import { TournamentFormDialog } from "./tournament-form-dialog";
 import { TournamentTypePicker } from "./tournament-type-picker";
 import { cloneTournamentAction, deleteTournamentAction } from "@/app/(dashboard)/[clubSlug]/torneos/actions";
+import { ZONES_DAYS_REQUIRED_TO_COPY_LINK } from "@/modules/tournaments/domain/zones-public-link";
 
 const STATUS_BADGE: Record<CreateTournamentValues["status"], string> = {
   DRAFT:
@@ -157,8 +158,12 @@ export function TournamentsTable({
     });
   }, [tournaments, query, statusFilter]);
 
-  function copyPublicLink(slug: string) {
-    const url = `${window.location.origin}/inscripcion/${slug}`;
+  function copyPublicLink(tournament: TournamentListItem) {
+    if (tournament.type === "ZONAS" && !tournament.zonesDaysReady) {
+      toast.error(ZONES_DAYS_REQUIRED_TO_COPY_LINK);
+      return;
+    }
+    const url = `${window.location.origin}/inscripcion/${tournament.publicSlug}`;
     void navigator.clipboard.writeText(url);
     toast.success("Link copiado", {
       description: "El enlace público de inscripción está en el portapapeles.",
@@ -453,7 +458,7 @@ export function TournamentsTable({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => copyPublicLink(t.publicSlug)}
+                  onClick={() => copyPublicLink(t)}
                 >
                   <Copy className="size-4" />
                   Copiar link

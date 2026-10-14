@@ -23,7 +23,10 @@ model Club {
   locale         String   @default("es-AR")
   /// Logo público del complejo (llaves, PDFs, encabezados).
   logoUrl        String?
+  /// Copia del nombre canónico de `catalogCity` (encabezados, PDFs, llaves).
   locality       String?
+  /// Localidad del catálogo global. Es la fuente de verdad.
+  catalogCityId  String?
   address        String?
   // Feature flags: m?dulos habilitados por club (sin tocar c?digo)
   enabledModules String[] @default([])
@@ -49,7 +52,9 @@ model Club {
   calendarSearchLinks        CalendarSearchLink[]
   improvements               ClubImprovement[]
   playerEvents               PlayerEvent[]
+  catalogCity                City?                 @relation(fields: [catalogCityId], references: [id], onDelete: SetNull)
 
+  @@index([catalogCityId])
   @@map("clubs")
 }
 
@@ -89,7 +94,11 @@ model User {
   phone         String?
   gender        Gender?
   birthDate     DateTime?      @db.Date
+  /// Copia del nombre canónico de `catalogCity`. Se mantiene para que las
+  /// pantallas y los PDFs que ya leen el texto sigan funcionando sin join.
   city          String?
+  /// Localidad del catálogo global. Es la fuente de verdad.
+  catalogCityId String?
   address       String?
   country       String?
   category      String?
@@ -109,13 +118,16 @@ model User {
   bookingPlayers      BookingPlayer[]
   responsibleBookings Booking[]         @relation("BookingResponsible")
   responsibleFixed    FixedBooking[]    @relation("FixedResponsible")
+  fixedBookingPlayers FixedBookingPlayer[]
   accountMovements        AccountMovement[]
   tournamentRegistrations TournamentRegistration[]
   pairsAsPlayer1          TournamentPair[]         @relation("PairPlayer1")
   pairsAsPlayer2          TournamentPair[]         @relation("PairPlayer2")
   playerEvents            PlayerEvent[]            @relation("PlayerEventSubject")
   playerEventsCreated     PlayerEvent[]            @relation("PlayerEventCreatedBy")
+  catalogCity             City?                    @relation(fields: [catalogCityId], references: [id], onDelete: SetNull)
 
+  @@index([catalogCityId])
   @@map("users")
 }
 
@@ -126,7 +138,10 @@ model ClubRequest {
   contactName     String
   email           String
   phone           String
+  /// Texto que dejó quien pidió el club. Si eligió del catálogo, es su copia.
   locality        String
+  /// Localidad del catálogo. Null si la persona escribió una que no está.
+  catalogCityId   String?
   message         String?
   status          ClubRequestStatus @default(PENDING)
   createdClubId   String?
@@ -134,8 +149,11 @@ model ClubRequest {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
+  catalogCity City? @relation(fields: [catalogCityId], references: [id], onDelete: SetNull)
+
   @@index([status])
   @@index([email])
+  @@index([catalogCityId])
   @@map("club_requests")
 }
 
@@ -193,6 +211,7 @@ enum AdminModule {
   CATALOG
   PRICE_MENU
   BOOKINGS
+  BOOKINGS_CONFIG
   TOURNAMENTS
   TOOLS
   TOOLS_ECO_TORNEO
@@ -218,6 +237,72 @@ enum CourtPosition {
   DRIVE
   REVES
   AMBOS
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo global de localidades
+// ---------------------------------------------------------------------------
+// No depende de `clubId`: es de la plataforma. Todo campo "Localidad" de la app
+// elige de acá, para que una misma ciudad no entre escrita de cinco formas
+// distintas ("San Marcos Sud", "San marcos sud", "SMS") y los filtros sirvan.
+
+model Province {
+  id         String   @id @default(cuid())
+  country    String   @default("AR")
+  name       String
+  /// `name` normalizado (minúsculas, sin tildes): búsqueda y unicidad.
+  searchName String
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  cities City[]
+
+  @@unique([country, searchName])
+  @@map("provinces")
+}
+
+/// Localidad canónica: el único nombre válido de esa ciudad en toda la app.
+model City {
+  id         String   @id @default(cuid())
+  provinceId String
+  name       String
+  /// `name` normalizado: búsqueda y unicidad dentro de la provincia.
+  searchName String
+  /// La creó un club y el superadmin todavía no la revisó (posible duplicado).
+  pending    Boolean  @default(false)
+  /// false = no se ofrece más al elegir (se fusionó o se dio de baja).
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  province     Province      @relation(fields: [provinceId], references: [id], onDelete: Cascade)
+  aliases      CityAlias[]
+  users        User[]
+  clubs        Club[]
+  clubRequests ClubRequest[]
+
+  @@unique([provinceId, searchName])
+  @@index([searchName])
+  @@map("cities")
+}
+
+/// Otra forma de escribir una localidad ("SMS" por "San Marcos Sud"). El
+/// buscador la encuentra y devuelve la ciudad canónica; al fusionar dos
+/// localidades el nombre viejo queda acá, para que nadie lo vuelva a crear.
+model CityAlias {
+  id     String @id @default(cuid())
+  cityId String
+  label  String
+  /// `label` normalizado. Único en todo el catálogo: un alias no puede apuntar
+  /// a dos ciudades o el buscador no sabría cuál de las dos devolver.
+  searchName String   @unique
+  createdAt  DateTime @default(now())
+
+  city City @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@index([cityId])
+  @@map("city_aliases")
 }
 
 // ---------------------------------------------------------------------------
@@ -250,6 +335,7 @@ model BookingSettings {
   preReservationMin Int     @default(15) // vencimiento de una PRE-RESERVA
   requirePrePayment Boolean @default(false)
   turnoProductId    String? // producto del cat?logo que define el precio del turno
+  availabilityIntro String  @default("") // primera linea al copiar turnos disponibles
 
   club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
 
@@ -302,25 +388,61 @@ model BookingPlayer {
 }
 
 /// Turno FIJO: plantilla semanal. Se crea una vez, se repite cada semana en el
-/// mismo d?a/hora/cancha y s?lo finaliza cuando el club lo cancela (active=false).
+/// mismo día/hora/cancha y sólo finaliza cuando el club lo cancela (active=false).
+/// Una fecha puntual se puede liberar sin cortar la serie.
 model FixedBooking {
   id            String   @id @default(cuid())
   clubId        String
   courtId       String
-  dayOfWeek     Int // 0 = domingo ... 6 = s?bado
+  dayOfWeek     Int // 0 = domingo ... 6 = sábado
   startTime     String // HH:mm
   durationMin   Int
   responsibleId String
+  /// True cuando el club guardó los jugadores de cancha. Si sigue en false,
+  /// el calendario muestra al responsable hasta que los editen.
+  playersSet    Boolean  @default(false)
   active        Boolean  @default(true)
   createdAt     DateTime @default(now())
 
-  club        Club      @relation(fields: [clubId], references: [id], onDelete: Cascade)
-  court       Court     @relation(fields: [courtId], references: [id], onDelete: Cascade)
-  responsible User      @relation("FixedResponsible", fields: [responsibleId], references: [id])
-  bookings    Booking[]
+  club         Club                  @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  court        Court                 @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  responsible  User                  @relation("FixedResponsible", fields: [responsibleId], references: [id])
+  bookings     Booking[]
+  releases     FixedBookingRelease[]
+  courtPlayers FixedBookingPlayer[]
 
   @@index([clubId, courtId])
   @@map("fixed_bookings")
+}
+
+/// Día en que el dueño de un turno fijo no lo usa. La serie sigue activa.
+model FixedBookingRelease {
+  id             String   @id @default(cuid())
+  fixedBookingId String
+  date           DateTime @db.Date
+  createdAt      DateTime @default(now())
+
+  fixedBooking FixedBooking @relation(fields: [fixedBookingId], references: [id], onDelete: Cascade)
+
+  @@unique([fixedBookingId, date])
+  @@index([date])
+  @@map("fixed_booking_releases")
+}
+
+/// Jugadores en cancha de un turno fijo (hasta 4). El responsable puede no estar.
+model FixedBookingPlayer {
+  id             String @id @default(cuid())
+  fixedBookingId String
+  userId         String
+  position       Int
+
+  fixedBooking FixedBooking @relation(fields: [fixedBookingId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([fixedBookingId, userId])
+  @@unique([fixedBookingId, position])
+  @@index([userId])
+  @@map("fixed_booking_players")
 }
 
 enum BookingType {

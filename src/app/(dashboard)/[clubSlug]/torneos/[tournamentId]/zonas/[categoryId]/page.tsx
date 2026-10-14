@@ -48,17 +48,17 @@ export default async function TorneoZonasCategoriaPage({
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
+      <Link
+        href={withTournamentMode(
+          `/${clubSlug}/torneos/${tournamentId}`,
+          mode,
+        )}
+        className="sticky top-0 z-10 -mb-3 flex items-center gap-1 bg-background py-2 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ChevronLeft className="size-4" />
+        Volver al torneo
+      </Link>
       <div className="flex flex-col gap-1">
-        <Link
-          href={withTournamentMode(
-            `/${clubSlug}/torneos/${tournamentId}`,
-            mode,
-          )}
-          className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="size-4" />
-          Volver al torneo
-        </Link>
         <h1 className="text-xl font-semibold">Zonas · {category.name}</h1>
         <p className="text-sm text-muted-foreground">
           {data.tournament.name} · recuadros y partidos de la fase de grupos

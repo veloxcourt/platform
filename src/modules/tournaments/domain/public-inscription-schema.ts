@@ -10,7 +10,8 @@ const playerSchema = z.object({
   lastName: z.string().trim().min(1, "Ingresá el apellido").max(60),
   phone: z.string().trim().min(6, "Ingresá el teléfono"),
   gender: z.enum(GENDERS),
-  city: z.string().trim().min(1, "Ingresá la localidad").max(80),
+  catalogCityId: z.string().trim().min(1, "Elegí la localidad"),
+  city: z.string().trim().max(80).optional().or(z.literal("")),
 });
 
 export const publicInscriptionSchema = z

@@ -1,4 +1,6 @@
-import { enforceClubModulePage } from "@/lib/auth/access";
+import { redirect } from "next/navigation";
+
+import { enforceClubModulePage, getClubAccess } from "@/lib/auth/access";
 
 export default async function BookingsLayout({
   children,
@@ -8,6 +10,15 @@ export default async function BookingsLayout({
   params: Promise<{ clubSlug: string }>;
 }) {
   const { clubSlug } = await params;
-  await enforceClubModulePage(clubSlug, "turnos");
+  const access = await getClubAccess(clubSlug);
+  if (!access) redirect(`/login?next=/${clubSlug}/turnos`);
+
+  const canEnter =
+    access.allowedModules.includes("turnos") ||
+    access.allowedModules.includes("turnos-config");
+  if (!canEnter) {
+    await enforceClubModulePage(clubSlug, "turnos");
+  }
+
   return children;
 }

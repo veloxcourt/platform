@@ -6,16 +6,24 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Repeat,
+  Unlock,
   Users,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { addDaysISO, formatLongDate, todayISO } from "@/lib/date";
-import type { Booking, DaySchedule } from "@/modules/bookings/domain/types";
-import { findBookingAt } from "@/modules/bookings/domain/rules";
+import type {
+  Booking,
+  DaySchedule,
+  ReleasedFixedSlot,
+} from "@/modules/bookings/domain/types";
+import { calendarCellAt } from "@/modules/bookings/domain/rules";
+import { buildAvailableSlotsText } from "./available-slots-text";
 import { PAYMENT_STATUS_META, SLOT_STATUS_STYLES } from "./booking-status";
 import { ViewSwitch } from "./view-switch";
 import { BookingDialog, type BookingSelection } from "./booking-dialog";
@@ -42,6 +50,31 @@ export function BookingCalendar({ schedule }: Props) {
 
   function goToDate(dateISO: string) {
     router.push(`?date=${dateISO}&view=dia`);
+  }
+
+  async function copyAvailableSlots() {
+    const { text, freeCount } = buildAvailableSlotsText({
+      intro: schedule.settings.availabilityIntro,
+      dateISO: schedule.date,
+      courts: schedule.courts,
+      slots: schedule.slots,
+      bookings: schedule.bookings,
+      releasedSlots: schedule.releasedSlots,
+    });
+    try {
+      await navigator.clipboard.writeText(text);
+      if (freeCount === 0) {
+        toast.message("No hay turnos libres", {
+          description: "Se copió el aviso para pegarlo en WhatsApp",
+        });
+        return;
+      }
+      toast.success("Turnos copiados", {
+        description: "Listo para pegar en WhatsApp",
+      });
+    } catch {
+      toast.error("No se pudo copiar");
+    }
   }
 
   const gridTemplate = {
@@ -99,13 +132,24 @@ export function BookingCalendar({ schedule }: Props) {
             </FilterChip>
           ))}
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox
-            checked={onlyFixed}
-            onCheckedChange={(v) => setOnlyFixed(v === true)}
-          />
-          Solo fijos
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void copyAvailableSlots()}
+          >
+            <Copy />
+            Copiar disponibles
+          </Button>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={onlyFixed}
+              onCheckedChange={(v) => setOnlyFixed(v === true)}
+            />
+            Solo fijos
+          </label>
+        </div>
       </div>
 
       <Legend />
@@ -136,21 +180,26 @@ export function BookingCalendar({ schedule }: Props) {
               className="grid border-b last:border-b-0"
               style={gridTemplate}
             >
-              <div className="flex items-start justify-end px-2 py-2 text-xs font-medium tabular-nums text-muted-foreground">
+              <div className="flex items-center justify-center px-2 py-2 text-xs font-medium tabular-nums text-muted-foreground">
                 {slot}
               </div>
               {visibleCourts.map((court) => {
-                let booking = findBookingAt(schedule.bookings, court.id, slot);
-                if (booking && onlyFixed && booking.type !== "FIJO") {
-                  booking = undefined;
-                }
+                const cell = calendarCellAt(
+                  schedule.bookings,
+                  schedule.releasedSlots,
+                  court.id,
+                  slot,
+                  { date: schedule.date, onlyFixed },
+                );
                 return (
                   <div key={court.id} className="border-l p-1">
                     <CalendarCell
-                      booking={booking}
+                      booking={cell.booking ?? undefined}
+                      released={cell.released}
                       onClick={() =>
                         setSelected({
-                          booking: booking ?? null,
+                          booking: cell.booking,
+                          released: cell.released,
                           courtName: court.name,
                           courtId: court.id,
                           slot,
@@ -208,9 +257,11 @@ function FilterChip({
 
 function CalendarCell({
   booking,
+  released,
   onClick,
 }: {
   booking: Booking | undefined;
+  released: ReleasedFixedSlot | null;
   onClick: () => void;
 }) {
   const status = booking ? booking.status : "DISPONIBLE";
@@ -250,6 +301,16 @@ function CalendarCell({
             </span>
           </div>
         </>
+      ) : released ? (
+        <>
+          <div className="flex items-center justify-between gap-1">
+            <span className="font-medium">Disponible</span>
+            <Unlock className="size-3 shrink-0 text-muted-foreground" />
+          </div>
+          <span className="truncate text-muted-foreground">
+            Fijo · {released.responsible.name}
+          </span>
+        </>
       ) : (
         <span className="m-auto text-muted-foreground/60">Disponible</span>
       )}
@@ -270,6 +331,9 @@ function Legend() {
       ))}
       <span className="flex items-center gap-1.5">
         <Repeat className="size-3" /> Turno fijo
+      </span>
+      <span className="flex items-center gap-1.5">
+        <Unlock className="size-3" /> Fijo liberado
       </span>
     </div>
   );

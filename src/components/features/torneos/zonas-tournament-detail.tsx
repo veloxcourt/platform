@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   BookOpen,
@@ -31,6 +30,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Card,
   CardAction,
   CardContent,
@@ -53,6 +59,10 @@ import {
   TOURNAMENT_STATUS_LABELS,
   type CreateTournamentValues,
 } from "@/modules/tournaments/domain/tournament-schema";
+import {
+  ZONES_DAYS_REQUIRED_TO_COPY_LINK,
+  zonesCategoriesReadyForPublicLink,
+} from "@/modules/tournaments/domain/zones-public-link";
 import { categoriesWithIntermediatePhase } from "@/modules/tournaments/domain/intermediate-phase";
 import { FinalLlavePanel } from "./final-llave-panel";
 import { FinalMatchGridPanel } from "./final-match-grid-panel";
@@ -65,6 +75,7 @@ import { IntermediatePhasePanel } from "./intermediate-phase-panel";
 import { PairsTable } from "./pairs-table";
 import { StableTabButton } from "@/components/ui/stable-tab-button";
 import { TournamentConfigTabs } from "./tournament-config-tabs";
+import type { ConfigFormGuard } from "./tournament-config-form";
 import { TorneosSoporteView } from "./torneos-soporte-view";
 import { TournamentEditForm } from "./tournament-form-dialog";
 import {
@@ -179,6 +190,60 @@ export function ZonasTournamentDetail({
   const [zonesPanelKey, setZonesPanelKey] = useState(0);
   const flushPendingPersistsRef = useRef<() => Promise<void>>(async () => {});
   const [activeTab, setActiveTab] = useState<TournamentTab>("inscripciones");
+  const configGuardRef = useRef<ConfigFormGuard | null>(null);
+  const pendingLeaveRef = useRef<(() => void) | null>(null);
+  const [leavePromptOpen, setLeavePromptOpen] = useState(false);
+  const [leaveSaving, setLeaveSaving] = useState(false);
+  const onConfigGuardReady = useCallback((guard: ConfigFormGuard | null) => {
+    configGuardRef.current = guard;
+  }, []);
+  const requestConfigLeave = useCallback((next: () => void) => {
+    if (!configGuardRef.current?.isDirty()) {
+      next();
+      return;
+    }
+    pendingLeaveRef.current = next;
+    setLeavePromptOpen(true);
+  }, []);
+
+  function cancelConfigLeave() {
+    pendingLeaveRef.current = null;
+    setLeavePromptOpen(false);
+  }
+
+  function discardConfigAndLeave() {
+    const next = pendingLeaveRef.current;
+    pendingLeaveRef.current = null;
+    setLeavePromptOpen(false);
+    next?.();
+  }
+
+  async function saveConfigAndLeave() {
+    const save = configGuardRef.current?.save;
+    if (!save) {
+      discardConfigAndLeave();
+      return;
+    }
+    setLeaveSaving(true);
+    let ok = false;
+    try {
+      ok = await save();
+    } catch {
+      toast.error("No se pudo guardar");
+      ok = false;
+    } finally {
+      setLeaveSaving(false);
+    }
+    if (!ok) {
+      pendingLeaveRef.current = null;
+      setLeavePromptOpen(false);
+      return;
+    }
+    const next = pendingLeaveRef.current;
+    pendingLeaveRef.current = null;
+    setLeavePromptOpen(false);
+    next?.();
+  }
   const [categoryFilterId, setCategoryFilterId] = useState<string>(
     () => tournament.categories[0]?.id ?? "",
   );
@@ -417,6 +482,16 @@ export function ZonasTournamentDetail({
   }
 
   function copyPublicLink() {
+    const zonesPlayDates = tournament.categories.map((category) => {
+      const match = config?.categories.find(
+        (item) => item.categoryId === category.id,
+      );
+      return match?.phases.zones.playDates ?? [];
+    });
+    if (!zonesCategoriesReadyForPublicLink(zonesPlayDates)) {
+      toast.error(ZONES_DAYS_REQUIRED_TO_COPY_LINK);
+      return;
+    }
     const url = `${window.location.origin}/inscripcion/${tournament.publicSlug}`;
     void navigator.clipboard.writeText(url);
     toast.success("Link copiado");
@@ -424,13 +499,18 @@ export function ZonasTournamentDetail({
 
   const chrome = (
     <>
-      <Link
-        href={`/${clubSlug}/torneos`}
-        className="mb-1 flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      <button
+        type="button"
+        className="mb-1 flex w-fit cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-sm text-muted-foreground hover:text-foreground"
+        onClick={() =>
+          requestConfigLeave(() => {
+            router.push(`/${clubSlug}/torneos`);
+          })
+        }
       >
         <ChevronLeft className="size-4" />
         Volver a torneos
-      </Link>
+      </button>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -471,7 +551,10 @@ export function ZonasTournamentDetail({
             <StableTabButton
               key={tab.id}
               active={active}
-              onSelect={() => setActiveTab(tab.id)}
+              onSelect={() => {
+                if (tab.id === activeTab) return;
+                requestConfigLeave(() => setActiveTab(tab.id));
+              }}
             >
               <Icon />
               {tab.label}
@@ -489,7 +572,10 @@ export function ZonasTournamentDetail({
         </Button>
         <StableTabButton
           active={activeTab === "soporte"}
-          onSelect={() => setActiveTab("soporte")}
+          onSelect={() => {
+            if (activeTab === "soporte") return;
+            requestConfigLeave(() => setActiveTab("soporte"));
+          }}
           className="ml-auto"
           title="Cómo se arma la llave según la cantidad de parejas"
         >
@@ -553,6 +639,8 @@ export function ZonasTournamentDetail({
           config={config}
           courtCount={courtCount}
           header={chrome}
+          requestLeave={requestConfigLeave}
+          onGuardReady={onConfigGuardReady}
         />
       ) : (
         <>
@@ -1147,6 +1235,47 @@ export function ZonasTournamentDetail({
         </>
       )}
     </div>
+    <Dialog
+      open={leavePromptOpen}
+      onOpenChange={(open) => {
+        if (open || leaveSaving) return;
+        cancelConfigLeave();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Cambios sin guardar</DialogTitle>
+          <DialogDescription>
+            Si salís ahora, se pierde la edición de la configuración.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={leaveSaving}
+            onClick={cancelConfigLeave}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={leaveSaving}
+            onClick={discardConfigAndLeave}
+          >
+            Seguir sin guardar
+          </Button>
+          <Button
+            type="button"
+            disabled={leaveSaving}
+            onClick={() => void saveConfigAndLeave()}
+          >
+            {leaveSaving ? "Guardando..." : "Guardar"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
     </FixtureEditModeProvider>
   );
 }

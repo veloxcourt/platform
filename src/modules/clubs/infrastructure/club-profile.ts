@@ -20,6 +20,7 @@ export async function ensureClubProfileColumns() {
 type ClubRow = {
   logoUrl: string | null;
   locality: string | null;
+  catalogCityId: string | null;
   address: string | null;
 };
 
@@ -31,13 +32,14 @@ export async function getClubProfile(clubId: string): Promise<ClubProfile | null
   });
   if (!club) return null;
   const extra = await prisma.$queryRawUnsafe<ClubRow[]>(
-    `SELECT "logoUrl", "locality", "address" FROM "clubs" WHERE "id" = $1`,
+    `SELECT "logoUrl", "locality", "address", "catalogCityId" FROM "clubs" WHERE "id" = $1`,
     clubId,
   );
   return {
     name: club.name,
     logoUrl: extra[0]?.logoUrl ?? null,
     locality: extra[0]?.locality ?? null,
+    catalogCityId: extra[0]?.catalogCityId ?? null,
     address: extra[0]?.address ?? null,
   };
 }
@@ -47,13 +49,14 @@ export async function updateClubProfile(
   input: {
     name: string;
     locality: string | null;
+    catalogCityId: string | null;
     address: string | null;
   },
 ) {
   await ensureClubProfileColumns();
   await prisma.club.update({
     where: { id: clubId },
-    data: { name: input.name },
+    data: { name: input.name, catalogCityId: input.catalogCityId },
   });
   await prisma.$executeRawUnsafe(
     `UPDATE "clubs" SET "locality" = $2, "address" = $3 WHERE "id" = $1`,
