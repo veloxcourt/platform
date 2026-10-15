@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { CalendarClock, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
+import { VeloxCourtLogo } from "@/components/brand/veloxcourt-logo";
 import { ClubRequestForm } from "@/components/features/platform/club-request-form";
 import { buttonVariants } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/auth/access";
@@ -46,12 +47,7 @@ export default async function Home() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(0,0,0,0.08),_transparent_45%),linear-gradient(180deg,#f7f7f5_0%,#eceae4_100%)]">
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-5">
-        <div className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="grid size-8 place-items-center rounded-md bg-foreground text-background">
-            <CalendarClock className="size-4" />
-          </span>
-          VeloxCourt
-        </div>
+        <VeloxCourtLogo className="h-9" />
         <div className="flex items-center gap-2">
           {superAdmin ? (
             <Link

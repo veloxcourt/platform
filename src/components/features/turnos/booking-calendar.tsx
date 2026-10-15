@@ -1,17 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  Copy,
   Repeat,
   Unlock,
   Users,
 } from "lucide-react";
-import { toast } from "sonner";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -23,17 +21,25 @@ import type {
   ReleasedFixedSlot,
 } from "@/modules/bookings/domain/types";
 import { calendarCellAt } from "@/modules/bookings/domain/rules";
-import { buildAvailableSlotsText } from "./available-slots-text";
-import { PAYMENT_STATUS_META, SLOT_STATUS_STYLES } from "./booking-status";
+import type { AvailableCopyOption } from "./available-copy";
+import { CopyAvailableMenu } from "./copy-available-menu";
+import {
+  FIXED_SLOT_STYLE,
+  PAYMENT_STATUS_META,
+  SLOT_STATUS_STYLES,
+  slotPaint,
+} from "./booking-status";
 import { ViewSwitch } from "./view-switch";
 import { BookingDialog, type BookingSelection } from "./booking-dialog";
 
 interface Props {
   schedule: DaySchedule;
+  copyOptions: AvailableCopyOption[];
 }
 
-export function BookingCalendar({ schedule }: Props) {
+export function BookingCalendar({ schedule, copyOptions }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
   const clubSlug = schedule.club.slug;
 
   const [courtFilter, setCourtFilter] = useState<string>("all");
@@ -49,42 +55,27 @@ export function BookingCalendar({ schedule }: Props) {
   );
 
   function goToDate(dateISO: string) {
-    router.push(`?date=${dateISO}&view=dia`);
+    router.push(`${pathname}?date=${dateISO}&view=dia`);
   }
 
-  async function copyAvailableSlots() {
-    const { text, freeCount } = buildAvailableSlotsText({
-      intro: schedule.settings.availabilityIntro,
-      dateISO: schedule.date,
-      courts: schedule.courts,
-      slots: schedule.slots,
-      bookings: schedule.bookings,
-      releasedSlots: schedule.releasedSlots,
-    });
-    try {
-      await navigator.clipboard.writeText(text);
-      if (freeCount === 0) {
-        toast.message("No hay turnos libres", {
-          description: "Se copió el aviso para pegarlo en WhatsApp",
-        });
-        return;
-      }
-      toast.success("Turnos copiados", {
-        description: "Listo para pegar en WhatsApp",
-      });
-    } catch {
-      toast.error("No se pudo copiar");
-    }
-  }
+  useEffect(() => {
+    router.prefetch(
+      `${pathname}?date=${addDaysISO(schedule.date, -1)}&view=dia`,
+    );
+    router.prefetch(
+      `${pathname}?date=${addDaysISO(schedule.date, 1)}&view=dia`,
+    );
+    router.prefetch(`${pathname}?date=${todayISO()}&view=dia`);
+  }, [pathname, router, schedule.date]);
 
   const gridTemplate = {
     gridTemplateColumns: `5rem repeat(${visibleCourts.length}, minmax(9rem, 1fr))`,
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 phone-landscape:gap-0">
       {/* Barra de herramientas */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 phone-landscape:hidden">
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
@@ -114,7 +105,7 @@ export function BookingCalendar({ schedule }: Props) {
         <ViewSwitch current="dia" />
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 phone-landscape:hidden">
         <div className="flex flex-wrap items-center gap-1.5">
           <FilterChip
             active={courtFilter === "all"}
@@ -133,15 +124,7 @@ export function BookingCalendar({ schedule }: Props) {
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void copyAvailableSlots()}
-          >
-            <Copy />
-            Copiar disponibles
-          </Button>
+          <CopyAvailableMenu options={copyOptions} />
           <label className="flex items-center gap-2 text-sm">
             <Checkbox
               checked={onlyFixed}
@@ -152,16 +135,18 @@ export function BookingCalendar({ schedule }: Props) {
         </div>
       </div>
 
-      <Legend />
+      <div className="phone-landscape:hidden">
+        <Legend />
+      </div>
 
       {/* Grilla del calendario */}
-      <div className="overflow-x-auto rounded-lg border">
+      <div className="min-h-0 w-full min-w-0 flex-1 overflow-auto overscroll-contain rounded-lg border phone-landscape:rounded-none phone-landscape:border-0 phone-landscape:pl-[env(safe-area-inset-left)] phone-landscape:pr-[env(safe-area-inset-right)]">
         <div className="min-w-fit">
           <div
-            className="sticky top-0 z-10 grid border-b bg-muted/50 backdrop-blur"
+            className="sticky top-0 z-30 grid border-b bg-muted"
             style={gridTemplate}
           >
-            <div className="px-2 py-3 text-xs font-medium text-muted-foreground">
+            <div className="sticky left-0 z-40 border-r bg-muted px-2 py-3 text-xs font-medium text-muted-foreground">
               Hora
             </div>
             {visibleCourts.map((court) => (
@@ -180,7 +165,7 @@ export function BookingCalendar({ schedule }: Props) {
               className="grid border-b last:border-b-0"
               style={gridTemplate}
             >
-              <div className="flex items-center justify-center px-2 py-2 text-xs font-medium tabular-nums text-muted-foreground">
+              <div className="sticky left-0 z-20 flex items-center justify-center border-r bg-background px-2 py-2 text-xs font-medium tabular-nums text-muted-foreground">
                 {slot}
               </div>
               {visibleCourts.map((court) => {
@@ -264,8 +249,7 @@ function CalendarCell({
   released: ReleasedFixedSlot | null;
   onClick: () => void;
 }) {
-  const status = booking ? booking.status : "DISPONIBLE";
-  const style = SLOT_STATUS_STYLES[status];
+  const style = booking ? slotPaint(booking) : SLOT_STATUS_STYLES.DISPONIBLE;
 
   return (
     <button
@@ -321,16 +305,38 @@ function CalendarCell({
 function Legend() {
   return (
     <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-      {(["DISPONIBLE", "PRE_RESERVA", "RESERVADO"] as const).map((s) => (
-        <span key={s} className="flex items-center gap-1.5">
-          <span
-            className={cn("size-2.5 rounded-full", SLOT_STATUS_STYLES[s].dot)}
-          />
-          {SLOT_STATUS_STYLES[s].label}
-        </span>
-      ))}
       <span className="flex items-center gap-1.5">
-        <Repeat className="size-3" /> Turno fijo
+        <span
+          className={cn(
+            "size-2.5 rounded-full",
+            SLOT_STATUS_STYLES.DISPONIBLE.dot,
+          )}
+        />
+        Disponible
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span
+          className={cn(
+            "size-2.5 rounded-full",
+            SLOT_STATUS_STYLES.PRE_RESERVA.dot,
+          )}
+        />
+        Pre-reserva
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span
+          className={cn(
+            "size-2.5 rounded-full",
+            SLOT_STATUS_STYLES.RESERVADO.dot,
+          )}
+        />
+        Reserva
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span
+          className={cn("size-2.5 rounded-full", FIXED_SLOT_STYLE.dot)}
+        />
+        Turno fijo
       </span>
       <span className="flex items-center gap-1.5">
         <Unlock className="size-3" /> Fijo liberado

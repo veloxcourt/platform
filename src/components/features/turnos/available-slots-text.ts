@@ -12,6 +12,8 @@ export interface AvailableSlotsTextInput {
   slots: string[];
   bookings: Booking[];
   releasedSlots: ReleasedFixedSlot[];
+  /// Segunda línea, ej. "Disponibles hoy (Martes)".
+  heading?: string;
 }
 
 export interface AvailableSlotsText {
@@ -40,10 +42,11 @@ export function buildAvailableSlotsText(
   );
 
   const intro = input.intro.trim();
+  const heading = input.heading?.trim() || "Disponibles";
   const disponibles =
     freeTimes.length === 0
       ? "No hay turnos libres."
-      : `Disponibles: ${freeTimes.join(" - ")}`;
+      : `${heading}: ${freeTimes.join(" - ")}`;
 
   return {
     text: intro ? `${intro}\n${disponibles}` : disponibles,

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
   CalendarRange,
   ChevronLeft,
@@ -15,20 +15,29 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { addDaysISO, formatShortDate, todayISO } from "@/lib/date";
 import type {
+  Booking,
   ReleasedFixedSlot,
   WeekSchedule,
 } from "@/modules/bookings/domain/types";
 import { calendarCellAt } from "@/modules/bookings/domain/rules";
-import { SLOT_STATUS_STYLES } from "./booking-status";
+import {
+  FIXED_SLOT_STYLE,
+  SLOT_STATUS_STYLES,
+  slotPaint,
+} from "./booking-status";
+import type { AvailableCopyOption } from "./available-copy";
+import { CopyAvailableMenu } from "./copy-available-menu";
 import { ViewSwitch } from "./view-switch";
 import { BookingDialog, type BookingSelection } from "./booking-dialog";
 
 interface Props {
   schedule: WeekSchedule;
+  copyOptions: AvailableCopyOption[];
 }
 
-export function WeeklySchedule({ schedule }: Props) {
+export function WeeklySchedule({ schedule, copyOptions }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
   const [includeWeekend, setIncludeWeekend] = useState(false);
   const [onlyFixed, setOnlyFixed] = useState(false);
   const [selectedCourts, setSelectedCourts] = useState<Set<string>>(
@@ -49,6 +58,16 @@ export function WeeklySchedule({ schedule }: Props) {
     [schedule.courts, selectedCourts],
   );
 
+  const bookingsByDate = useMemo(() => {
+    const map = new Map<string, Booking[]>();
+    for (const booking of schedule.bookings) {
+      const list = map.get(booking.date);
+      if (list) list.push(booking);
+      else map.set(booking.date, [booking]);
+    }
+    return map;
+  }, [schedule.bookings]);
+
   function toggleCourt(id: string) {
     setSelectedCourts((prev) => {
       const next = new Set(prev);
@@ -59,22 +78,33 @@ export function WeeklySchedule({ schedule }: Props) {
   }
 
   function goToWeek(dateISO: string) {
-    router.push(`?date=${dateISO}&view=semana`);
+    router.push(`${pathname}?date=${dateISO}&view=semana`);
   }
 
+  useEffect(() => {
+    const prev = addDaysISO(schedule.weekStart, -7);
+    const next = addDaysISO(schedule.weekStart, 7);
+    router.prefetch(`${pathname}?date=${prev}&view=semana`);
+    router.prefetch(`${pathname}?date=${next}&view=semana`);
+    router.prefetch(`${pathname}?date=${todayISO()}&view=semana`);
+  }, [pathname, router, schedule.weekStart]);
+
   const nCols = visibleDays.length * visibleCourts.length;
+  const timeCol = "4.5rem";
+  const courtCol = "6.5rem";
   const gridTemplate = {
-    gridTemplateColumns: `4.5rem repeat(${nCols}, minmax(6rem, 1fr))`,
+    gridTemplateColumns: `${timeCol} repeat(${nCols}, minmax(${courtCol}, 1fr))`,
   };
+  const tableMinWidth = `calc(${timeCol} + ${nCols} * ${courtCol})`;
 
   const rangeLabel = `${formatShortDate(schedule.days[0].date)} – ${formatShortDate(
     schedule.days[6].date,
   )}`;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4 phone-landscape:gap-0">
       {/* Barra de herramientas */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 phone-landscape:hidden">
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
@@ -105,22 +135,25 @@ export function WeeklySchedule({ schedule }: Props) {
       </div>
 
       {/* Filtros */}
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-4">
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={includeWeekend}
-              onCheckedChange={(v) => setIncludeWeekend(v === true)}
-            />
-            Incluir sábados y domingos
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={onlyFixed}
-              onCheckedChange={(v) => setOnlyFixed(v === true)}
-            />
-            Solo fijos
-          </label>
+      <div className="flex flex-col gap-2 phone-landscape:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={includeWeekend}
+                onCheckedChange={(v) => setIncludeWeekend(v === true)}
+              />
+              Incluir sábados y domingos
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={onlyFixed}
+                onCheckedChange={(v) => setOnlyFixed(v === true)}
+              />
+              Solo fijos
+            </label>
+          </div>
+          <CopyAvailableMenu options={copyOptions} />
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-muted-foreground">Canchas:</span>
@@ -136,19 +169,21 @@ export function WeeklySchedule({ schedule }: Props) {
         </div>
       </div>
 
-      <Legend />
+      <div className="phone-landscape:hidden">
+        <Legend />
+      </div>
 
       {visibleCourts.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
           Seleccioná al menos una cancha para ver la agenda.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <div className="min-w-fit">
-            <div className="sticky top-0 z-10 bg-muted/50 backdrop-blur">
+        <div className="min-h-0 w-full min-w-0 flex-1 overflow-auto overscroll-contain rounded-lg border phone-landscape:rounded-none phone-landscape:border-0 phone-landscape:pl-[env(safe-area-inset-left)] phone-landscape:pr-[env(safe-area-inset-right)]">
+          <div className="w-full" style={{ minWidth: tableMinWidth }}>
+            <div className="sticky top-0 z-30 bg-muted shadow-[0_1px_0_0_var(--border)]">
               {/* Fila 1: días (cada uno abarca sus canchas) */}
               <div className="grid" style={gridTemplate}>
-                <div />
+                <div className="sticky left-0 z-40 bg-muted" />
                 {visibleDays.map((day) => (
                   <div
                     key={day.date}
@@ -161,7 +196,7 @@ export function WeeklySchedule({ schedule }: Props) {
               </div>
               {/* Fila 2: nombres de cancha */}
               <div className="grid border-b" style={gridTemplate}>
-                <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                <div className="sticky left-0 z-40 border-r bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
                   Hora
                 </div>
                 {visibleDays.map((day) =>
@@ -187,13 +222,11 @@ export function WeeklySchedule({ schedule }: Props) {
                 className="grid border-b last:border-b-0"
                 style={gridTemplate}
               >
-                <div className="flex items-center justify-center px-2 py-1 text-xs font-medium tabular-nums text-muted-foreground">
+                <div className="sticky left-0 z-20 flex items-center justify-center border-r bg-background px-2 py-1 text-xs font-medium tabular-nums text-muted-foreground">
                   {slot}
                 </div>
                 {visibleDays.map((day) => {
-                  const dayBookings = schedule.bookings.filter(
-                    (b) => b.date === day.date,
-                  );
+                  const dayBookings = bookingsByDate.get(day.date) ?? [];
                   return visibleCourts.map((court, idx) => {
                     const cell = calendarCellAt(
                       dayBookings,
@@ -258,8 +291,7 @@ function WeekCell({
   released: ReleasedFixedSlot | null;
   onClick: () => void;
 }) {
-  const status = booking ? booking.status : "DISPONIBLE";
-  const style = SLOT_STATUS_STYLES[status];
+  const style = booking ? slotPaint(booking) : SLOT_STATUS_STYLES.DISPONIBLE;
   return (
     <button
       type="button"
@@ -296,16 +328,36 @@ function WeekCell({
 function Legend() {
   return (
     <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-      {(["DISPONIBLE", "PRE_RESERVA", "RESERVADO"] as const).map((s) => (
-        <span key={s} className="flex items-center gap-1.5">
-          <span
-            className={cn("size-2.5 rounded-full", SLOT_STATUS_STYLES[s].dot)}
-          />
-          {SLOT_STATUS_STYLES[s].label}
-        </span>
-      ))}
       <span className="flex items-center gap-1.5">
-        <Repeat className="size-3" /> Turno fijo
+        <span
+          className={cn(
+            "size-2.5 rounded-full",
+            SLOT_STATUS_STYLES.DISPONIBLE.dot,
+          )}
+        />
+        Disponible
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span
+          className={cn(
+            "size-2.5 rounded-full",
+            SLOT_STATUS_STYLES.PRE_RESERVA.dot,
+          )}
+        />
+        Pre-reserva
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span
+          className={cn(
+            "size-2.5 rounded-full",
+            SLOT_STATUS_STYLES.RESERVADO.dot,
+          )}
+        />
+        Reserva
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className={cn("size-2.5 rounded-full", FIXED_SLOT_STYLE.dot)} />
+        Turno fijo
       </span>
       <span className="flex items-center gap-1.5">
         <Unlock className="size-3" /> Fijo liberado

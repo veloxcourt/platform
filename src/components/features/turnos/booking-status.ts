@@ -1,10 +1,14 @@
-import type { PaymentStatus, SlotStatus } from "@/modules/bookings/domain/types";
+import type {
+  BookingType,
+  PaymentStatus,
+  SlotStatus,
+} from "@/modules/bookings/domain/types";
+
+type SlotPaint = { label: string; cell: string; dot: string };
 
 /// Estilos por estado de reserva (colores de la celda del calendario).
-export const SLOT_STATUS_STYLES: Record<
-  SlotStatus,
-  { label: string; cell: string; dot: string }
-> = {
+/// Reservado es la reserva del día (azul). El turno fijo usa su propio verde.
+export const SLOT_STATUS_STYLES: Record<SlotStatus, SlotPaint> = {
   DISPONIBLE: {
     label: "Disponible",
     cell: "bg-background hover:bg-muted/60 border-dashed",
@@ -12,15 +16,30 @@ export const SLOT_STATUS_STYLES: Record<
   },
   PRE_RESERVA: {
     label: "Pre-reserva",
-    cell: "bg-amber-50 hover:bg-amber-100 border-amber-300 dark:bg-amber-950/40 dark:border-amber-800",
-    dot: "bg-amber-500",
+    cell: "bg-yellow-100 hover:bg-yellow-200 border-yellow-400 dark:bg-yellow-950/50 dark:border-yellow-700",
+    dot: "bg-yellow-400",
   },
   RESERVADO: {
     label: "Reservado",
-    cell: "bg-emerald-50 hover:bg-emerald-100 border-emerald-300 dark:bg-emerald-950/40 dark:border-emerald-800",
-    dot: "bg-emerald-500",
+    cell: "bg-sky-100 hover:bg-sky-200 border-sky-400 dark:bg-sky-950/50 dark:border-sky-700",
+    dot: "bg-sky-500",
   },
 };
+
+export const FIXED_SLOT_STYLE: SlotPaint = {
+  label: "Turno fijo",
+  cell: "bg-emerald-100 hover:bg-emerald-200 border-emerald-400 dark:bg-emerald-950/50 dark:border-emerald-700",
+  dot: "bg-emerald-500",
+};
+
+/// Color de una celda ocupada: el fijo es verde aunque el estado sea reservado.
+export function slotPaint(booking: {
+  type: BookingType;
+  status: Exclude<SlotStatus, "DISPONIBLE">;
+}): SlotPaint {
+  if (booking.type === "FIJO") return FIXED_SLOT_STYLE;
+  return SLOT_STATUS_STYLES[booking.status];
+}
 
 export const PAYMENT_STATUS_META: Record<
   PaymentStatus,

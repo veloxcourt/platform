@@ -224,6 +224,27 @@ function rawDateToISO(value: Date | string): string {
   return `${year}-${month}-${day}`;
 }
 
+/// Día calendario en la zona del club. createdAt en UTC no sirve: después de
+/// las 21 en Argentina, toISOString() ya es el día siguiente y el turno fijo
+/// desaparece de la celda en la que se acaba de crear.
+function isoDateInTimeZone(value: Date, timeZone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(value);
+    const year = parts.find((part) => part.type === "year")?.value;
+    const month = parts.find((part) => part.type === "month")?.value;
+    const day = parts.find((part) => part.type === "day")?.value;
+    if (year && month && day) return `${year}-${month}-${day}`;
+  } catch {
+    // Zona inválida: se usa el día UTC.
+  }
+  return rawDateToISO(value);
+}
+
 type FixedReleaseRow = {
   fixedBookingId: string;
   date: Date | string;
@@ -371,8 +392,8 @@ function mapBooking(b: BookingRow): Booking {
 }
 
 const BOOKING_INCLUDE = {
-  responsible: true,
-  players: { include: { user: true } },
+  responsible: { select: { id: true, fullName: true } },
+  players: { select: { user: { select: { id: true, fullName: true } } } },
 } as const;
 
 // -----------------------------------------------------------------------------
@@ -407,8 +428,11 @@ export class PrismaBookingRepository implements BookingRepository {
 
   async getSettings(clubId: string): Promise<BookingSettings> {
     await ensureRuntimeSchema();
-    const s = await prisma.bookingSettings.findUnique({ where: { clubId } });
-    if (!s) return { ...DEFAULT_SETTINGS };
+    const [s, availabilityIntro] = await Promise.all([
+      prisma.bookingSettings.findUnique({ where: { clubId } }),
+      readAvailabilityIntro(clubId),
+    ]);
+    if (!s) return { ...DEFAULT_SETTINGS, availabilityIntro };
     return {
       openTime: s.openTime,
       closeTime: s.closeTime,
@@ -417,7 +441,7 @@ export class PrismaBookingRepository implements BookingRepository {
       preReservationMin: s.preReservationMin,
       requirePrePayment: s.requirePrePayment,
       turnoProductId: s.turnoProductId,
-      availabilityIntro: await readAvailabilityIntro(clubId),
+      availabilityIntro,
       bookingPrice: await resolveTurnoPrice(clubId, s.turnoProductId),
     };
   }
@@ -426,7 +450,13 @@ export class PrismaBookingRepository implements BookingRepository {
     const users = await prisma.user.findMany({
       where: { memberships: { some: { clubId, role: "PLAYER" } } },
       orderBy: { fullName: "asc" },
-      include: { catalogCity: { select: { name: true } } },
+      select: {
+        id: true,
+        fullName: true,
+        gender: true,
+        city: true,
+        catalogCity: { select: { name: true } },
+      },
     });
     return users.map((u) => ({
       id: u.id,
@@ -772,7 +802,7 @@ export class PrismaBookingRepository implements BookingRepository {
         where: { clubId, date: toDbDate(date), status: { not: "CANCELLED" } },
         include: BOOKING_INCLUDE,
       }),
-      this.getActiveFixedBookings(clubId),
+      this.getActiveFixedBookings(clubId, { start: date, end: date }),
     ]);
     return [...rows.map(mapBooking), ...expandFixedBookings(templates, [date])];
   }
@@ -791,7 +821,7 @@ export class PrismaBookingRepository implements BookingRepository {
         },
         include: BOOKING_INCLUDE,
       }),
-      this.getActiveFixedBookings(clubId),
+      this.getActiveFixedBookings(clubId, { start: startDate, end: endDate }),
     ]);
 
     const dates: string[] = [];
@@ -965,13 +995,17 @@ export class PrismaBookingRepository implements BookingRepository {
 
   async getActiveFixedBookings(
     clubId: string,
+    range?: { start: string; end: string },
   ): Promise<FixedBookingTemplate[]> {
     const [rows, releases, playerRows] = await Promise.all([
       prisma.fixedBooking.findMany({
         where: { clubId, active: true },
-        include: { responsible: true },
+        include: {
+          responsible: { select: { id: true, fullName: true } },
+          club: { select: { timezone: true } },
+        },
       }),
-      queryFixedReleases(clubId),
+      queryFixedReleases(clubId, range),
       queryFixedPlayers(clubId),
     ]);
     const releasedDates = new Map<string, string[]>();
@@ -1006,7 +1040,10 @@ export class PrismaBookingRepository implements BookingRepository {
         responsible: { id: f.responsible.id, name: f.responsible.fullName },
         players: stored?.players ?? [],
         playersSet: stored?.playersSet ?? false,
-        startDate: f.createdAt.toISOString().slice(0, 10),
+        startDate: isoDateInTimeZone(
+          f.createdAt,
+          f.club.timezone || "America/Argentina/Buenos_Aires",
+        ),
         releasedDates: releasedDates.get(f.id) ?? [],
       };
     });
@@ -1024,6 +1061,9 @@ export class PrismaBookingRepository implements BookingRepository {
         startTime: input.startTime,
         durationMin: input.durationMin,
         responsibleId: input.responsibleId,
+        // Mediodía UTC del día elegido: la serie empieza en esa celda, no al
+        // día siguiente por el desfase con UTC.
+        createdAt: new Date(`${input.startDate}T12:00:00.000Z`),
       },
       select: { id: true },
     });

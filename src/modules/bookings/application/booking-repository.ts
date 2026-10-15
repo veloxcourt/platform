@@ -94,7 +94,10 @@ export interface BookingRepository {
   ): Promise<void>;
 
   // Turnos fijos (plantillas recurrentes)
-  getActiveFixedBookings(clubId: string): Promise<FixedBookingTemplate[]>;
+  getActiveFixedBookings(
+    clubId: string,
+    range?: { start: string; end: string },
+  ): Promise<FixedBookingTemplate[]>;
   createFixedBooking(
     clubId: string,
     input: CreateFixedBookingInput,

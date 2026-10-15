@@ -148,6 +148,8 @@ export interface CreateFixedBookingInput {
   durationMin: number;
   responsibleId: string;
   playerIds: string[];
+  /// Primer día en que la serie ocupa el calendario ("YYYY-MM-DD").
+  startDate: string;
 }
 
 /// Edición de un turno fijo. Aplica a todas las semanas de la serie.

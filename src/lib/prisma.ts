@@ -409,6 +409,7 @@ async function applyRuntimeSchema() {
     `CREATE UNIQUE INDEX IF NOT EXISTS "fixed_booking_players_fixedBookingId_userId_key" ON "fixed_booking_players"("fixedBookingId", "userId")`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "fixed_booking_players_fixedBookingId_position_key" ON "fixed_booking_players"("fixedBookingId", "position")`,
     `CREATE INDEX IF NOT EXISTS "fixed_booking_players_userId_idx" ON "fixed_booking_players"("userId")`,
+    `CREATE INDEX IF NOT EXISTS "bookings_clubId_date_idx" ON "bookings"("clubId", "date")`,
   ];
 
   const pool = new Pool({

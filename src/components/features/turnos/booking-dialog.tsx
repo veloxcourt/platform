@@ -197,9 +197,7 @@ function CreateBookingForm({
   onDone: () => void;
 }) {
   const [players, setPlayers] = useState<PlayerRef[]>(initialPlayers);
-  const [responsibleId, setResponsibleId] = useState<string>(
-    initialPlayers[0]?.id ?? "",
-  );
+  const [responsibleId, setResponsibleId] = useState("");
   const [slots, setSlots] = useState<string[]>(["", "", "", ""]);
   const [type, setType] = useState<"FIJO" | "NO_FIJO">("NO_FIJO");
   const [payment, setPayment] = useState<PaymentStatus>(
@@ -787,14 +785,21 @@ function BookingDetail({
               <select
                 className={SELECT_CLASS}
                 value={type}
-                onChange={(e) =>
-                  setType(e.target.value as "FIJO" | "NO_FIJO")
-                }
+                onChange={(e) => {
+                  const next = e.target.value as "FIJO" | "NO_FIJO";
+                  setType(next);
+                  if (next === "FIJO") setStatus("RESERVADO");
+                }}
               >
                 <option value="NO_FIJO">No fijo</option>
                 <option value="FIJO">Fijo</option>
               </select>
             </div>
+            {type === "FIJO" ? (
+              <p className="flex items-end text-xs text-muted-foreground">
+                El turno fijo queda reservado. No usa pre-reserva.
+              </p>
+            ) : (
             <div className="flex flex-col gap-1.5">
               <Label>Estado</Label>
               <select
@@ -808,6 +813,7 @@ function BookingDetail({
                 <option value="RESERVADO">Reservado</option>
               </select>
             </div>
+            )}
             <div className="flex flex-col gap-1.5">
               <Label>Pago</Label>
               <select

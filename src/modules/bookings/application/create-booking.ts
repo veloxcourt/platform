@@ -62,6 +62,7 @@ export async function createBooking(
       durationMin: settings.slotDurationMin,
       responsibleId: values.responsibleId,
       playerIds,
+      startDate: values.date,
     });
     return { ok: true };
   }

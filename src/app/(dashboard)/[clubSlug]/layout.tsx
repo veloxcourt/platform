@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { CalendarClock, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 
 import { logoutAction } from "@/app/(auth)/login/actions";
+import { VeloxCourtLogo } from "@/components/brand/veloxcourt-logo";
 import { ClubSwitcher } from "@/components/features/dashboard/club-switcher";
 import { DashboardNav } from "@/components/features/dashboard/dashboard-nav";
 import { getClubAccess } from "@/lib/auth/access";
@@ -48,14 +49,11 @@ export default async function DashboardLayout({
   });
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden">
+    <div className="flex h-dvh flex-col overflow-hidden phone-landscape:[&:has([data-turnos-board])>header]:hidden phone-landscape:[&:has([data-turnos-board])>main]:overflow-hidden phone-landscape:[&:has([data-turnos-board])>main]:p-0">
       <header className="shrink-0 border-b bg-background">
         <div className="flex h-14 items-center gap-4 px-4">
-          <Link href="/" className="flex items-center gap-2 font-semibold">
-            <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
-              <CalendarClock className="size-4" />
-            </span>
-            VeloxCourt
+          <Link href="/" className="flex shrink-0 items-center" aria-label="VeloxCourt">
+            <VeloxCourtLogo />
           </Link>
           <ClubSwitcher currentSlug={clubSlug} clubs={clubs} />
           <div className="ml-auto flex items-center gap-3">

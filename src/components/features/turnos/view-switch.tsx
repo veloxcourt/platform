@@ -1,17 +1,23 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { CalendarDays, CalendarRange } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { persistTurnosView, type TurnosView } from "./turnos-view";
 
-export function ViewSwitch({ current }: { current: "dia" | "semana" }) {
+export function ViewSwitch({ current }: { current: TurnosView }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const date = params.get("date");
 
-  function build(view: "dia" | "semana") {
+  useEffect(() => {
+    persistTurnosView(current);
+  }, [current]);
+
+  function build(view: TurnosView) {
     const p = new URLSearchParams();
     if (date) p.set("date", date);
     p.set("view", view);
@@ -25,6 +31,8 @@ export function ViewSwitch({ current }: { current: "dia" | "semana" }) {
     <div className="inline-flex rounded-lg border p-0.5">
       <Link
         href={build("dia")}
+        prefetch
+        onClick={() => persistTurnosView("dia")}
         className={cn(
           base,
           current === "dia"
@@ -37,6 +45,8 @@ export function ViewSwitch({ current }: { current: "dia" | "semana" }) {
       </Link>
       <Link
         href={build("semana")}
+        prefetch
+        onClick={() => persistTurnosView("semana")}
         className={cn(
           base,
           current === "semana"

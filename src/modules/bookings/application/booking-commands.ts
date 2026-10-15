@@ -50,7 +50,11 @@ export async function updateBooking(
     };
   }
 
-  await repo.updateBooking(club.id, bookingId, { ...data, playerIds });
+  await repo.updateBooking(club.id, bookingId, {
+    ...data,
+    playerIds,
+    status: data.type === "FIJO" ? "RESERVADO" : data.status,
+  });
   return { ok: true };
 }
 

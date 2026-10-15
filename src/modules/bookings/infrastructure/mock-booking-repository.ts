@@ -534,7 +534,7 @@ export class MockBookingRepository implements BookingRepository {
       responsible: nameOf(input.responsibleId),
       players: playerIds.map(nameOf),
       playersSet: playerIds.length > 0,
-      startDate: todayISO(),
+      startDate: input.startDate,
       releasedDates: [],
       active: true,
     });

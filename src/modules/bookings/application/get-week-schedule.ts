@@ -13,16 +13,6 @@ export async function getWeekSchedule(
   const club = await repo.getClubBySlug(clubSlug);
   if (!club) return null;
 
-  const [settings, courts, players, categories] = await Promise.all([
-    repo.getSettings(club.id),
-    repo.getCourts(club.id),
-    repo.getPlayers(club.id),
-    repo.getClubCategories(club.id),
-  ]);
-  const activeCourts = courts
-    .filter((c) => c.active)
-    .sort((a, b) => a.order - b.order);
-
   const weekStart = getWeekStartISO(dateISO);
   const days: DayColumn[] = Array.from({ length: 7 }, (_, i) => {
     const date = addDaysISO(weekStart, i);
@@ -35,10 +25,18 @@ export async function getWeekSchedule(
     };
   });
 
-  const [bookings, releasedSlots] = await Promise.all([
-    repo.getBookingsForRange(club.id, days[0].date, days[6].date),
-    repo.getReleasedFixedSlots(club.id, days[0].date, days[6].date),
-  ]);
+  const [settings, courts, players, categories, bookings, releasedSlots] =
+    await Promise.all([
+      repo.getSettings(club.id),
+      repo.getCourts(club.id),
+      repo.getPlayers(club.id),
+      repo.getClubCategories(club.id),
+      repo.getBookingsForRange(club.id, days[0].date, days[6].date),
+      repo.getReleasedFixedSlots(club.id, days[0].date, days[6].date),
+    ]);
+  const activeCourts = courts
+    .filter((c) => c.active)
+    .sort((a, b) => a.order - b.order);
 
   return {
     club,

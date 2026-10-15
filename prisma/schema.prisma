@@ -371,6 +371,7 @@ model Booking {
   players      BookingPlayer[]
 
   @@index([clubId, courtId, date])
+  @@index([clubId, date])
   @@map("bookings")
 }
 
