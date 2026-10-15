@@ -226,7 +226,14 @@ function buildDemoBookings(
         date,
         startTime: slot,
         durationMin: settings.slotDurationMin,
-        type: isFixed ? "FIJO" : "NO_FIJO",
+        type:
+          seed % 7 === 0
+            ? isFixed
+              ? "CLASE_FIJO"
+              : "CLASE_NO_FIJO"
+            : isFixed
+              ? "FIJO"
+              : "NO_FIJO",
         status: isReserved ? "RESERVADO" : "PRE_RESERVA",
         paymentStatus:
           paymentSeed === 0 ? "PAID" : paymentSeed === 1 ? "PARTIAL" : "UNPAID",
@@ -520,17 +527,19 @@ export class MockBookingRepository implements BookingRepository {
   async createFixedBooking(
     clubId: string,
     input: CreateFixedBookingInput,
-  ): Promise<void> {
+  ): Promise<string> {
     const record = getOrCreateRecord(clubId);
     const nameOf = (id: string) =>
       record.players.find((p) => p.id === id) ?? { id, name: "Jugador" };
     const playerIds = input.playerIds.filter(Boolean);
+    const id = `fx-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     record.fixed.push({
-      id: `fx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id,
       courtId: input.courtId,
       dayOfWeek: input.dayOfWeek,
       startTime: input.startTime,
       durationMin: input.durationMin,
+      type: input.type,
       responsible: nameOf(input.responsibleId),
       players: playerIds.map(nameOf),
       playersSet: playerIds.length > 0,
@@ -538,6 +547,7 @@ export class MockBookingRepository implements BookingRepository {
       releasedDates: [],
       active: true,
     });
+    return id;
   }
 
   async updateFixedBooking(
@@ -552,6 +562,7 @@ export class MockBookingRepository implements BookingRepository {
     if (!fixed) return { ok: false, error: "No se encontró el turno fijo" };
     const nameOf = (id: string) =>
       record.players.find((p) => p.id === id) ?? { id, name: "Jugador" };
+    fixed.type = data.type;
     fixed.responsible = nameOf(data.responsibleId);
     fixed.players = data.playerIds.filter(Boolean).map(nameOf);
     fixed.playersSet = true;

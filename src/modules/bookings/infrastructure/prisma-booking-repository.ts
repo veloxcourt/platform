@@ -15,6 +15,8 @@ import { totalRecipeCostCents } from "@/modules/catalog/domain/recipe-cost";
 import type {
   Booking,
   BookingSettings,
+  BookingType,
+  FixedBookingType,
   WritableBookingSettings,
   ClubInfo,
   Court,
@@ -251,6 +253,7 @@ type FixedReleaseRow = {
   courtId: string;
   startTime: string;
   durationMin: number;
+  type: FixedBookingType;
   userId: string;
   fullName: string;
 };
@@ -265,7 +268,7 @@ async function queryFixedReleases(
   const rows = range
     ? await prisma.$queryRawUnsafe<FixedReleaseRow[]>(
       `SELECT r."fixedBookingId", r."date", f."courtId", f."startTime", f."durationMin",
-              u."id" AS "userId", u."fullName"
+              f."type"::text AS "type", u."id" AS "userId", u."fullName"
        FROM "fixed_booking_releases" r
        INNER JOIN "fixed_bookings" f ON f."id" = r."fixedBookingId"
        INNER JOIN "users" u ON u."id" = f."responsibleId"
@@ -279,7 +282,7 @@ async function queryFixedReleases(
     )
     : await prisma.$queryRawUnsafe<FixedReleaseRow[]>(
         `SELECT r."fixedBookingId", r."date", f."courtId", f."startTime", f."durationMin",
-                u."id" AS "userId", u."fullName"
+                f."type"::text AS "type", u."id" AS "userId", u."fullName"
          FROM "fixed_booking_releases" r
          INNER JOIN "fixed_bookings" f ON f."id" = r."fixedBookingId"
          INNER JOIN "users" u ON u."id" = f."responsibleId"
@@ -289,6 +292,7 @@ async function queryFixedReleases(
   return rows.map((row) => ({
     ...row,
     durationMin: Number(row.durationMin),
+    type: row.type === "CLASE_FIJO" ? "CLASE_FIJO" : "FIJO",
   }));
 }
 
@@ -358,7 +362,7 @@ type BookingRow = {
   date: Date;
   startTime: string;
   durationMin: number;
-  type: "FIJO" | "NO_FIJO";
+  type: BookingType;
   status: "PRE_RESERVA" | "RESERVADO" | "CANCELLED";
   paymentStatus: string;
   price: number;
@@ -797,6 +801,7 @@ export class PrismaBookingRepository implements BookingRepository {
   }
 
   async getBookingsForDate(clubId: string, date: string): Promise<Booking[]> {
+    await ensureRuntimeSchema();
     const [rows, templates] = await Promise.all([
       prisma.booking.findMany({
         where: { clubId, date: toDbDate(date), status: { not: "CANCELLED" } },
@@ -812,6 +817,7 @@ export class PrismaBookingRepository implements BookingRepository {
     startDate: string,
     endDate: string,
   ): Promise<Booking[]> {
+    await ensureRuntimeSchema();
     const [rows, templates] = await Promise.all([
       prisma.booking.findMany({
         where: {
@@ -901,6 +907,7 @@ export class PrismaBookingRepository implements BookingRepository {
     clubId: string,
     data: CreateBookingData,
   ): Promise<Booking> {
+    await ensureRuntimeSchema();
     const created = await prisma.booking.create({
       data: {
         clubId,
@@ -936,6 +943,7 @@ export class PrismaBookingRepository implements BookingRepository {
     });
     if (!existing) return;
 
+    await ensureRuntimeSchema();
     await prisma.booking.update({
       where: { id: bookingId },
       data: {
@@ -997,6 +1005,7 @@ export class PrismaBookingRepository implements BookingRepository {
     clubId: string,
     range?: { start: string; end: string },
   ): Promise<FixedBookingTemplate[]> {
+    await ensureRuntimeSchema();
     const [rows, releases, playerRows] = await Promise.all([
       prisma.fixedBooking.findMany({
         where: { clubId, active: true },
@@ -1037,6 +1046,7 @@ export class PrismaBookingRepository implements BookingRepository {
         dayOfWeek: f.dayOfWeek,
         startTime: f.startTime,
         durationMin: f.durationMin,
+        type: f.type === "CLASE_FIJO" ? "CLASE_FIJO" : "FIJO",
         responsible: { id: f.responsible.id, name: f.responsible.fullName },
         players: stored?.players ?? [],
         playersSet: stored?.playersSet ?? false,
@@ -1052,7 +1062,8 @@ export class PrismaBookingRepository implements BookingRepository {
   async createFixedBooking(
     clubId: string,
     input: CreateFixedBookingInput,
-  ): Promise<void> {
+  ): Promise<string> {
+    await ensureRuntimeSchema();
     const created = await prisma.fixedBooking.create({
       data: {
         clubId,
@@ -1060,6 +1071,7 @@ export class PrismaBookingRepository implements BookingRepository {
         dayOfWeek: input.dayOfWeek,
         startTime: input.startTime,
         durationMin: input.durationMin,
+        type: input.type,
         responsibleId: input.responsibleId,
         // Mediodía UTC del día elegido: la serie empieza en esa celda, no al
         // día siguiente por el desfase con UTC.
@@ -1070,6 +1082,7 @@ export class PrismaBookingRepository implements BookingRepository {
     if (input.playerIds.length > 0) {
       await writeFixedPlayers(created.id, clubId, input.playerIds);
     }
+    return created.id;
   }
 
   async updateFixedBooking(
@@ -1084,14 +1097,15 @@ export class PrismaBookingRepository implements BookingRepository {
     if (!fixed) return { ok: false, error: "No se encontró el turno fijo" };
 
     try {
+      await ensureRuntimeSchema();
       await prisma.fixedBooking.updateMany({
         where: { id: fixedBookingId, clubId },
-        data: { responsibleId: data.responsibleId },
+        data: { responsibleId: data.responsibleId, type: data.type },
       });
       await writeFixedPlayers(fixedBookingId, clubId, data.playerIds);
     } catch (error) {
       console.error("[turnos] updateFixedBooking", error);
-      return { ok: false, error: "No se pudieron guardar los jugadores" };
+      return { ok: false, error: "No se pudo guardar el turno fijo" };
     }
     return { ok: true };
   }
@@ -1121,6 +1135,7 @@ export class PrismaBookingRepository implements BookingRepository {
       date: rawDateToISO(row.date),
       startTime: row.startTime,
       durationMin: row.durationMin,
+      type: row.type,
       responsible: { id: row.userId, name: row.fullName },
     }));
   }

@@ -1,10 +1,21 @@
 import type {
   Booking,
   BookingSettings,
+  BookingType,
   FixedBookingTemplate,
+  FixedBookingType,
   PlayerRef,
   ReleasedFixedSlot,
 } from "./types";
+
+/// Juego (Fijo) y Clase (Fijo) se repiten cada semana.
+export function isFixedType(type: BookingType): type is FixedBookingType {
+  return type === "FIJO" || type === "CLASE_FIJO";
+}
+
+export function isClassType(type: BookingType): boolean {
+  return type === "CLASE_FIJO" || type === "CLASE_NO_FIJO";
+}
 
 /// Convierte "HH:mm" a minutos desde la medianoche.
 export function timeToMinutes(time: string): number {
@@ -139,7 +150,7 @@ export function expandFixedBookings(
         date,
         startTime: t.startTime,
         durationMin: t.durationMin,
-        type: "FIJO",
+        type: t.type,
         status: "RESERVADO",
         paymentStatus: "UNPAID",
         price: 0,
@@ -170,6 +181,7 @@ export function releasedFixedSlots(
         date,
         startTime: t.startTime,
         durationMin: t.durationMin,
+        type: t.type,
         responsible: t.responsible,
       });
     }
@@ -204,7 +216,7 @@ export function calendarCellAt(
 ): { booking: Booking | null; released: ReleasedFixedSlot | null } {
   const booking = findBookingAt(bookings, courtId, slot);
   if (booking) {
-    if (options?.onlyFixed && booking.type !== "FIJO") {
+    if (options?.onlyFixed && !isFixedType(booking.type)) {
       return { booking: null, released: null };
     }
     return { booking, released: null };

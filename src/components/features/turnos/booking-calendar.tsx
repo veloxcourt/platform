@@ -6,6 +6,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  GraduationCap,
   Repeat,
   Unlock,
   Users,
@@ -20,31 +21,58 @@ import type {
   DaySchedule,
   ReleasedFixedSlot,
 } from "@/modules/bookings/domain/types";
-import { calendarCellAt } from "@/modules/bookings/domain/rules";
+import {
+  calendarCellAt,
+  isClassType,
+  isFixedType,
+} from "@/modules/bookings/domain/rules";
 import type { AvailableCopyOption } from "./available-copy";
 import { CopyAvailableMenu } from "./copy-available-menu";
 import {
+  CLASS_SLOT_STYLE,
+  FIXED_CLASS_SLOT_STYLE,
   FIXED_SLOT_STYLE,
   PAYMENT_STATUS_META,
   SLOT_STATUS_STYLES,
   slotPaint,
 } from "./booking-status";
+import {
+  AbbreviateNamesToggle,
+  useAbbreviateNames,
+} from "./abbreviate-names-toggle";
+import { formatResponsibleName } from "./responsible-name";
 import { ViewSwitch } from "./view-switch";
 import { BookingDialog, type BookingSelection } from "./booking-dialog";
+import { useScheduleBoard } from "./use-schedule-board";
 
 interface Props {
   schedule: DaySchedule;
   copyOptions: AvailableCopyOption[];
+  abbreviateNames: boolean;
 }
 
-export function BookingCalendar({ schedule, copyOptions }: Props) {
+export function BookingCalendar({
+  schedule,
+  copyOptions,
+  abbreviateNames: abbreviateNamesInitial,
+}: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const clubSlug = schedule.club.slug;
 
   const [courtFilter, setCourtFilter] = useState<string>("all");
   const [onlyFixed, setOnlyFixed] = useState(false);
+  const { abbreviateNames, setAbbreviate } = useAbbreviateNames(
+    abbreviateNamesInitial,
+  );
   const [selected, setSelected] = useState<BookingSelection>(null);
+  const board = useScheduleBoard({
+    clubSlug,
+    bookings: schedule.bookings,
+    releasedSlots: schedule.releasedSlots,
+    durationMin: schedule.settings.slotDurationMin,
+    onClose: () => setSelected(null),
+  });
 
   const visibleCourts = useMemo(
     () =>
@@ -132,6 +160,10 @@ export function BookingCalendar({ schedule, copyOptions }: Props) {
             />
             Solo fijos
           </label>
+          <AbbreviateNamesToggle
+            checked={abbreviateNames}
+            onCheckedChange={setAbbreviate}
+          />
         </div>
       </div>
 
@@ -170,8 +202,8 @@ export function BookingCalendar({ schedule, copyOptions }: Props) {
               </div>
               {visibleCourts.map((court) => {
                 const cell = calendarCellAt(
-                  schedule.bookings,
-                  schedule.releasedSlots,
+                  board.bookings,
+                  board.releasedSlots,
                   court.id,
                   slot,
                   { date: schedule.date, onlyFixed },
@@ -181,6 +213,7 @@ export function BookingCalendar({ schedule, copyOptions }: Props) {
                     <CalendarCell
                       booking={cell.booking ?? undefined}
                       released={cell.released}
+                      abbreviateNames={abbreviateNames}
                       onClick={() =>
                         setSelected({
                           booking: cell.booking,
@@ -213,6 +246,11 @@ export function BookingCalendar({ schedule, copyOptions }: Props) {
           setSelected(null);
           router.refresh();
         }}
+        onCancelBooking={board.cancelBooking}
+        onCancelFixedSeries={board.cancelFixedSeries}
+        onReleaseFixedDay={board.releaseFixedDay}
+        onRestoreFixedDay={board.restoreFixedDay}
+        onCreateBooking={board.createBooking}
       />
     </div>
   );
@@ -243,10 +281,12 @@ function FilterChip({
 function CalendarCell({
   booking,
   released,
+  abbreviateNames,
   onClick,
 }: {
   booking: Booking | undefined;
   released: ReleasedFixedSlot | null;
+  abbreviateNames: boolean;
   onClick: () => void;
 }) {
   const style = booking ? slotPaint(booking) : SLOT_STATUS_STYLES.DISPONIBLE;
@@ -263,12 +303,16 @@ function CalendarCell({
       {booking ? (
         <>
           <div className="flex items-center justify-between gap-1">
-            <span className="truncate font-medium">
-              {booking.responsible.name}
+            <span
+              className="truncate font-medium"
+              title={booking.responsible.name}
+            >
+              {formatResponsibleName(booking.responsible.name, abbreviateNames)}
             </span>
-            {booking.type === "FIJO" && (
-              <Repeat className="size-3 shrink-0 text-muted-foreground" />
-            )}
+            <span className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
+              {isClassType(booking.type) && <GraduationCap className="size-3" />}
+              {isFixedType(booking.type) && <Repeat className="size-3" />}
+            </span>
           </div>
           <div className="flex items-center justify-between gap-1">
             <span className="flex items-center gap-1 text-muted-foreground">
@@ -291,8 +335,12 @@ function CalendarCell({
             <span className="font-medium">Disponible</span>
             <Unlock className="size-3 shrink-0 text-muted-foreground" />
           </div>
-          <span className="truncate text-muted-foreground">
-            Fijo · {released.responsible.name}
+          <span
+            className="truncate text-muted-foreground"
+            title={released.responsible.name}
+          >
+            Fijo ·{" "}
+            {formatResponsibleName(released.responsible.name, abbreviateNames)}
           </span>
         </>
       ) : (
@@ -336,7 +384,17 @@ function Legend() {
         <span
           className={cn("size-2.5 rounded-full", FIXED_SLOT_STYLE.dot)}
         />
-        Turno fijo
+        {FIXED_SLOT_STYLE.label}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className={cn("size-2.5 rounded-full", CLASS_SLOT_STYLE.dot)} />
+        {CLASS_SLOT_STYLE.label}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span
+          className={cn("size-2.5 rounded-full", FIXED_CLASS_SLOT_STYLE.dot)}
+        />
+        {FIXED_CLASS_SLOT_STYLE.label}
       </span>
       <span className="flex items-center gap-1.5">
         <Unlock className="size-3" /> Fijo liberado

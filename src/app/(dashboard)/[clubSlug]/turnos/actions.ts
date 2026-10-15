@@ -22,11 +22,9 @@ import {
   setBookingPayment,
   setBookingStatus,
   updateBooking,
+  type EditFixedBookingInput,
 } from "@/modules/bookings/application/booking-commands";
-import type {
-  UpdateBookingData,
-  UpdateFixedBookingData,
-} from "@/modules/bookings/domain/types";
+import type { UpdateBookingData } from "@/modules/bookings/domain/types";
 import {
   createBookingSchema,
   type CreateBookingValues,
@@ -228,11 +226,18 @@ export async function cancelBookingAction(
 export async function updateFixedBookingAction(
   clubSlug: string,
   fixedBookingId: string,
-  data: UpdateFixedBookingData,
+  date: string,
+  data: EditFixedBookingInput,
 ): Promise<CommandResult> {
   await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
-  const result = await updateFixedBooking(repo, clubSlug, fixedBookingId, data);
+  const result = await updateFixedBooking(
+    repo,
+    clubSlug,
+    fixedBookingId,
+    date,
+    data,
+  );
   if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
   return result;
 }
@@ -285,11 +290,12 @@ export async function cancelFixedBookingAction(
 export async function updateBookingAction(
   clubSlug: string,
   bookingId: string,
+  date: string,
   data: UpdateBookingData,
 ): Promise<CommandResult> {
   await requireClubModuleAccess(clubSlug, "turnos");
   const repo = getBookingRepository();
-  const result = await updateBooking(repo, clubSlug, bookingId, data);
+  const result = await updateBooking(repo, clubSlug, bookingId, date, data);
   if (result.ok) revalidatePath(`/${clubSlug}/turnos`);
   return result;
 }

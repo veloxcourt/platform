@@ -1,7 +1,10 @@
 // Tipos de dominio del módulo de Turnos.
 // Independientes de la infraestructura (Prisma/Supabase) y de la UI.
 
-export type BookingType = "FIJO" | "NO_FIJO";
+/// FIJO y NO_FIJO son turnos de juego. Los dos de clase usan el mismo campo.
+export type BookingType = "NO_FIJO" | "FIJO" | "CLASE_NO_FIJO" | "CLASE_FIJO";
+/// Tipos que se repiten cada semana (plantilla de turno fijo).
+export type FixedBookingType = Extract<BookingType, "FIJO" | "CLASE_FIJO">;
 export type BookingStatus = "PRE_RESERVA" | "RESERVADO" | "CANCELLED";
 export type PaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
 
@@ -121,6 +124,7 @@ export interface FixedBookingTemplate {
   dayOfWeek: number; // 0 (dom) .. 6 (sáb)
   startTime: string; // "HH:mm"
   durationMin: number;
+  type: FixedBookingType;
   responsible: PlayerRef;
   /// Jugadores en cancha. Si playersSet es false y esta lista está vacía,
   /// el calendario muestra al responsable.
@@ -137,6 +141,7 @@ export interface ReleasedFixedSlot {
   date: string; // "YYYY-MM-DD"
   startTime: string; // "HH:mm"
   durationMin: number;
+  type: FixedBookingType;
   responsible: PlayerRef;
 }
 
@@ -146,6 +151,7 @@ export interface CreateFixedBookingInput {
   dayOfWeek: number;
   startTime: string;
   durationMin: number;
+  type: FixedBookingType;
   responsibleId: string;
   playerIds: string[];
   /// Primer día en que la serie ocupa el calendario ("YYYY-MM-DD").
@@ -154,6 +160,7 @@ export interface CreateFixedBookingInput {
 
 /// Edición de un turno fijo. Aplica a todas las semanas de la serie.
 export interface UpdateFixedBookingData {
+  type: FixedBookingType;
   responsibleId: string;
   playerIds: string[];
 }

@@ -101,7 +101,7 @@ export interface BookingRepository {
   createFixedBooking(
     clubId: string,
     input: CreateFixedBookingInput,
-  ): Promise<void>;
+  ): Promise<string>;
   updateFixedBooking(
     clubId: string,
     fixedBookingId: string,

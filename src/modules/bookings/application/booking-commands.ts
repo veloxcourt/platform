@@ -1,11 +1,25 @@
 import type { BookingRepository } from "./booking-repository";
-import type { CommandResult } from "./create-booking";
+import { overlapsFixedTemplate, type CommandResult } from "./create-booking";
 import type {
+  BookingType,
   PaymentStatus,
   UpdateBookingData,
-  UpdateFixedBookingData,
 } from "../domain/types";
-import { MAX_PLAYERS_PER_BOOKING } from "../domain/rules";
+import {
+  dayOfWeekISO,
+  isFixedType,
+  MAX_PLAYERS_PER_BOOKING,
+} from "../domain/rules";
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/// Edición de un turno fijo desde el calendario. Si el tipo pasa a no fijo,
+/// la serie termina y queda una reserva sola para la fecha tocada.
+export interface EditFixedBookingInput {
+  type: BookingType;
+  responsibleId: string;
+  playerIds: string[];
+}
 
 /// Confirma una pre-reserva (PRE_RESERVA -> RESERVADO).
 export async function confirmBooking(
@@ -31,13 +45,17 @@ export async function cancelBooking(
   return { ok: true };
 }
 
-/// Edita una reserva completa: responsable, jugadores, estado y pago.
+/// Edita una reserva completa: tipo, responsable, jugadores, estado y pago.
+/// Si una reserva no fija pasa a fija, se crea la serie desde su fecha y la
+/// reserva suelta se cancela.
 export async function updateBooking(
   repo: BookingRepository,
   clubSlug: string,
   bookingId: string,
+  date: string,
   data: UpdateBookingData,
 ): Promise<CommandResult> {
+  if (!ISO_DATE.test(date)) return { ok: false, error: "Fecha inválida" };
   const club = await repo.getClubBySlug(clubSlug);
   if (!club) return { ok: false, error: "Club no encontrado" };
   if (!data.responsibleId) return { ok: false, error: "Elegí un responsable" };
@@ -50,10 +68,42 @@ export async function updateBooking(
     };
   }
 
+  if (isFixedType(data.type)) {
+    const dayBookings = await repo.getBookingsForDate(club.id, date);
+    const existing = dayBookings.find((booking) => booking.id === bookingId);
+    if (!existing) return { ok: false, error: "No se encontró el turno" };
+
+    if (!isFixedType(existing.type)) {
+      if (existing.impacted) {
+        return {
+          ok: false,
+          error:
+            "El turno ya se cargó en la cuenta del responsable. Cancelalo y creá el turno fijo de nuevo.",
+        };
+      }
+      const templates = await repo.getActiveFixedBookings(club.id);
+      if (overlapsFixedTemplate(templates, existing)) {
+        return { ok: false, error: "Ese horario ya tiene un turno fijo" };
+      }
+      await repo.createFixedBooking(club.id, {
+        courtId: existing.courtId,
+        dayOfWeek: dayOfWeekISO(existing.date),
+        startTime: existing.startTime,
+        durationMin: existing.durationMin,
+        type: data.type,
+        responsibleId: data.responsibleId,
+        playerIds,
+        startDate: existing.date,
+      });
+      await repo.cancelBooking(club.id, bookingId);
+      return { ok: true };
+    }
+  }
+
   await repo.updateBooking(club.id, bookingId, {
     ...data,
     playerIds,
-    status: data.type === "FIJO" ? "RESERVADO" : data.status,
+    status: isFixedType(data.type) ? "RESERVADO" : data.status,
   });
   return { ok: true };
 }
@@ -71,13 +121,16 @@ export async function setBookingStatus(
   return { ok: true };
 }
 
-/// Cambia responsable y jugadores de un turno fijo. Vale para toda la serie.
+/// Cambia tipo, responsable y jugadores de un turno fijo. Vale para toda la serie.
+/// Si el tipo pasa a no fijo, la serie termina y `date` queda como reserva suelta.
 export async function updateFixedBooking(
   repo: BookingRepository,
   clubSlug: string,
   fixedBookingId: string,
-  data: UpdateFixedBookingData,
+  date: string,
+  data: EditFixedBookingInput,
 ): Promise<CommandResult> {
+  if (!ISO_DATE.test(date)) return { ok: false, error: "Fecha inválida" };
   const club = await repo.getClubBySlug(clubSlug);
   if (!club) return { ok: false, error: "Club no encontrado" };
   if (!data.responsibleId) return { ok: false, error: "Elegí un responsable" };
@@ -90,7 +143,34 @@ export async function updateFixedBooking(
     };
   }
 
+  if (!isFixedType(data.type)) {
+    const templates = await repo.getActiveFixedBookings(club.id);
+    const template = templates.find((item) => item.id === fixedBookingId);
+    if (!template) return { ok: false, error: "No se encontró el turno fijo" };
+    if (dayOfWeekISO(date) !== template.dayOfWeek || date < template.startDate) {
+      return { ok: false, error: "La fecha no corresponde a este turno fijo" };
+    }
+    const settings = await repo.getSettings(club.id);
+    await repo.createBooking(club.id, {
+      courtId: template.courtId,
+      date,
+      startTime: template.startTime,
+      durationMin: template.durationMin,
+      type: data.type,
+      status: "RESERVADO",
+      paymentStatus: "UNPAID",
+      price: settings.bookingPrice,
+      responsibleId: data.responsibleId,
+      playerIds,
+      expiresAt: null,
+      createdById: data.responsibleId,
+    });
+    await repo.cancelFixedBooking(club.id, fixedBookingId);
+    return { ok: true };
+  }
+
   const result = await repo.updateFixedBooking(club.id, fixedBookingId, {
+    type: data.type,
     responsibleId: data.responsibleId,
     playerIds,
   });
@@ -99,8 +179,6 @@ export async function updateFixedBooking(
   }
   return { ok: true };
 }
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /// Libera una sola fecha de un turno fijo. La serie sigue las demás semanas.
 export async function releaseFixedOccurrence(

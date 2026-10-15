@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
-const PRISMA_SCHEMA_REVISION = 61;
+const PRISMA_SCHEMA_REVISION = 63;
 
 /** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
 const PG_POOL_MAX = 1;
@@ -78,6 +78,8 @@ function schemaFingerprint(): string {
     "instagram" in Prisma.UserScalarFieldEnum ? "1" : "0",
     "showInClientMenu" in Prisma.ProductScalarFieldEnum ? "1" : "0",
     "catalogCityId" in Prisma.UserScalarFieldEnum ? "1" : "0",
+    "type" in Prisma.FixedBookingScalarFieldEnum ? "1" : "0",
+    "CLASE_FIJO" in $Enums.BookingType ? "1" : "0",
   ].join(":");
 }
 
@@ -385,6 +387,29 @@ async function applyRuntimeSchema() {
     `CREATE UNIQUE INDEX IF NOT EXISTS "fixed_booking_releases_fixedBookingId_date_key" ON "fixed_booking_releases"("fixedBookingId", "date")`,
     `CREATE INDEX IF NOT EXISTS "fixed_booking_releases_date_idx" ON "fixed_booking_releases"("date")`,
     `ALTER TABLE "fixed_bookings" ADD COLUMN IF NOT EXISTS "playersSet" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TYPE "BookingType" ADD VALUE IF NOT EXISTS 'CLASE_FIJO'`,
+    `ALTER TYPE "BookingType" ADD VALUE IF NOT EXISTS 'CLASE_NO_FIJO'`,
+    `ALTER TABLE "fixed_bookings" ADD COLUMN IF NOT EXISTS "type" "BookingType" NOT NULL DEFAULT 'FIJO'`,
+    // Las clases se marcaron un rato con una columna booleana aparte. Se pasan
+    // al tipo y la columna se elimina.
+    `DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'bookings' AND column_name = 'isClass'
+      ) THEN
+        UPDATE "bookings"
+        SET "type" = (CASE WHEN "type" = 'FIJO' THEN 'CLASE_FIJO' ELSE 'CLASE_NO_FIJO' END)::"BookingType"
+        WHERE "isClass" = true;
+        ALTER TABLE "bookings" DROP COLUMN "isClass";
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'fixed_bookings' AND column_name = 'isClass'
+      ) THEN
+        UPDATE "fixed_bookings" SET "type" = 'CLASE_FIJO' WHERE "isClass" = true;
+        ALTER TABLE "fixed_bookings" DROP COLUMN "isClass";
+      END IF;
+    END $$`,
     `CREATE TABLE IF NOT EXISTS "fixed_booking_players" (
       "id" TEXT NOT NULL,
       "fixedBookingId" TEXT NOT NULL,

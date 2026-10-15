@@ -6,6 +6,7 @@ import {
   CalendarRange,
   ChevronLeft,
   ChevronRight,
+  GraduationCap,
   Repeat,
   Unlock,
 } from "lucide-react";
@@ -19,31 +20,58 @@ import type {
   ReleasedFixedSlot,
   WeekSchedule,
 } from "@/modules/bookings/domain/types";
-import { calendarCellAt } from "@/modules/bookings/domain/rules";
 import {
+  calendarCellAt,
+  isClassType,
+  isFixedType,
+} from "@/modules/bookings/domain/rules";
+import {
+  CLASS_SLOT_STYLE,
+  FIXED_CLASS_SLOT_STYLE,
   FIXED_SLOT_STYLE,
   SLOT_STATUS_STYLES,
   slotPaint,
 } from "./booking-status";
 import type { AvailableCopyOption } from "./available-copy";
 import { CopyAvailableMenu } from "./copy-available-menu";
+import {
+  AbbreviateNamesToggle,
+  useAbbreviateNames,
+} from "./abbreviate-names-toggle";
+import { formatResponsibleName } from "./responsible-name";
 import { ViewSwitch } from "./view-switch";
 import { BookingDialog, type BookingSelection } from "./booking-dialog";
+import { slotSpanMin, useScheduleBoard } from "./use-schedule-board";
 
 interface Props {
   schedule: WeekSchedule;
   copyOptions: AvailableCopyOption[];
+  abbreviateNames: boolean;
 }
 
-export function WeeklySchedule({ schedule, copyOptions }: Props) {
+export function WeeklySchedule({
+  schedule,
+  copyOptions,
+  abbreviateNames: abbreviateNamesInitial,
+}: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const [includeWeekend, setIncludeWeekend] = useState(false);
   const [onlyFixed, setOnlyFixed] = useState(false);
+  const { abbreviateNames, setAbbreviate } = useAbbreviateNames(
+    abbreviateNamesInitial,
+  );
   const [selectedCourts, setSelectedCourts] = useState<Set<string>>(
     () => new Set(schedule.courts.map((c) => c.id)),
   );
   const [selected, setSelected] = useState<BookingSelection>(null);
+  const board = useScheduleBoard({
+    clubSlug: schedule.club.slug,
+    bookings: schedule.bookings,
+    releasedSlots: schedule.releasedSlots,
+    durationMin: slotSpanMin(schedule.slots),
+    onClose: () => setSelected(null),
+  });
 
   const visibleDays = useMemo(
     () =>
@@ -60,13 +88,13 @@ export function WeeklySchedule({ schedule, copyOptions }: Props) {
 
   const bookingsByDate = useMemo(() => {
     const map = new Map<string, Booking[]>();
-    for (const booking of schedule.bookings) {
+    for (const booking of board.bookings) {
       const list = map.get(booking.date);
       if (list) list.push(booking);
       else map.set(booking.date, [booking]);
     }
     return map;
-  }, [schedule.bookings]);
+  }, [board.bookings]);
 
   function toggleCourt(id: string) {
     setSelectedCourts((prev) => {
@@ -152,6 +180,10 @@ export function WeeklySchedule({ schedule, copyOptions }: Props) {
               />
               Solo fijos
             </label>
+            <AbbreviateNamesToggle
+              checked={abbreviateNames}
+              onCheckedChange={setAbbreviate}
+            />
           </div>
           <CopyAvailableMenu options={copyOptions} />
         </div>
@@ -230,7 +262,7 @@ export function WeeklySchedule({ schedule, copyOptions }: Props) {
                   return visibleCourts.map((court, idx) => {
                     const cell = calendarCellAt(
                       dayBookings,
-                      schedule.releasedSlots,
+                      board.releasedSlots,
                       court.id,
                       slot,
                       { date: day.date, onlyFixed },
@@ -243,6 +275,7 @@ export function WeeklySchedule({ schedule, copyOptions }: Props) {
                       <WeekCell
                         booking={cell.booking}
                         released={cell.released}
+                        abbreviateNames={abbreviateNames}
                         onClick={() =>
                           setSelected({
                             booking: cell.booking,
@@ -277,6 +310,11 @@ export function WeeklySchedule({ schedule, copyOptions }: Props) {
           setSelected(null);
           router.refresh();
         }}
+        onCancelBooking={board.cancelBooking}
+        onCancelFixedSeries={board.cancelFixedSeries}
+        onReleaseFixedDay={board.releaseFixedDay}
+        onRestoreFixedDay={board.restoreFixedDay}
+        onCreateBooking={board.createBooking}
       />
     </div>
   );
@@ -285,10 +323,12 @@ export function WeeklySchedule({ schedule, copyOptions }: Props) {
 function WeekCell({
   booking,
   released,
+  abbreviateNames,
   onClick,
 }: {
   booking: ReturnType<typeof calendarCellAt>["booking"];
   released: ReleasedFixedSlot | null;
+  abbreviateNames: boolean;
   onClick: () => void;
 }) {
   const style = booking ? slotPaint(booking) : SLOT_STATUS_STYLES.DISPONIBLE;
@@ -308,10 +348,13 @@ function WeekCell({
     >
       {booking ? (
         <>
-          <span className="truncate">{booking.responsible.name}</span>
-          {booking.type === "FIJO" && (
-            <Repeat className="ml-auto size-3 shrink-0 text-muted-foreground" />
-          )}
+          <span className="truncate" title={booking.responsible.name}>
+            {formatResponsibleName(booking.responsible.name, abbreviateNames)}
+          </span>
+          <span className="ml-auto flex shrink-0 items-center gap-0.5 text-muted-foreground">
+            {isClassType(booking.type) && <GraduationCap className="size-3" />}
+            {isFixedType(booking.type) && <Repeat className="size-3" />}
+          </span>
         </>
       ) : released ? (
         <>
@@ -357,7 +400,17 @@ function Legend() {
       </span>
       <span className="flex items-center gap-1.5">
         <span className={cn("size-2.5 rounded-full", FIXED_SLOT_STYLE.dot)} />
-        Turno fijo
+        {FIXED_SLOT_STYLE.label}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className={cn("size-2.5 rounded-full", CLASS_SLOT_STYLE.dot)} />
+        {CLASS_SLOT_STYLE.label}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span
+          className={cn("size-2.5 rounded-full", FIXED_CLASS_SLOT_STYLE.dot)}
+        />
+        {FIXED_CLASS_SLOT_STYLE.label}
       </span>
       <span className="flex items-center gap-1.5">
         <Unlock className="size-3" /> Fijo liberado

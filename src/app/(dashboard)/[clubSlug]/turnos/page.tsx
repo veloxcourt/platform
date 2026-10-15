@@ -13,6 +13,10 @@ import { normalizeDateISO } from "@/lib/date";
 import { BookingCalendar } from "@/components/features/turnos/booking-calendar";
 import { WeeklySchedule } from "@/components/features/turnos/weekly-schedule";
 import {
+  TURNOS_ABBREV_NAMES_COOKIE,
+  resolveAbbreviateNames,
+} from "@/components/features/turnos/responsible-name";
+import {
   TURNOS_VIEW_COOKIE,
   resolveTurnosView,
 } from "@/components/features/turnos/turnos-view";
@@ -32,7 +36,11 @@ export default async function TurnosPage({
 }) {
   const { clubSlug } = await params;
   const { date, view } = await searchParams;
-  const savedView = (await cookies()).get(TURNOS_VIEW_COOKIE)?.value;
+  const cookieStore = await cookies();
+  const savedView = cookieStore.get(TURNOS_VIEW_COOKIE)?.value;
+  const abbreviateNames = resolveAbbreviateNames(
+    cookieStore.get(TURNOS_ABBREV_NAMES_COOKIE)?.value,
+  );
   const turnosView = resolveTurnosView(view, savedView);
 
   const access = await getClubAccess(clubSlug);
@@ -86,9 +94,17 @@ export default async function TurnosPage({
       </div>
 
       {isWeek && weekSchedule ? (
-        <WeeklySchedule schedule={weekSchedule} copyOptions={copyOptions} />
+        <WeeklySchedule
+          schedule={weekSchedule}
+          copyOptions={copyOptions}
+          abbreviateNames={abbreviateNames}
+        />
       ) : schedule ? (
-        <BookingCalendar schedule={schedule} copyOptions={copyOptions} />
+        <BookingCalendar
+          schedule={schedule}
+          copyOptions={copyOptions}
+          abbreviateNames={abbreviateNames}
+        />
       ) : null}
     </div>
   );

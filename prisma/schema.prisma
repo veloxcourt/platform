@@ -402,6 +402,8 @@ model FixedBooking {
   /// True cuando el club guardó los jugadores de cancha. Si sigue en false,
   /// el calendario muestra al responsable hasta que los editen.
   playersSet    Boolean  @default(false)
+  /// FIJO (juego) o CLASE_FIJO.
+  type          BookingType @default(FIJO)
   active        Boolean  @default(true)
   createdAt     DateTime @default(now())
 
@@ -446,9 +448,12 @@ model FixedBookingPlayer {
   @@map("fixed_booking_players")
 }
 
+/// FIJO y NO_FIJO son turnos de juego.
 enum BookingType {
   FIJO
   NO_FIJO
+  CLASE_FIJO
+  CLASE_NO_FIJO
 }
 
 enum BookingStatus {

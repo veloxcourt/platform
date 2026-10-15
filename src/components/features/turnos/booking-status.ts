@@ -27,19 +27,55 @@ export const SLOT_STATUS_STYLES: Record<SlotStatus, SlotPaint> = {
 };
 
 export const FIXED_SLOT_STYLE: SlotPaint = {
-  label: "Turno fijo",
+  label: "Juego (Fijo)",
   cell: "bg-emerald-100 hover:bg-emerald-200 border-emerald-400 dark:bg-emerald-950/50 dark:border-emerald-700",
   dot: "bg-emerald-500",
 };
 
-/// Color de una celda ocupada: el fijo es verde aunque el estado sea reservado.
+export const CLASS_SLOT_STYLE: SlotPaint = {
+  label: "Clase (No fijo)",
+  cell: "bg-violet-100 hover:bg-violet-200 border-violet-400 dark:bg-violet-950/50 dark:border-violet-700",
+  dot: "bg-violet-500",
+};
+
+export const FIXED_CLASS_SLOT_STYLE: SlotPaint = {
+  label: "Clase (Fijo)",
+  cell: "bg-orange-100 hover:bg-orange-200 border-orange-400 dark:bg-orange-950/50 dark:border-orange-700",
+  dot: "bg-orange-500",
+};
+
+/// Color de una celda ocupada. Juego (No fijo) usa el color de su estado;
+/// los otros tres tipos tienen color propio.
 export function slotPaint(booking: {
   type: BookingType;
   status: Exclude<SlotStatus, "DISPONIBLE">;
 }): SlotPaint {
-  if (booking.type === "FIJO") return FIXED_SLOT_STYLE;
-  return SLOT_STATUS_STYLES[booking.status];
+  switch (booking.type) {
+    case "FIJO":
+      return FIXED_SLOT_STYLE;
+    case "CLASE_NO_FIJO":
+      return CLASS_SLOT_STYLE;
+    case "CLASE_FIJO":
+      return FIXED_CLASS_SLOT_STYLE;
+    default:
+      return SLOT_STATUS_STYLES[booking.status];
+  }
 }
+
+export const BOOKING_TYPE_LABELS: Record<BookingType, string> = {
+  NO_FIJO: "Juego (No fijo)",
+  FIJO: "Juego (Fijo)",
+  CLASE_NO_FIJO: "Clase (No fijo)",
+  CLASE_FIJO: "Clase (Fijo)",
+};
+
+/// Opciones del selector "Tipo", en el orden en que se muestran.
+export const BOOKING_TYPE_OPTIONS: BookingType[] = [
+  "NO_FIJO",
+  "FIJO",
+  "CLASE_NO_FIJO",
+  "CLASE_FIJO",
+];
 
 export const PAYMENT_STATUS_META: Record<
   PaymentStatus,
