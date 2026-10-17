@@ -48,6 +48,8 @@ export interface PlayerRef {
 export interface PlayerListItem {
   id: string;
   fullName: string;
+  firstName: string | null;
+  lastName: string | null;
   phone: string | null;
   instagram: string | null;
   gender: Gender | null;

@@ -297,6 +297,8 @@ export class MockBookingRepository implements BookingRepository {
       .map((p) => ({
         id: p.id,
         fullName: p.name,
+        firstName: null,
+        lastName: null,
         phone: null,
         instagram: null,
         gender: p.gender ?? null,

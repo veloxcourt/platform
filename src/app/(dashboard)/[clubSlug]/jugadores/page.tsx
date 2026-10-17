@@ -28,10 +28,6 @@ export default async function JugadoresPage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <p className="shrink-0 text-sm text-muted-foreground">
-        {data.club.name} · {data.players.length} jugadores
-      </p>
-
       <PlayersTable
         clubSlug={clubSlug}
         clubName={data.club.name}

@@ -13,8 +13,10 @@ import {
   AtSign,
   ChevronDown,
   Columns3,
+  Copy,
   History,
   Pencil,
+  Phone,
   PhoneOff,
   Search,
   Trash2,
@@ -31,6 +33,8 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -59,7 +63,12 @@ import {
   type PlayerFieldKey,
   type PlayerFieldTarget,
 } from "@/components/features/players/player-field-dialog";
-import { formatPhoneDisplay, whatsAppUrl } from "@/lib/phone";
+import {
+  digitsOnly,
+  formatPhoneDisplay,
+  whatsAppNumber,
+  whatsAppUrl,
+} from "@/lib/phone";
 import {
   deletePlayerAction,
   getPlayerProfileAction,
@@ -76,6 +85,56 @@ const ALL_CITIES = "";
 const NO_CITY = "__none__";
 const ALL_TOURNAMENTS = "";
 const ALL_TOURNAMENT_CATEGORIES = "";
+const NO_DUPLICATE_FILTER = "";
+
+const DUPLICATE_OPTIONS = [
+  { key: "fullName", label: "Nombre y Apellido" },
+  { key: "firstName", label: "Nombre" },
+  { key: "lastName", label: "Apellido" },
+  { key: "phone", label: "Teléfono" },
+] as const;
+
+type DuplicateKey = (typeof DUPLICATE_OPTIONS)[number]["key"];
+
+type DuplicateFilter = DuplicateKey | typeof NO_DUPLICATE_FILTER;
+
+function compactText(value: string): string {
+  return normalizeText(value).replace(/\s+/g, " ");
+}
+
+/// Los jugadores cargados antes de separar nombre y apellido solo tienen
+/// `fullName`: la primera palabra se toma como nombre y el resto como apellido.
+function nameParts(player: PlayerListItem): { first: string; last: string } {
+  if (player.firstName?.trim() || player.lastName?.trim()) {
+    return { first: player.firstName ?? "", last: player.lastName ?? "" };
+  }
+  const [first = "", ...rest] = player.fullName.trim().split(/\s+/);
+  return { first, last: rest.join(" ") };
+}
+
+/// Valor con el que se comparan dos jugadores. Vacío = no participa.
+function duplicateKey(player: PlayerListItem, by: DuplicateKey): string {
+  switch (by) {
+    case "fullName":
+      return compactText(player.fullName);
+    case "firstName":
+      return compactText(nameParts(player).first);
+    case "lastName":
+      return compactText(nameParts(player).last);
+    case "phone":
+      return whatsAppNumber(player.phone) ?? "";
+  }
+}
+
+/// Se compara contra lo guardado y contra lo que se ve en la tabla: en
+/// Argentina el E.164 lleva un 9 que la tabla no muestra (+54 9 341… → +54 341…).
+function phoneMatches(stored: string | null, digits: string): boolean {
+  if (!stored) return false;
+  return (
+    digitsOnly(stored).includes(digits) ||
+    digitsOnly(formatPhoneDisplay(stored)).includes(digits)
+  );
+}
 
 const FILTER_SELECT_CLASS =
   "h-8 max-w-[14rem] shrink-0 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -142,6 +201,7 @@ export function PlayersTable({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const [phoneQuery, setPhoneQuery] = useState("");
   const [category, setCategory] = useState(ALL_CATEGORIES);
   const [gender, setGender] = useState(ALL_GENDERS);
   const [city, setCity] = useState(ALL_CITIES);
@@ -152,6 +212,8 @@ export function PlayersTable({
   const [tournamentPickerOpen, setTournamentPickerOpen] = useState(false);
   const [hideLatestInscribed, setHideLatestInscribed] = useState(false);
   const [onlyWithoutPhone, setOnlyWithoutPhone] = useState(false);
+  const [duplicateBy, setDuplicateBy] =
+    useState<DuplicateFilter>(NO_DUPLICATE_FILTER);
   const [sentOverride, setSentOverride] = useState<Record<string, boolean>>({});
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
   const [newOpen, setNewOpen] = useState(false);
@@ -416,12 +478,38 @@ export function PlayersTable({
     return ids;
   }, [selectedTournament, tournamentCategoryId]);
 
+  /// Grupo de cada jugador cuyo dato elegido se repite en otro jugador del club.
+  /// Se calcula sobre todo el club, no sobre lo filtrado, para no esconder un
+  /// duplicado solo porque su copia tiene otra categoría o localidad.
+  const duplicateGroupOf = useMemo(() => {
+    if (duplicateBy === NO_DUPLICATE_FILTER) return null;
+    const idsByKey = new Map<string, string[]>();
+    for (const p of players) {
+      const key = duplicateKey(p, duplicateBy);
+      if (!key) continue;
+      const ids = idsByKey.get(key);
+      if (ids) ids.push(p.id);
+      else idsByKey.set(key, [p.id]);
+    }
+    const repeatedKeys = [...idsByKey.keys()]
+      .filter((key) => idsByKey.get(key)!.length > 1)
+      .sort((a, b) => a.localeCompare(b, "es"));
+    const groupOf = new Map<string, number>();
+    repeatedKeys.forEach((key, index) => {
+      for (const id of idsByKey.get(key)!) groupOf.set(id, index);
+    });
+    return groupOf;
+  }, [players, duplicateBy]);
+
   const filtered = useMemo(() => {
     const q = normalizeText(query);
-    return players.filter((p) => {
+    const phoneDigits = digitsOnly(phoneQuery);
+    const result = players.filter((p) => {
+      if (duplicateGroupOf && !duplicateGroupOf.has(p.id)) return false;
       if (inscribedIds && !inscribedIds.has(p.id)) return false;
       if (hideLatestInscribed && latestInscribedIds.has(p.id)) return false;
       if (onlyWithoutPhone && p.phone?.trim()) return false;
+      if (phoneDigits && !phoneMatches(p.phone, phoneDigits)) return false;
       if (q && !normalizeText(p.fullName).includes(q) && !normalizeText(p.city ?? "").includes(q)) return false;
       if (category === NO_CATEGORY) {
         if (p.category?.trim()) return false;
@@ -439,9 +527,16 @@ export function PlayersTable({
       }
       return true;
     });
+    if (duplicateGroupOf) {
+      result.sort(
+        (a, b) => duplicateGroupOf.get(a.id)! - duplicateGroupOf.get(b.id)!,
+      );
+    }
+    return result;
   }, [
     players,
     query,
+    phoneQuery,
     category,
     gender,
     city,
@@ -449,7 +544,29 @@ export function PlayersTable({
     hideLatestInscribed,
     latestInscribedIds,
     onlyWithoutPhone,
+    duplicateGroupOf,
   ]);
+
+  /// Filas sombreadas en grupos alternos para distinguir dónde empieza cada
+  /// grupo de duplicados.
+  const duplicateBands = useMemo(() => {
+    const shaded = new Set<string>();
+    let groups = 0;
+    if (!duplicateGroupOf) return { shaded, groups };
+    let previous: number | undefined;
+    for (const p of filtered) {
+      const group = duplicateGroupOf.get(p.id);
+      if (group !== previous) {
+        groups += 1;
+        previous = group;
+      }
+      if (groups % 2 === 0) shaded.add(p.id);
+    }
+    return { shaded, groups };
+  }, [filtered, duplicateGroupOf]);
+
+  const duplicateLabel =
+    DUPLICATE_OPTIONS.find((o) => o.key === duplicateBy)?.label ?? null;
 
   const visibleOptionalCount = OPTIONAL_COLUMNS.filter(
     (c) => columns[c.key],
@@ -459,143 +576,191 @@ export function PlayersTable({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex shrink-0 items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <div className="relative max-w-xs min-w-40 flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-8"
-              placeholder="Buscar jugador..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-          <select
-            className={FILTER_SELECT_CLASS}
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            aria-label="Filtrar por categoría"
-            title="Filtrar por categoría"
+      <div className="flex shrink-0 flex-wrap items-center gap-3">
+        <p className="text-sm text-muted-foreground">
+          {clubName} · {players.length} jugadores
+        </p>
+        <PlayerSignupLinkButton clubSlug={clubSlug} clubName={clubName} />
+        <Button onClick={() => setNewOpen(true)}>
+          <UserPlus className="size-4" />
+          Nuevo jugador
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(buttonVariants({ variant: "outline" }), "ml-auto shrink-0")}
+            title="Elegir qué columnas se muestran"
           >
-            <option value={ALL_CATEGORIES}>Todas las categorías</option>
-            {hasUncategorized && (
-              <option value={NO_CATEGORY}>Sin categoría</option>
+            <Columns3 className="size-4" />
+            Columnas
+            {visibleOptionalCount < OPTIONAL_COLUMNS.length && (
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {visibleOptionalCount}/{OPTIONAL_COLUMNS.length}
+              </span>
             )}
-            {categoryOptions.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
+            <ChevronDown className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-52">
+            {OPTIONAL_COLUMNS.map((col) => (
+              <DropdownMenuCheckboxItem
+                key={col.key}
+                checked={columns[col.key]}
+                closeOnClick={false}
+                onCheckedChange={(checked) =>
+                  toggleColumn(col.key, checked === true)
+                }
+              >
+                {col.label}
+              </DropdownMenuCheckboxItem>
             ))}
-          </select>
-          <select
-            className={FILTER_SELECT_CLASS}
-            value={gender}
-            onChange={(e) => setGender(e.target.value)}
-            aria-label="Filtrar por género"
-            title="Filtrar por género"
-          >
-            <option value={ALL_GENDERS}>Todos</option>
-            <option value="MALE">Masculino</option>
-            <option value="FEMALE">Femenina</option>
-          </select>
-          <select
-            className={FILTER_SELECT_CLASS}
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            aria-label="Filtrar por localidad"
-            title="Filtrar por localidad"
-          >
-            <option value={ALL_CITIES}>Todas las localidades</option>
-            {hasNoCity && <option value={NO_CITY}>Sin localidad</option>}
-            {cityOptions.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-          {tournaments.length > 0 && (
-            <Button
-              type="button"
-              variant="outline"
-              className="max-w-[18rem] justify-between"
-              onClick={() => setTournamentPickerOpen(true)}
-              aria-haspopup="dialog"
-              aria-expanded={tournamentPickerOpen}
-              title="Elegir torneo y categoría"
-            >
-              <Trophy className="size-4" />
-              <span className="min-w-0 truncate">{tournamentButtonLabel}</span>
-              <ChevronDown className="size-4" />
-            </Button>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={resetColumns}>
+              Mostrar todas
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="relative max-w-xs min-w-40 flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-8"
+            placeholder="Buscar jugador..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="relative w-44 shrink-0">
+          <Phone className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-8"
+            inputMode="tel"
+            placeholder="Buscar teléfono..."
+            aria-label="Buscar por teléfono"
+            title="Busca por parte del número, sin importar espacios ni guiones"
+            value={phoneQuery}
+            onChange={(e) => setPhoneQuery(e.target.value)}
+          />
+        </div>
+        <select
+          className={FILTER_SELECT_CLASS}
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          aria-label="Filtrar por categoría"
+          title="Filtrar por categoría"
+        >
+          <option value={ALL_CATEGORIES}>Todas las categorías</option>
+          {hasUncategorized && (
+            <option value={NO_CATEGORY}>Sin categoría</option>
           )}
-          {latestTournament && (
-            <Button
-              type="button"
-              variant={hideLatestInscribed ? "default" : "outline"}
-              aria-pressed={hideLatestInscribed}
-              title={`Muestra a quien no está inscripto en ${latestTournament.name}, para invitar`}
-              onClick={() => setHideLatestInscribed((value) => !value)}
-            >
-              Para invitar
-            </Button>
-          )}
+          {categoryOptions.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <select
+          className={FILTER_SELECT_CLASS}
+          value={gender}
+          onChange={(e) => setGender(e.target.value)}
+          aria-label="Filtrar por género"
+          title="Filtrar por género"
+        >
+          <option value={ALL_GENDERS}>Todos</option>
+          <option value="MALE">Masculino</option>
+          <option value="FEMALE">Femenina</option>
+        </select>
+        <select
+          className={FILTER_SELECT_CLASS}
+          value={city}
+          onChange={(e) => setCity(e.target.value)}
+          aria-label="Filtrar por localidad"
+          title="Filtrar por localidad"
+        >
+          <option value={ALL_CITIES}>Todas las localidades</option>
+          {hasNoCity && <option value={NO_CITY}>Sin localidad</option>}
+          {cityOptions.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        {tournaments.length > 0 && (
           <Button
             type="button"
-            variant={onlyWithoutPhone ? "default" : "outline"}
-            aria-pressed={onlyWithoutPhone}
-            title="Muestra solo a quien no tiene teléfono cargado"
-            onClick={() => setOnlyWithoutPhone((value) => !value)}
+            variant="outline"
+            className="max-w-[18rem] justify-between"
+            onClick={() => setTournamentPickerOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={tournamentPickerOpen}
+            title="Elegir torneo y categoría"
           >
-            <PhoneOff className="size-4" />
-            Sin teléfono
+            <Trophy className="size-4" />
+            <span className="min-w-0 truncate">{tournamentButtonLabel}</span>
+            <ChevronDown className="size-4" />
           </Button>
-          <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
-            {filtered.length}{" "}
-            {filtered.length === 1 ? "jugador" : "jugadores"}
-          </span>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
-          <div className="flex items-center gap-3">
-            <PlayerSignupLinkButton clubSlug={clubSlug} clubName={clubName} />
-            <Button onClick={() => setNewOpen(true)}>
-              <UserPlus className="size-4" />
-              Nuevo jugador
-            </Button>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className={cn(buttonVariants({ variant: "outline" }), "shrink-0")}
-              title="Elegir qué columnas se muestran"
+        )}
+        {latestTournament && (
+          <Button
+            type="button"
+            variant={hideLatestInscribed ? "default" : "outline"}
+            aria-pressed={hideLatestInscribed}
+            title={`Muestra a quien no está inscripto en ${latestTournament.name}, para invitar`}
+            onClick={() => setHideLatestInscribed((value) => !value)}
+          >
+            Para invitar
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant={onlyWithoutPhone ? "default" : "outline"}
+          aria-pressed={onlyWithoutPhone}
+          title="Muestra solo a quien no tiene teléfono cargado"
+          onClick={() => setOnlyWithoutPhone((value) => !value)}
+        >
+          <PhoneOff className="size-4" />
+          Sin teléfono
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              buttonVariants({ variant: duplicateLabel ? "default" : "outline" }),
+              "shrink-0",
+            )}
+            title="Muestra solo a quienes comparten el dato elegido con otro jugador"
+          >
+            <Copy className="size-4" />
+            {duplicateLabel ? `Duplicados: ${duplicateLabel}` : "Duplicados"}
+            <ChevronDown className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-auto min-w-52">
+            <DropdownMenuRadioGroup
+              value={duplicateBy}
+              onValueChange={(value) => setDuplicateBy(value as DuplicateFilter)}
             >
-              <Columns3 className="size-4" />
-              Columnas
-              {visibleOptionalCount < OPTIONAL_COLUMNS.length && (
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {visibleOptionalCount}/{OPTIONAL_COLUMNS.length}
-                </span>
-              )}
-              <ChevronDown className="size-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-auto min-w-52">
-              {OPTIONAL_COLUMNS.map((col) => (
-                <DropdownMenuCheckboxItem
-                  key={col.key}
-                  checked={columns[col.key]}
-                  closeOnClick={false}
-                  onCheckedChange={(checked) =>
-                    toggleColumn(col.key, checked === true)
-                  }
-                >
-                  {col.label}
-                </DropdownMenuCheckboxItem>
-              ))}
+              <DropdownMenuRadioItem value={NO_DUPLICATE_FILTER}>
+                Sin filtrar
+              </DropdownMenuRadioItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={resetColumns}>
-                Mostrar todas
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+              {DUPLICATE_OPTIONS.map((option) => (
+                <DropdownMenuRadioItem key={option.key} value={option.key}>
+                  {option.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+          {filtered.length}{" "}
+          {filtered.length === 1 ? "jugador" : "jugadores"}
+          {duplicateLabel && (
+            <>
+              {" "}
+              en {duplicateBands.groups}{" "}
+              {duplicateBands.groups === 1 ? "grupo" : "grupos"}
+            </>
+          )}
+        </span>
       </div>
 
       <div
@@ -649,7 +814,9 @@ export function PlayersTable({
                 >
                   {players.length === 0
                     ? "Sin jugadores."
-                    : "Ningún jugador coincide con el filtro."}
+                    : duplicateGroupOf?.size === 0
+                      ? `No hay jugadores con ${duplicateLabel?.toLowerCase()} repetido.`
+                      : "Ningún jugador coincide con el filtro."}
                 </td>
               </tr>
             ) : (
@@ -659,6 +826,7 @@ export function PlayersTable({
                   ref={p.id === activeId ? activeRowRef : undefined}
                   className={cn(
                     "border-b last:border-b-0",
+                    duplicateBands.shaded.has(p.id) && "bg-muted/50",
                     p.id === activeId && "bg-accent/60",
                   )}
                 >

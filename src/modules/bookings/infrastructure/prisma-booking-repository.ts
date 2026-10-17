@@ -509,6 +509,8 @@ export class PrismaBookingRepository implements BookingRepository {
     return users.map((u) => ({
       id: u.id,
       fullName: u.fullName,
+      firstName: u.firstName,
+      lastName: u.lastName,
       phone: u.phone,
       instagram:
         (instagramMap ? instagramMap.get(u.id) : u.instagram?.trim()) || null,
