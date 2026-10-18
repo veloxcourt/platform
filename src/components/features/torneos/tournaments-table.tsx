@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import {
   CalendarDays,
   CircleDollarSign,
@@ -96,7 +95,6 @@ export function TournamentsTable({
   currency: string;
   tournaments: TournamentListItem[];
 }) {
-  const router = useRouter();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     "all" | CreateTournamentValues["status"]
@@ -200,7 +198,6 @@ export function TournamentsTable({
         includePairs ? "Torneo clonado completo" : "Torneo clonado sin parejas",
         { description: name },
       );
-      router.refresh();
     });
   }
 
@@ -228,7 +225,6 @@ export function TournamentsTable({
         return;
       }
       toast.success("Torneo eliminado");
-      router.refresh();
     });
   }
 
@@ -515,7 +511,6 @@ export function TournamentsTable({
           }
         }}
         onBack={editing ? undefined : handleFormBack}
-        onSaved={() => router.refresh()}
       />
     </div>
   );

@@ -40,7 +40,6 @@ export function AddCategoryDialog({
   tournamentCategories,
   open,
   onOpenChange,
-  onAdded,
 }: {
   clubSlug: string;
   tournamentId: string;
@@ -48,7 +47,6 @@ export function AddCategoryDialog({
   tournamentCategories: TournamentCategoryItem[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdded: () => void;
 }) {
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -90,7 +88,6 @@ export function AddCategoryDialog({
       if (result.ok) {
         toast.success(`${catalog.name} agregada al torneo`);
         onOpenChange(false);
-        onAdded();
       } else {
         toast.error("No se pudo agregar la categoría", {
           description: result.error,
@@ -150,7 +147,6 @@ export function AddCategoryDialog({
       }
       toast.success("Categoría actualizada");
       setEditingId(null);
-      onAdded();
     });
   }
 
@@ -296,7 +292,6 @@ export function AddCategoryDialog({
                 }
                 toast.success("Categoría creada y agregada al torneo");
                 onOpenChange(false);
-                onAdded();
                 return true;
               }}
             />

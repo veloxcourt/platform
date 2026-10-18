@@ -296,8 +296,7 @@ export function CatalogView({
   function toggleActive(id: string, active: boolean) {
     startTransition(async () => {
       const r = await setProductActiveAction(clubSlug, id, active);
-      if (r.ok) router.refresh();
-      else toast.error("Error", { description: r.error });
+      if (!r.ok) toast.error("Error", { description: r.error });
     });
   }
 
@@ -311,8 +310,7 @@ export function CatalogView({
         id,
         showInPriceMenu,
       );
-      if (r.ok) router.refresh();
-      else {
+      if (!r.ok) {
         toast.error("Error", { description: r.error });
         router.refresh();
       }
@@ -329,8 +327,7 @@ export function CatalogView({
         id,
         showInClientMenu,
       );
-      if (r.ok) router.refresh();
-      else {
+      if (!r.ok) {
         toast.error("Error", { description: r.error });
         router.refresh();
       }
@@ -372,8 +369,7 @@ export function CatalogView({
         clubSlug,
         next.map((p) => p.id),
       );
-      if (r.ok) router.refresh();
-      else {
+      if (!r.ok) {
         toast.error("No se pudo reordenar", { description: r.error });
         router.refresh();
       }
@@ -714,10 +710,7 @@ export function CatalogView({
           setNewOpen(o);
           if (!o) setCloneDefaults(null);
         }}
-        onDone={() => {
-          setCloneDefaults(null);
-          router.refresh();
-        }}
+        onDone={() => setCloneDefaults(null)}
       />
       <ProductFormDialog
         clubSlug={clubSlug}
@@ -726,11 +719,7 @@ export function CatalogView({
         editing={editing}
         open={editing !== null}
         onOpenChange={(o) => !o && setEditing(null)}
-        onPhotoChanged={() => router.refresh()}
-        onDone={() => {
-          setEditing(null);
-          router.refresh();
-        }}
+        onDone={() => setEditing(null)}
       />
     </div>
   );
@@ -743,7 +732,6 @@ function TypesManager({
   clubSlug: string;
   types: ProductType[];
 }) {
-  const router = useRouter();
   const [value, setValue] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -752,26 +740,22 @@ function TypesManager({
     if (!name) return;
     startTransition(async () => {
       const r = await createProductTypeAction(clubSlug, { name });
-      if (r.ok) {
-        setValue("");
-        router.refresh();
-      } else toast.error("Error", { description: r.error });
+      if (r.ok) setValue("");
+      else toast.error("Error", { description: r.error });
     });
   }
 
   function rename(id: string, name: string) {
     startTransition(async () => {
       const r = await updateProductTypeAction(clubSlug, id, { name });
-      if (r.ok) router.refresh();
-      else toast.error("Error", { description: r.error });
+      if (!r.ok) toast.error("Error", { description: r.error });
     });
   }
 
   function remove(id: string) {
     startTransition(async () => {
       const r = await deleteProductTypeAction(clubSlug, id);
-      if (r.ok) router.refresh();
-      else toast.error("No se pudo eliminar", { description: r.error });
+      if (!r.ok) toast.error("No se pudo eliminar", { description: r.error });
     });
   }
 

@@ -62,7 +62,7 @@ export function TournamentEditForm({
   readOnly?: boolean;
   showTypeBadge?: boolean;
   onCancel?: () => void;
-  onSaved: () => void;
+  onSaved?: () => void;
 }) {
   const isEdit = Boolean(tournament);
   const effectiveType = tournament?.type ?? tournamentType;
@@ -113,7 +113,7 @@ export function TournamentEditForm({
         });
         if (result.ok) {
           toast.success("Torneo actualizado");
-          onSaved();
+          onSaved?.();
         } else {
           toast.error("No se pudo actualizar el torneo", {
             description: result.error,
@@ -133,7 +133,7 @@ export function TournamentEditForm({
       });
       if (result.ok) {
         toast.success("Torneo creado");
-        onSaved();
+        onSaved?.();
       } else {
         toast.error("No se pudo crear el torneo", {
           description: result.error,
@@ -273,7 +273,6 @@ export function TournamentFormDialog({
   open,
   onOpenChange,
   onBack,
-  onSaved,
 }: {
   clubSlug: string;
   tournamentType: TournamentType | null;
@@ -282,7 +281,6 @@ export function TournamentFormDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onBack?: () => void;
-  onSaved: () => void;
 }) {
   const isEdit = Boolean(tournament);
   const effectiveType = tournament?.type ?? tournamentType;
@@ -322,10 +320,7 @@ export function TournamentFormDialog({
           tournament={tournament}
           readOnly={readOnly}
           onCancel={() => onOpenChange(false)}
-          onSaved={() => {
-            onOpenChange(false);
-            onSaved();
-          }}
+          onSaved={() => onOpenChange(false)}
         />
       </DialogContent>
     </Dialog>

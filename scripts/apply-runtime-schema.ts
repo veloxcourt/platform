@@ -1,13 +1,19 @@
 import "dotenv/config";
 
-import { ensureRuntimeSchema, prisma } from "../src/lib/prisma";
+import { applyRuntimeSchema, prisma } from "../src/lib/prisma";
 
 /// Aplica el DDL pendiente y muestra cómo quedó el catálogo de localidades.
-/// Es el mismo DDL que corre la app al arrancar: aditivo e idempotente, se
-/// puede repetir sin consecuencias. No usar `prisma db push` en su lugar:
-/// compara contra el schema y puede decidir borrar columnas o tablas.
+/// Corre en cada `npm run build` (deploy de Vercel) y en desarrollo lo corre
+/// la app al arrancar: aditivo e idempotente, se puede repetir sin
+/// consecuencias. No usar `prisma db push` en su lugar: compara contra el
+/// schema y puede decidir borrar columnas o tablas.
 async function main() {
-  await ensureRuntimeSchema();
+  if (!process.env.DIRECT_URL && !process.env.DATABASE_URL) {
+    console.warn("[apply-runtime-schema] Sin DIRECT_URL/DATABASE_URL: se omite.");
+    return;
+  }
+
+  await applyRuntimeSchema();
 
   const [provinces, cities, aliases] = await Promise.all([
     prisma.province.count(),

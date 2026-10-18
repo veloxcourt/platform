@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Calculator, Trophy } from "lucide-react";
 import { toast } from "sonner";
 
@@ -67,7 +66,6 @@ export function FinalPhasePanel({
   courtCount: number;
   categoryId: string;
 }) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isCalculating, startCalculate] = useTransition();
   const category = categories.find((item) => item.id === categoryId) ?? null;
@@ -267,7 +265,6 @@ export function FinalPhasePanel({
         });
         return;
       }
-      router.refresh();
       toast.success("Clasificación calculada", {
         description: [
           category?.name ?? "Esta categoría",
@@ -299,7 +296,6 @@ export function FinalPhasePanel({
         });
         return;
       }
-      router.refresh();
       toast.success("Fase final armada", {
         description: [
           `${result.categoryCount} categoría(s) · ${result.matchCount} partido(s)`,

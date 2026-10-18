@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useOptimistic, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { FileDown, Pencil, Plus, Search, Link2, Wallet, X } from "lucide-react";
@@ -39,6 +39,16 @@ import { EditPairDialog } from "./edit-pair-dialog";
 import { useTournamentReadOnly } from "./tournament-mode-context";
 
 type RowFilter = "all" | "incomplete" | "pending" | "cancel_requested";
+
+type PairPatch = Partial<
+  Pick<
+    PairListItem,
+    | "player1Confirmed"
+    | "player2Confirmed"
+    | "player1PaymentStatus"
+    | "player2PaymentStatus"
+  >
+>;
 
 const ROW_FILTER_LABELS: Record<RowFilter, string> = {
   all: "Todas",
@@ -96,10 +106,19 @@ export function PairsTable({
   const [editPair, setEditPair] = useState<PairListItem | null>(null);
   const [accountPlayer, setAccountPlayer] = useState<PlayerRef | null>(null);
   const [isPending, startTransition] = useTransition();
+  /// Los toggles no usan `isPending`: no deben bloquear el resto de la tabla.
+  const [, startToggleTransition] = useTransition();
+  const [optimisticPairs, patchPair] = useOptimistic(
+    pairs,
+    (current: PairListItem[], update: { pairId: string; patch: PairPatch }) =>
+      current.map((pair) =>
+        pair.id === update.pairId ? { ...pair, ...update.patch } : pair,
+      ),
+  );
 
   const filtered = useMemo(() => {
     const q = normalizeText(query);
-    return pairs.filter((pair) => {
+    return optimisticPairs.filter((pair) => {
       if (pair.status === "CANCELLED") return false;
       if (categoryFilterId && pair.categoryId !== categoryFilterId) return false;
       const state = pairRowState(pair);
@@ -122,7 +141,7 @@ export function PairsTable({
         normalizeText(pair.zoneLabel ?? "").includes(q)
       );
     });
-  }, [pairs, query, rowFilter, categoryFilterId]);
+  }, [optimisticPairs, query, rowFilter, categoryFilterId]);
 
   const cancelRequestedCount = useMemo(
     () => pairs.filter((pair) => pair.status === "CANCEL_REQUESTED").length,
@@ -234,12 +253,15 @@ export function PairsTable({
     });
   }
 
-  function runToggle(action: () => Promise<{ ok: boolean; error?: string }>) {
-    startTransition(async () => {
+  function runToggle(
+    pairId: string,
+    patch: PairPatch,
+    action: () => Promise<{ ok: boolean; error?: string }>,
+  ) {
+    startToggleTransition(async () => {
+      patchPair({ pairId, patch });
       const result = await action();
-      if (result.ok) {
-        router.refresh();
-      } else {
+      if (!result.ok) {
         toast.error("Error", { description: result.error });
       }
     });
@@ -253,7 +275,6 @@ export function PairsTable({
       const result = await action();
       if (result.ok) {
         toast.success(success);
-        router.refresh();
       } else {
         toast.error("Error", { description: result.error });
       }
@@ -388,7 +409,7 @@ export function PairsTable({
             ) : (
               filtered.map((pair, index) => {
                 const inactive = pair.status === "CANCELLED";
-                const toggleDisabled = isPending || inactive || readOnly;
+                const toggleDisabled = inactive || readOnly;
                 const rowState = pairRowState(pair);
 
                 return (
@@ -454,14 +475,17 @@ export function PairsTable({
                           disabled={toggleDisabled}
                           label={`Confirmó ${pair.player1.name}`}
                           onToggle={(checked) =>
-                            runToggle(() =>
-                              updatePairPlayerConfirmationAction(
-                                clubSlug,
-                                tournamentId,
-                                pair.id,
-                                1,
-                                checked,
-                              ),
+                            runToggle(
+                              pair.id,
+                              { player1Confirmed: checked },
+                              () =>
+                                updatePairPlayerConfirmationAction(
+                                  clubSlug,
+                                  tournamentId,
+                                  pair.id,
+                                  1,
+                                  checked,
+                                ),
                             )
                           }
                         />
@@ -471,14 +495,17 @@ export function PairsTable({
                             disabled={toggleDisabled}
                             label={`Confirmó ${pair.player2.name}`}
                             onToggle={(checked) =>
-                              runToggle(() =>
-                                updatePairPlayerConfirmationAction(
-                                  clubSlug,
-                                  tournamentId,
-                                  pair.id,
-                                  2,
-                                  checked,
-                                ),
+                              runToggle(
+                                pair.id,
+                                { player2Confirmed: checked },
+                                () =>
+                                  updatePairPlayerConfirmationAction(
+                                    clubSlug,
+                                    tournamentId,
+                                    pair.id,
+                                    2,
+                                    checked,
+                                  ),
                               )
                             }
                           />
@@ -494,14 +521,17 @@ export function PairsTable({
                           disabled={toggleDisabled}
                           label={`Pago de ${pair.player1.name}`}
                           onChange={(method) =>
-                            runToggle(() =>
-                              updatePairPlayerPaymentAction(
-                                clubSlug,
-                                tournamentId,
-                                pair.id,
-                                1,
-                                method,
-                              ),
+                            runToggle(
+                              pair.id,
+                              { player1PaymentStatus: method },
+                              () =>
+                                updatePairPlayerPaymentAction(
+                                  clubSlug,
+                                  tournamentId,
+                                  pair.id,
+                                  1,
+                                  method,
+                                ),
                             )
                           }
                         />
@@ -511,14 +541,17 @@ export function PairsTable({
                             disabled={toggleDisabled}
                             label={`Pago de ${pair.player2.name}`}
                             onChange={(method) =>
-                              runToggle(() =>
-                                updatePairPlayerPaymentAction(
-                                  clubSlug,
-                                  tournamentId,
-                                  pair.id,
-                                  2,
-                                  method,
-                                ),
+                              runToggle(
+                                pair.id,
+                                { player2PaymentStatus: method },
+                                () =>
+                                  updatePairPlayerPaymentAction(
+                                    clubSlug,
+                                    tournamentId,
+                                    pair.id,
+                                    2,
+                                    method,
+                                  ),
                               )
                             }
                           />
@@ -617,7 +650,6 @@ export function PairsTable({
             setEditPair(null);
           }
         }}
-        onSaved={() => router.refresh()}
       />
 
       <AccountDialog

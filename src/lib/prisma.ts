@@ -5,8 +5,18 @@ import { Pool } from "pg";
 // Incrementar cuando cambie prisma/schema.prisma (invalida cliente cacheado en dev).
 const PRISMA_SCHEMA_REVISION = 63;
 
-/** Cap bajo: Supabase session pooler ~15 slots; Vercel + HMR multiplican clientes. */
-const PG_POOL_MAX = 1;
+/**
+ * Con 1 conexión, los `Promise.all` y los requests concurrentes de una
+ * instancia van en fila. El transaction pooler (:6543) admite cientos de
+ * clientes; el session pooler (:5432) solo ~15 slots en total, y en dev HMR
+ * deja pools viejos abiertos, así que ahí se queda en 1.
+ */
+function pgPoolMax(): number {
+  const fromEnv = Number(process.env.DATABASE_POOL_MAX);
+  if (fromEnv > 0) return fromEnv;
+  if (process.env.NODE_ENV !== "production") return 1;
+  return process.env.DATABASE_URL?.includes(":6543") ? 5 : 1;
+}
 
 type PrismaBundle = {
   client: PrismaClient;
@@ -124,7 +134,7 @@ function clientHasCurrentDelegates(client: PrismaClient): boolean {
 function createBundle(fingerprint: string): PrismaBundle {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    max: PG_POOL_MAX,
+    max: pgPoolMax(),
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 10_000,
   });
@@ -198,11 +208,18 @@ let runtimeSchemaPromise: Promise<void> | null = null;
  * Prisma del request: el transaction pooler (6543) aborta ALTER y deja
  * la sesión inutilizable, y la app no carga.
  */
-async function applyRuntimeSchema() {
+export async function applyRuntimeSchema() {
   const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
   if (!url) return;
 
   const statements = [
+    `ALTER TABLE "clubs" ADD COLUMN IF NOT EXISTS "logoUrl" TEXT`,
+    `ALTER TABLE "clubs" ADD COLUMN IF NOT EXISTS "locality" TEXT`,
+    `ALTER TABLE "clubs" ADD COLUMN IF NOT EXISTS "address" TEXT`,
+    `ALTER TABLE "tournaments" ADD COLUMN IF NOT EXISTS "fixtureEditMode" TEXT NOT NULL DEFAULT 'AUTO'`,
+    `ALTER TABLE "tournaments" ADD COLUMN IF NOT EXISTS "fixtureEditModes" JSONB`,
+    `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "intermediateFixture" JSONB`,
+    `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "finalFixture" JSONB`,
     `ALTER TYPE "AdminModule" ADD VALUE IF NOT EXISTS 'QUE_MEJORO'`,
     `ALTER TYPE "AdminModule" ADD VALUE IF NOT EXISTS 'BOOKINGS_CONFIG'`,
     `DO $$ BEGIN CREATE TYPE "ImprovementKind" AS ENUM ('IMPROVE', 'ADD'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
@@ -444,20 +461,30 @@ async function applyRuntimeSchema() {
     connectionTimeoutMillis: 10_000,
   });
   try {
-    for (const sql of statements) {
-      try {
-        await pool.query(sql);
-      } catch (error) {
-        console.error("[prisma] ensureRuntimeSchema", sql.slice(0, 80), error);
+    const client = await pool.connect();
+    try {
+      for (const sql of statements) {
+        try {
+          await client.query(sql);
+        } catch (error) {
+          console.error("[prisma] ensureRuntimeSchema", sql.slice(0, 80), error);
+        }
       }
+    } finally {
+      client.release();
     }
   } finally {
     await pool.end().catch(() => {});
   }
 }
 
-/** Completa columnas/tablas nuevas. Usar solo en pantallas que las necesitan. */
+/**
+ * Completa columnas/tablas nuevas en desarrollo. En producción no hace nada:
+ * `npm run build` corre `scripts/apply-runtime-schema.ts` antes de publicar,
+ * así ningún request paga las ~70 sentencias ni los locks del DDL.
+ */
 export async function ensureRuntimeSchema() {
+  if (process.env.NODE_ENV === "production") return;
   if (!runtimeSchemaPromise) {
     runtimeSchemaPromise = applyRuntimeSchema().catch((error) => {
       runtimeSchemaPromise = null;

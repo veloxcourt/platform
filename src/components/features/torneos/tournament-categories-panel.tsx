@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Check, FileDown, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -138,7 +137,6 @@ export function TournamentCategoriesPanel({
   showInscriptionStats?: boolean;
   compact?: boolean;
 }) {
-  const router = useRouter();
   const readOnly = useTournamentReadOnly();
   const [addOpen, setAddOpen] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, SimulationDraft>>(() =>
@@ -246,9 +244,7 @@ export function TournamentCategoriesPanel({
           toast.error("No se pudo guardar la simulación", {
             description: result.error,
           });
-          return;
         }
-        router.refresh();
       });
     };
 
@@ -295,7 +291,6 @@ export function TournamentCategoriesPanel({
           return;
         }
       }
-      router.refresh();
     });
   }
 
@@ -348,9 +343,7 @@ export function TournamentCategoriesPanel({
         toast.error("No se pudo guardar el rango", {
           description: result.error,
         });
-        return;
       }
-      router.refresh();
     });
   }
 
@@ -379,9 +372,7 @@ export function TournamentCategoriesPanel({
         toast.error("No se pudo cambiar el color", {
           description: result.error,
         });
-        return;
       }
-      router.refresh();
     });
   }
 
@@ -405,7 +396,6 @@ export function TournamentCategoriesPanel({
             ? "Categoría e inscripciones eliminadas"
             : "Categoría eliminada",
         );
-        router.refresh();
       } else {
         toast.error("No se pudo eliminar", { description: result.error });
       }
@@ -697,7 +687,6 @@ export function TournamentCategoriesPanel({
         tournamentCategories={categories}
         open={addOpen}
         onOpenChange={setAddOpen}
-        onAdded={() => router.refresh()}
       />
     </>
   );

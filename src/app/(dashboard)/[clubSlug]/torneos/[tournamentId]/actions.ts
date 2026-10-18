@@ -34,14 +34,23 @@ import type { TournamentRepository } from "@/modules/tournaments/application/tou
 
 type Result = { ok: true } | { ok: false; error: string };
 type AddPairResult =
-  | { ok: true; id: string }
+  | {
+      ok: true;
+      id: string;
+      /// La pareja quedó creada pero no se guardaron sus preferencias.
+      warning?: { title: string; description: string };
+    }
   | { ok: false; error: string };
 
+const addPairPreferencesSchema = replacePairSlotPreferencesSchema.extend(
+  updatePairZonesDayPreferenceSchema.shape,
+);
+type AddPairPreferences = ReplacePairSlotPreferencesValues &
+  UpdatePairZonesDayPreferenceValues;
+
 async function resolveClubId(clubSlug: string) {
-  await requireClubModuleAccess(clubSlug, "torneos");
-  const repo = getTournamentRepository();
-  const club = await repo.getClubBySlug(clubSlug);
-  return { repo, clubId: club?.id ?? null };
+  const access = await requireClubModuleAccess(clubSlug, "torneos");
+  return { repo: getTournamentRepository(), clubId: access.club.id };
 }
 
 function revalidate(clubSlug: string, tournamentId: string) {
@@ -104,10 +113,16 @@ export async function addPairAction(
   clubSlug: string,
   tournamentId: string,
   values: AddPairValues,
+  preferences: AddPairPreferences = { slots: [], zonesDayPreference: "ANY" },
 ): Promise<AddPairResult> {
   const parsed = addPairSchema.safeParse(values);
   if (!parsed.success) {
     const msg = parsed.error.issues[0]?.message ?? "Datos inválidos";
+    return { ok: false, error: msg };
+  }
+  const parsedPreferences = addPairPreferencesSchema.safeParse(preferences);
+  if (!parsedPreferences.success) {
+    const msg = parsedPreferences.error.issues[0]?.message ?? "Datos inválidos";
     return { ok: false, error: msg };
   }
 
@@ -115,10 +130,50 @@ export async function addPairAction(
   if (!clubId) return { ok: false, error: "Club no encontrado" };
 
   const result = await repo.addPair(clubId, tournamentId, parsed.data);
-  if (result.ok) revalidate(clubSlug, tournamentId);
-  return result.ok
-    ? { ok: true, id: result.id }
-    : { ok: false, error: result.error ?? "Error" };
+  if (!result.ok) return { ok: false, error: result.error ?? "Error" };
+
+  revalidate(clubSlug, tournamentId);
+  const { slots, zonesDayPreference } = parsedPreferences.data;
+
+  if (slots.length > 0) {
+    const saved = await repo.replacePairSlotPreferences(
+      clubId,
+      tournamentId,
+      result.id,
+      { slots },
+    );
+    if (!saved.ok) {
+      return {
+        ok: true,
+        id: result.id,
+        warning: {
+          title: "Inscripción creada, pero no se guardaron las preferencias",
+          description: saved.error ?? "Error",
+        },
+      };
+    }
+  }
+
+  if (zonesDayPreference !== "ANY") {
+    const saved = await repo.updatePairZonesDayPreference(
+      clubId,
+      tournamentId,
+      result.id,
+      zonesDayPreference,
+    );
+    if (!saved.ok) {
+      return {
+        ok: true,
+        id: result.id,
+        warning: {
+          title: "Inscripción creada, pero no se guardó la preferencia de días",
+          description: saved.error ?? "Error",
+        },
+      };
+    }
+  }
+
+  return { ok: true, id: result.id };
 }
 
 export async function updatePairAction(

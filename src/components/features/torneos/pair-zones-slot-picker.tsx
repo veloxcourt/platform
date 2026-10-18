@@ -78,7 +78,6 @@ export function PairZonesSlotPicker({
   zonesDayPreference: initialDayPreference = "ANY",
   persist = true,
   onDraftChange,
-  onChanged,
   title = "Rangos de preferencia",
   hint,
 }: {
@@ -93,13 +92,11 @@ export function PairZonesSlotPicker({
   zonesDayPreference?: ZonesDayPreference;
   persist?: boolean;
   onDraftChange?: (draft: PairDraftPreferences) => void;
-  onChanged?: () => void;
   title?: string;
   hint?: string;
 }) {
   const inFlightRef = useRef(new Set<string>());
   const expectedFingerprintRef = useRef<string | null>(null);
-  const notifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingToggles, setPendingToggles] = useState(0);
   const [bulkPending, setBulkPending] = useState(false);
   const [dayPreference, setDayPreference] = useState<ZonesDayPreference>(
@@ -110,21 +107,6 @@ export function PairZonesSlotPicker({
   >([]);
   const isDraftPair = pairId === "draft";
   const draftDefaultsAppliedRef = useRef(false);
-
-  function notifyChanged() {
-    if (!onChanged) return;
-    if (notifyTimerRef.current) clearTimeout(notifyTimerRef.current);
-    notifyTimerRef.current = setTimeout(() => {
-      notifyTimerRef.current = null;
-      onChanged();
-    }, 450);
-  }
-
-  useEffect(() => {
-    return () => {
-      if (notifyTimerRef.current) clearTimeout(notifyTimerRef.current);
-    };
-  }, []);
 
   useEffect(() => {
     setDayPreference(initialDayPreference);
@@ -354,9 +336,7 @@ export function PairZonesSlotPicker({
           toast.error("No se pudieron actualizar las preferencias", {
             description: result.error,
           });
-          return;
         }
-        notifyChanged();
       })
       .finally(() => {
         setBulkPending(false);
@@ -457,9 +437,7 @@ export function PairZonesSlotPicker({
           toast.error("No se pudo actualizar la preferencia", {
             description: result.error,
           });
-          return;
         }
-        notifyChanged();
       })
       .finally(() => {
         inFlightRef.current.delete(key);
@@ -483,9 +461,7 @@ export function PairZonesSlotPicker({
         toast.error("No se pudo guardar la preferencia de días", {
           description: result.error,
         });
-        return;
       }
-      notifyChanged();
     });
   }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Lightbulb, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -151,7 +150,6 @@ export function ImprovementsTable({
   clubSlug: string;
   items: ImprovementItem[];
 }) {
-  const router = useRouter();
   const [query, setQuery] = useState("");
   const [form, setForm] = useState<ImprovementValues>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -194,7 +192,6 @@ export function ImprovementsTable({
       if (result.ok) {
         toast.success(editingId ? "Idea actualizada" : "Idea agregada");
         setDialogOpen(false);
-        router.refresh();
       } else {
         toast.error("No se pudo guardar", { description: result.error });
       }
@@ -209,8 +206,9 @@ export function ImprovementsTable({
         item.id,
         status,
       );
-      if (result.ok) router.refresh();
-      else toast.error("No se pudo cambiar el estado", { description: result.error });
+      if (!result.ok) {
+        toast.error("No se pudo cambiar el estado", { description: result.error });
+      }
     });
   }
 
@@ -223,7 +221,6 @@ export function ImprovementsTable({
       const result = await deleteImprovementAction(clubSlug, item.id);
       if (result.ok) {
         toast.success("Idea eliminada");
-        router.refresh();
       } else {
         toast.error("No se pudo eliminar", { description: result.error });
       }

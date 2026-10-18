@@ -135,27 +135,10 @@ function fromDbDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-let intermediateFixtureColumnReady = false;
-let finalFixtureColumnReady = false;
-let fixtureEditModeColumnReady = false;
-let fixtureEditModesColumnReady = false;
 let roundPhaseConfigsColumnReady = false;
 
-async function ensureFixtureEditModeColumn() {
-  if (fixtureEditModeColumnReady) return;
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "tournaments" ADD COLUMN IF NOT EXISTS "fixtureEditMode" TEXT NOT NULL DEFAULT 'AUTO'`,
-  );
-  fixtureEditModeColumnReady = true;
-}
-
 async function ensureFixtureEditModesColumn() {
-  if (fixtureEditModesColumnReady) return;
-  await ensureFixtureEditModeColumn();
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "tournaments" ADD COLUMN IF NOT EXISTS "fixtureEditModes" JSONB`,
-  );
-  fixtureEditModesColumnReady = true;
+  await ensureRuntimeSchema();
 }
 
 async function readFixtureEditModes(
@@ -185,19 +168,11 @@ async function readFixtureEditMode(
 }
 
 async function ensureIntermediateFixtureColumn() {
-  if (intermediateFixtureColumnReady) return;
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "intermediateFixture" JSONB`,
-  );
-  intermediateFixtureColumnReady = true;
+  await ensureRuntimeSchema();
 }
 
 async function ensureFinalFixtureColumn() {
-  if (finalFixtureColumnReady) return;
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "tournament_settings" ADD COLUMN IF NOT EXISTS "finalFixture" JSONB`,
-  );
-  finalFixtureColumnReady = true;
+  await ensureRuntimeSchema();
 }
 
 async function ensureZoneQualificationColumn() {

@@ -1,20 +1,8 @@
-import { prisma } from "@/lib/prisma";
+import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import type { ClubProfile } from "../domain/club-profile-schema";
 
-let clubProfileColumnsReady = false;
-
 export async function ensureClubProfileColumns() {
-  if (clubProfileColumnsReady) return;
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "clubs" ADD COLUMN IF NOT EXISTS "logoUrl" TEXT`,
-  );
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "clubs" ADD COLUMN IF NOT EXISTS "locality" TEXT`,
-  );
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "clubs" ADD COLUMN IF NOT EXISTS "address" TEXT`,
-  );
-  clubProfileColumnsReady = true;
+  await ensureRuntimeSchema();
 }
 
 type ClubRow = {

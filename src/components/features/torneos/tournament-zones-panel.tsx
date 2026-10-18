@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Grid3x3 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -297,7 +296,6 @@ export function TournamentZonesPanel({
   initialCategoryId?: string;
   reservations?: SlotReservationItem[];
 }) {
-  const router = useRouter();
   const readOnly = useTournamentReadOnly();
   const [isPending, startTransition] = useTransition();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -873,7 +871,6 @@ export function TournamentZonesPanel({
       setChangePairRequest(null);
       setChangeScheduleRequest(null);
       setRebuildToken((n) => n + 1);
-      router.refresh();
 
       const withPartner = categoryPairs.filter(pairEligibleForZones).length;
       toast.success("Zonas armadas", {

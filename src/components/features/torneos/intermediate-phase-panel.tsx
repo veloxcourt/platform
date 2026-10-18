@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Calculator, GitBranch } from "lucide-react";
 import { toast } from "sonner";
 
@@ -66,7 +65,6 @@ export function IntermediatePhasePanel({
   courtCount: number;
   categoryId: string;
 }) {
-  const router = useRouter();
   const readOnly = useTournamentReadOnly();
   const { isManual, modes } = useFixtureEditMode(categoryId, "intermediate");
   const [isPending, startTransition] = useTransition();
@@ -265,7 +263,6 @@ export function IntermediatePhasePanel({
         });
         return;
       }
-      router.refresh();
       toast.success("Clasificación calculada", {
         description: [
           category?.name ?? "Esta categoría",
@@ -297,7 +294,6 @@ export function IntermediatePhasePanel({
         });
         return;
       }
-      router.refresh();
       toast.success("Fase intermedia armada", {
         description: [
           `${result.categoryCount} categoría(s) · ${result.matchCount} partido(s)`,

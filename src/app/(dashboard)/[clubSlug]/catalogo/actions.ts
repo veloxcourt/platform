@@ -26,10 +26,8 @@ import type { SellableProduct } from "@/modules/catalog/domain/types";
 type Result = { ok: true } | { ok: false; error: string };
 
 async function resolveClubId(clubSlug: string) {
-  await requireClubModuleAccess(clubSlug, "catalogo");
-  const repo = getBookingRepository();
-  const club = await repo.getClubBySlug(clubSlug);
-  return { repo, clubId: club?.id ?? null };
+  const access = await requireClubModuleAccess(clubSlug, "catalogo");
+  return { repo: getBookingRepository(), clubId: access.club.id };
 }
 
 function revalidate(clubSlug: string) {

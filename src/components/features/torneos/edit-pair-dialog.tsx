@@ -26,9 +26,7 @@ import {
 } from "@/modules/tournaments/domain/category-player-filter";
 import {
   addPairAction,
-  replacePairSlotPreferencesAction,
   updatePairAction,
-  updatePairZonesDayPreferenceAction,
 } from "@/app/(dashboard)/[clubSlug]/torneos/[tournamentId]/actions";
 import {
   PairZonesSlotPicker,
@@ -56,7 +54,6 @@ export function EditPairDialog({
   lockCategory = false,
   open,
   onOpenChange,
-  onSaved,
 }: {
   clubSlug: string;
   tournamentId: string;
@@ -74,7 +71,6 @@ export function EditPairDialog({
   lockCategory?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
 }) {
   const isAdd = mode === "add";
   const [player1Id, setPlayer1Id] = useState("");
@@ -158,19 +154,6 @@ export function EditPairDialog({
 
     startTransition(async () => {
       if (isAdd) {
-        const result = await addPairAction(clubSlug, tournamentId, {
-          player1Id,
-          player2Id: player2Id || undefined,
-          categoryId,
-        });
-        if (!result.ok) {
-          toast.error("No se pudo inscribir", {
-            description: result.error,
-          });
-          return;
-        }
-
-        const pairId = result.id;
         const categoryConfig = config?.categories.find(
           (item) => item.categoryId === categoryId,
         );
@@ -182,43 +165,30 @@ export function EditPairDialog({
                 playDays: config.playDays,
                 courtCount,
               });
-        if (slots.length > 0) {
-          const prefResult = await replacePairSlotPreferencesAction(
-            clubSlug,
-            tournamentId,
-            pairId,
-            { slots },
-          );
-          if (!prefResult.ok) {
-            toast.error("Inscripción creada, pero no se guardaron las preferencias", {
-              description: prefResult.error,
-            });
-            onSaved();
-            onOpenChange(false);
-            return;
-          }
+        const result = await addPairAction(
+          clubSlug,
+          tournamentId,
+          {
+            player1Id,
+            player2Id: player2Id || undefined,
+            categoryId,
+          },
+          { slots, zonesDayPreference: draftPreferences.dayPreference },
+        );
+        if (!result.ok) {
+          toast.error("No se pudo inscribir", {
+            description: result.error,
+          });
+          return;
         }
 
-        if (draftPreferences.dayPreference !== "ANY") {
-          const prefResult = await updatePairZonesDayPreferenceAction(
-            clubSlug,
-            tournamentId,
-            pairId,
-            { zonesDayPreference: draftPreferences.dayPreference },
-          );
-          if (!prefResult.ok) {
-            toast.error(
-              "Inscripción creada, pero no se guardó la preferencia de días",
-              { description: prefResult.error },
-            );
-            onSaved();
-            onOpenChange(false);
-            return;
-          }
+        if (result.warning) {
+          toast.error(result.warning.title, {
+            description: result.warning.description,
+          });
+        } else {
+          toast.success(player2Id ? "Pareja inscripta" : "Jugador inscripto");
         }
-
-        toast.success(player2Id ? "Pareja inscripta" : "Jugador inscripto");
-        onSaved();
         onOpenChange(false);
         return;
       }
@@ -231,7 +201,6 @@ export function EditPairDialog({
       });
       if (result.ok) {
         toast.success("Inscripción actualizada");
-        onSaved();
       } else {
         toast.error("No se pudo actualizar", {
           description: result.error,
@@ -335,7 +304,6 @@ export function EditPairDialog({
               zonesDayPreference={isAdd ? "ANY" : pair!.zonesDayPreference}
               persist={!isAdd}
               onDraftChange={isAdd ? setDraftPreferences : undefined}
-              onChanged={isAdd ? undefined : onSaved}
             />
           )}
 

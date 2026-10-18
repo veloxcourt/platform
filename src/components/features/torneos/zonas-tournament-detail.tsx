@@ -376,7 +376,6 @@ export function ZonasTournamentDetail({
         return;
       }
       setZonesPanelKey((n) => n + 1);
-      router.refresh();
       toast.success("Zonas armadas", {
         description: [
           `${result.categoryCount} categoría(s) · ${result.zoneCount} zona(s) · ${result.matchCount} partido(s)`,
@@ -406,7 +405,6 @@ export function ZonasTournamentDetail({
         });
         return;
       }
-      router.refresh();
       toast.success("Fase intermedia armada", {
         description: [
           `${result.categoryCount} categoría(s) · ${result.matchCount} partido(s)`,
@@ -436,7 +434,6 @@ export function ZonasTournamentDetail({
         });
         return;
       }
-      router.refresh();
       toast.success("Clasificación calculada", {
         description: [
           `${result.seedCount} puesto${result.seedCount === 1 ? "" : "s"} definido${result.seedCount === 1 ? "" : "s"}`,
@@ -464,7 +461,6 @@ export function ZonasTournamentDetail({
         });
         return;
       }
-      router.refresh();
       toast.success("Fase final armada", {
         description: [
           `${result.categoryCount} categoría(s) · ${result.matchCount} partido(s)`,
@@ -1027,7 +1023,6 @@ export function ZonasTournamentDetail({
               tournament={tournament}
               readOnly={readOnly}
               showTypeBadge
-              onSaved={() => router.refresh()}
             />
           </CardContent>
         </Card>
