@@ -4,7 +4,12 @@ import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import type {
   TournamentRepository,
   MutationResult,
+  SaveZonesArmadoProResult,
 } from "../application/tournament-repository";
+import {
+  applyArmadoProLayout,
+  type ArmadoProLayout,
+} from "../domain/armado-pro";
 import type { AddPairValues, UpdatePairValues } from "../domain/pair-schema";
 import {
   derivePairPaymentStatus,
@@ -2887,6 +2892,84 @@ export class PrismaTournamentRepository implements TournamentRepository {
       }
     });
     return { ok: true };
+  }
+
+  async saveZonesArmadoPro(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+    layout: ArmadoProLayout,
+  ): Promise<SaveZonesArmadoProResult> {
+    const config = await this.getTournamentConfig(clubId, tournamentId);
+    const category = config?.categories.find(
+      (item) => item.categoryId === categoryId,
+    );
+    if (!config || !category) {
+      return { ok: false, error: "Categoría no encontrada" };
+    }
+
+    const pairs = await prisma.tournamentPair.findMany({
+      where: { tournamentId, categoryId },
+      select: {
+        id: true,
+        status: true,
+        player2Id: true,
+        player1Confirmed: true,
+        player2Confirmed: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    const result = applyArmadoProLayout({
+      previous: category.zonesFixture,
+      layout,
+      eligiblePairIds: pairs
+        .filter((pair) =>
+          isPairEligibleForZones({
+            status: pair.status as RegistrationStatus,
+            hasPartner: Boolean(pair.player2Id),
+            player1Confirmed: Boolean(pair.player1Confirmed),
+            player2Confirmed: Boolean(pair.player2Confirmed),
+          }),
+        )
+        .map((pair) => pair.id),
+    });
+    if (!result.ok) return result;
+
+    await persistZonesFixtures(tournamentId, [
+      {
+        categoryId,
+        categoryName: category.categoryName,
+        fixture: result.fixture,
+        matchFormat: category.phases.zones.matchFormat,
+        zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
+      },
+    ]);
+
+    const mode = await readFixtureEditMode(tournamentId, categoryId, "zones");
+    const switchedToManual = mode !== "MANUAL";
+    if (switchedToManual) {
+      const switched = await this.setFixtureEditMode(
+        clubId,
+        tournamentId,
+        categoryId,
+        "MANUAL",
+        "zones",
+      );
+      if (!switched.ok) {
+        return {
+          ok: false,
+          error:
+            "Las zonas se guardaron, pero no se pudo pasar a Modo Manual. Cambialo a mano antes de tocar Actualizar.",
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      switchedToManual,
+      unscheduledMatchCount: result.unscheduledMatchCount,
+      unassignedCount: result.unassignedCount,
+    };
   }
 
   async saveKnockoutFixtureDraft(

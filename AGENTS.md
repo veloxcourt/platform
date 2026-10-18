@@ -1,8 +1,17 @@
 <!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# Next.js 16 (may differ from your training data)
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+Only when the task touches Next.js APIs (routing, layouts, server actions, caching, `params`/`searchParams`, middleware/proxy, metadata, config), grep `node_modules/next/dist/docs/` for that specific API and read just the matching section. Skip the docs for pure UI, styling, copy or domain-logic changes.
 <!-- END:nextjs-agent-rules -->
+
+# Working efficiently
+
+- Go straight to the files the user names; search narrowly (Grep for a symbol) instead of exploring the tree.
+- Project layout: routes and server actions in `src/app`, UI by area in `src/components/features/<area>`, shadcn primitives in `src/components/ui`, business logic in `src/modules/<area>/{domain,application,infrastructure}`.
+- Before writing a new component, reuse the closest existing sibling as the pattern.
+- Never read `*.pdf`, images, `*.svg` logos or `node_modules` (except the Next docs above) unless asked.
+- Verify with `npx tsc --noEmit` and `npx eslint <changed files>`. Don't run `npm run build` (it applies the DB schema) or start the dev server unless asked.
+- Keep replies short: what changed and anything the user must do.
 
 # Deploying to production
 

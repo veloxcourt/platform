@@ -24,13 +24,17 @@ import type {
 import { isPairPaymentMethod } from "@/modules/tournaments/domain/pair-payment";
 import { intermediateFixtureSchema } from "@/modules/tournaments/domain/intermediate-fixture-schema";
 import { zonesFixtureDraftSchema } from "@/modules/tournaments/domain/zones-fixture-schema";
+import { armadoProLayoutSchema } from "@/modules/tournaments/domain/armado-pro";
 import {
   isPhaseManual,
   type FixtureEditMode,
   type FixtureEditPhase,
 } from "@/modules/tournaments/domain/fixture-edit-mode";
 import { getTournamentRepository } from "@/modules/tournaments/infrastructure/repository";
-import type { TournamentRepository } from "@/modules/tournaments/application/tournament-repository";
+import type {
+  SaveZonesArmadoProResult,
+  TournamentRepository,
+} from "@/modules/tournaments/application/tournament-repository";
 
 type Result = { ok: true } | { ok: false; error: string };
 type AddPairResult =
@@ -575,6 +579,28 @@ export async function saveZonesFixtureDraftAction(
   );
   if (result.ok) revalidate(clubSlug, tournamentId);
   return result.ok ? { ok: true } : { ok: false, error: result.error ?? "Error" };
+}
+
+export async function saveZonesArmadoProAction(
+  clubSlug: string,
+  tournamentId: string,
+  categoryId: string,
+  layout: unknown,
+): Promise<SaveZonesArmadoProResult> {
+  const parsed = armadoProLayoutSchema.safeParse(layout);
+  if (!parsed.success) {
+    return { ok: false, error: "Datos de Armado Pro inválidos" };
+  }
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+  const result = await repo.saveZonesArmadoPro(
+    clubId,
+    tournamentId,
+    categoryId,
+    parsed.data,
+  );
+  if (result.ok) revalidate(clubSlug, tournamentId);
+  return result;
 }
 
 export async function saveKnockoutFixtureDraftAction(

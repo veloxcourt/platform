@@ -1,7 +1,12 @@
 import type {
   TournamentRepository,
   MutationResult,
+  SaveZonesArmadoProResult,
 } from "../application/tournament-repository";
+import {
+  applyArmadoProLayout,
+  type ArmadoProLayout,
+} from "../domain/armado-pro";
 import type { AddPairValues, UpdatePairValues } from "../domain/pair-schema";
 import { derivePairPaymentStatus } from "../domain/pair-payment";
 import {
@@ -2211,6 +2216,84 @@ export class MockTournamentRepository implements TournamentRepository {
       });
       syncCategoryCounts(record, tournamentId);
       return { ok: true };
+    }
+    return { ok: false, error: "Club no encontrado" };
+  }
+
+  async saveZonesArmadoPro(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+    layout: ArmadoProLayout,
+  ): Promise<SaveZonesArmadoProResult> {
+    for (const record of store.values()) {
+      if (record.club.id !== clubId) continue;
+      const tournament = record.tournaments.find((t) => t.id === tournamentId);
+      if (!tournament || tournament.type !== "ZONAS") {
+        return { ok: false, error: "Torneo no encontrado" };
+      }
+      const config = record.configs.get(tournamentId);
+      const category = config?.categories.find(
+        (item) => item.categoryId === categoryId,
+      );
+      if (!config || !category) {
+        return { ok: false, error: "Categoría no encontrada" };
+      }
+      const pairs = (record.pairs.get(tournamentId) ?? []).filter(
+        (pair) => pair.categoryId === categoryId,
+      );
+      const result = applyArmadoProLayout({
+        previous: category.zonesFixture,
+        layout,
+        eligiblePairIds: pairs
+          .filter((pair) =>
+            isPairEligibleForZones({
+              status: pair.status,
+              hasPartner: Boolean(pair.player2),
+              player1Confirmed: pair.player1Confirmed,
+              player2Confirmed: pair.player2Confirmed,
+            }),
+          )
+          .map((pair) => pair.id),
+      });
+      if (!result.ok) return result;
+
+      for (const pair of pairs) pair.zoneLabel = null;
+      for (const zone of result.fixture.zones) {
+        for (const pairId of zone.pairIds) {
+          const pair = pairs.find((item) => item.id === pairId);
+          if (pair) pair.zoneLabel = zone.label;
+        }
+      }
+      const modes = parseFixtureEditModes(config.fixtureEditModes);
+      const switchedToManual =
+        fixtureEditModeFor(modes, categoryId, "zones") !== "MANUAL";
+      record.configs.set(tournamentId, {
+        ...config,
+        fixtureEditModes: switchedToManual
+          ? setCategoryPhaseMode(modes, categoryId, "zones", "MANUAL")
+          : config.fixtureEditModes,
+        categories: config.categories.map((item) =>
+          item.categoryId === categoryId
+            ? {
+                ...item,
+                zonesFixture: result.fixture,
+                zoneQualification: buildZoneQualification({
+                  fixture: result.fixture,
+                  format: category.phases.zones.matchFormat,
+                  zone4Advancers: category.zone4Advancers === 2 ? 2 : 3,
+                }),
+              }
+            : item,
+        ),
+      });
+      syncCategoryCounts(record, tournamentId);
+      return {
+        ok: true,
+        switchedToManual,
+        unscheduledMatchCount: result.unscheduledMatchCount,
+        unassignedCount: result.unassignedCount,
+      };
     }
     return { ok: false, error: "Club no encontrado" };
   }

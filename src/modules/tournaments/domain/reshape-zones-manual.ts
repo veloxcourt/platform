@@ -80,6 +80,31 @@ function zoneFromPairs(
   };
 }
 
+type PersistedZoneMatch = ZonesFixturePersisted["zones"][number]["matches"][number];
+
+function toPreviousMatch(
+  match: PersistedZoneMatch,
+  matchIndex: number,
+): PreviousMatch {
+  return { ...match, matchIndex, endTime: match.endTime ?? null };
+}
+
+/// Rearma los partidos de una zona: los cruces que siguen igual conservan
+/// día, horario y cancha; los nuevos quedan sin programar.
+export function rebuildZoneKeepingSchedules(params: {
+  label: string;
+  pairIds: string[];
+  preferred: PersistedZoneMatch[];
+  fallback: PersistedZoneMatch[];
+}): ScheduledZone {
+  return zoneFromPairs(
+    params.label,
+    params.pairIds,
+    params.preferred.map(toPreviousMatch),
+    params.fallback.map(toPreviousMatch),
+  );
+}
+
 function keepZoneAsIs(zone: ScheduledZone): ScheduledZone {
   return {
     label: zone.label,

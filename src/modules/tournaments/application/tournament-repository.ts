@@ -31,8 +31,18 @@ import type {
   ZonesFixtureDraftInput,
   ZonesFixturePersisted,
 } from "../domain/zones-fixture-schema";
+import type { ArmadoProLayout } from "../domain/armado-pro";
 
 export type MutationResult = { ok: boolean; error?: string };
+
+export type SaveZonesArmadoProResult =
+  | {
+      ok: true;
+      switchedToManual: boolean;
+      unscheduledMatchCount: number;
+      unassignedCount: number;
+    }
+  | { ok: false; error: string };
 
 export interface TournamentRepository {
   getClubBySlug(
@@ -218,6 +228,12 @@ export interface TournamentRepository {
     categoryId: string,
     draft: ZonesFixtureDraftInput,
   ): Promise<MutationResult>;
+  saveZonesArmadoPro(
+    clubId: string,
+    tournamentId: string,
+    categoryId: string,
+    layout: ArmadoProLayout,
+  ): Promise<SaveZonesArmadoProResult>;
   saveKnockoutFixtureDraft(
     clubId: string,
     tournamentId: string,

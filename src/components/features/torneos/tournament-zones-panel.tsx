@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Grid3x3 } from "lucide-react";
+import { Grid3x3, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
@@ -11,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ArmadoProBoardDialog } from "./armado-pro-board";
 import { AyudaButton } from "./ayuda-button";
 import { STICKY_PANEL_CARD, STICKY_PANEL_HEADER } from "./sticky-panel";
 import { formatShortDate, formatWeekday } from "@/lib/date";
@@ -325,12 +327,13 @@ export function TournamentZonesPanel({
     zoneId: string;
     matchId: string;
   } | null>(null);
+  const [armadoProOpen, setArmadoProOpen] = useState(false);
 
   const activeCategoryId =
     initialCategoryId && categories.some((c) => c.id === initialCategoryId)
       ? initialCategoryId
       : (categories[0]?.id ?? "");
-  const { isManual, scheduleLocked, modes } = useFixtureEditMode(
+  const { isManual, scheduleLocked, modes, setMode } = useFixtureEditMode(
     activeCategoryId,
     "zones",
   );
@@ -376,6 +379,19 @@ export function TournamentZonesPanel({
         label: pairOptionLabel(p),
       })),
     [categoryPairs],
+  );
+  const armadoProPairs = useMemo(
+    () =>
+      categoryPairs.filter(pairEligibleForZones).map((p) => ({
+        id: p.id,
+        label: pairOptionLabel(p),
+        zonesDayPreference: p.zonesDayPreference,
+      })),
+    [categoryPairs],
+  );
+  const armadoProPreferences = useMemo(
+    () => reservations.filter((r) => r.categoryId === activeCategoryId),
+    [reservations, activeCategoryId],
   );
 
   const dayOptions = useMemo(() => {
@@ -844,6 +860,30 @@ export function TournamentZonesPanel({
     );
   }
 
+  function openArmadoPro() {
+    if (!activeCategoryId) return;
+    startTransition(async () => {
+      const flushed = await flushZonesSave();
+      if (!flushed.ok) return;
+      setArmadoProOpen(true);
+    });
+  }
+
+  function handleArmadoProSaved(result: { switchedToManual: boolean }) {
+    if (result.switchedToManual) setMode("MANUAL");
+    setZonesByCategory((prev) => {
+      const copy = { ...prev };
+      delete copy[activeCategoryId];
+      return copy;
+    });
+    setLastEditedZoneId(null);
+    setLastEditedMatchId(null);
+    setChangePairRequest(null);
+    setChangeScheduleRequest(null);
+    setRebuildToken((n) => n + 1);
+    setArmadoProOpen(false);
+  }
+
   function handleActualizar() {
     if (!activeCategoryId) return;
     startTransition(async () => {
@@ -930,6 +970,17 @@ export function TournamentZonesPanel({
           <div className="flex flex-wrap items-center justify-end gap-2">
           {!readOnly && activeCategoryId ? (
             <>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isPending || armadoProPairs.length === 0}
+                onClick={openArmadoPro}
+                title="Armá las zonas a mano: mové parejas entre zonas"
+              >
+                <LayoutGrid className="size-4" />
+                Armado Pro
+              </Button>
               <FixtureEditModeSelect
                 clubSlug={clubSlug}
                 tournamentId={tournamentId}
@@ -1105,6 +1156,23 @@ export function TournamentZonesPanel({
             setChangeScheduleRequest(null);
           }}
         />
+        {activeCategoryId && !readOnly ? (
+          <ArmadoProBoardDialog
+            open={armadoProOpen}
+            onClose={() => setArmadoProOpen(false)}
+            onSaved={handleArmadoProSaved}
+            clubSlug={clubSlug}
+            tournamentId={tournamentId}
+            categoryId={activeCategoryId}
+            categoryName={categoryMeta?.name ?? ""}
+            isManual={isManual}
+            pairsPerZone={pairsPerZone}
+            zones={zones}
+            eligiblePairs={armadoProPairs}
+            allPairs={pairOptions}
+            preferences={armadoProPreferences}
+          />
+        ) : null}
       </CardContent>
     </Card>
   );
