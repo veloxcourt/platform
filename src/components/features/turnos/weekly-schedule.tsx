@@ -210,25 +210,28 @@ export function WeeklySchedule({
           Seleccioná al menos una cancha para ver la agenda.
         </div>
       ) : (
-        <div className="min-h-0 w-full min-w-0 flex-1 overflow-auto overscroll-contain rounded-lg border phone-landscape:rounded-none phone-landscape:border-0 phone-landscape:pl-[env(safe-area-inset-left)] phone-landscape:pr-[env(safe-area-inset-right)]">
+        <div className="min-h-0 w-full min-w-0 flex-1 overflow-auto overscroll-contain rounded-lg border border-sky-200 phone-landscape:rounded-none phone-landscape:border-0 phone-landscape:pl-[env(safe-area-inset-left)] phone-landscape:pr-[env(safe-area-inset-right)] dark:border-sky-900">
           <div className="w-full" style={{ minWidth: tableMinWidth }}>
-            <div className="sticky top-0 z-30 bg-muted shadow-[0_1px_0_0_var(--border)]">
+            <div className="sticky top-0 z-30 bg-sky-950">
               {/* Fila 1: días (cada uno abarca sus canchas) */}
               <div className="grid" style={gridTemplate}>
-                <div className="sticky left-0 z-40 bg-muted" />
+                <div className="sticky left-0 z-40 bg-sky-950" />
                 {visibleDays.map((day) => (
                   <div
                     key={day.date}
                     style={{ gridColumn: `span ${visibleCourts.length}` }}
-                    className="border-l px-2 py-1.5 text-center text-xs font-semibold capitalize"
+                    className="border-l border-sky-800 px-2 py-1.5 text-center text-xs font-semibold tracking-wide text-sky-50 capitalize"
                   >
                     {day.label}
                   </div>
                 ))}
               </div>
               {/* Fila 2: nombres de cancha */}
-              <div className="grid border-b" style={gridTemplate}>
-                <div className="sticky left-0 z-40 border-r bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+              <div
+                className="grid border-b-2 border-emerald-500 bg-blue-100 dark:bg-blue-900"
+                style={gridTemplate}
+              >
+                <div className="sticky left-0 z-40 border-r border-blue-200 bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-950 dark:border-blue-800 dark:bg-blue-900 dark:text-blue-50">
                   Hora
                 </div>
                 {visibleDays.map((day) =>
@@ -236,8 +239,8 @@ export function WeeklySchedule({
                     <div
                       key={`${day.date}-${court.id}`}
                       className={cn(
-                        "px-1 py-1 text-center text-[11px] text-muted-foreground",
-                        idx === 0 && "border-l",
+                        "px-1 py-1 text-center text-[11px] font-medium text-blue-950 dark:text-blue-50",
+                        idx === 0 && "border-l border-blue-300 dark:border-blue-700",
                       )}
                     >
                       {court.name}
@@ -248,13 +251,20 @@ export function WeeklySchedule({
             </div>
 
             {/* Filas por horario */}
-            {schedule.slots.map((slot) => (
+            {schedule.slots.map((slot, rowIndex) => (
               <div
                 key={slot}
-                className="grid border-b last:border-b-0"
+                className="grid border-b border-sky-100 last:border-b-0 dark:border-sky-950"
                 style={gridTemplate}
               >
-                <div className="sticky left-0 z-20 flex items-center justify-center border-r bg-background px-2 py-1 text-xs font-medium tabular-nums text-muted-foreground">
+                <div
+                  className={cn(
+                    "sticky left-0 z-20 flex items-center justify-center border-r border-blue-200 px-2 py-1 text-xs font-semibold tabular-nums text-blue-950 dark:border-blue-800 dark:text-blue-50",
+                    rowIndex % 2 === 0
+                      ? "bg-blue-50 dark:bg-blue-950"
+                      : "bg-blue-100 dark:bg-blue-900",
+                  )}
+                >
                   {slot}
                 </div>
                 {visibleDays.map((day) => {
@@ -270,7 +280,10 @@ export function WeeklySchedule({
                   return (
                     <div
                       key={`${day.date}-${court.id}`}
-                      className={cn("p-0.5", idx === 0 && "border-l")}
+                      className={cn(
+                        "p-0.5",
+                        idx === 0 && "border-l border-sky-200 dark:border-sky-800",
+                      )}
                     >
                       <WeekCell
                         booking={cell.booking}

@@ -40,6 +40,7 @@ import type { Gender } from "./new-player-schema";
 export interface PlayerRef {
   id: string;
   name: string;
+  nickname?: string | null;
   gender?: Gender | null;
   city?: string | null;
 }
@@ -50,6 +51,7 @@ export interface PlayerListItem {
   fullName: string;
   firstName: string | null;
   lastName: string | null;
+  nickname: string | null;
   phone: string | null;
   instagram: string | null;
   gender: Gender | null;

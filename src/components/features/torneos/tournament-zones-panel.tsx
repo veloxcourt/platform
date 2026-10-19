@@ -73,6 +73,7 @@ import {
   type ZonePairOption,
 } from "./zone-card";
 import { ActualizarConfirmButton } from "./actualizar-confirm-button";
+import { loadZonesScoreLossWarning } from "./zones-score-loss-warning";
 import { FixtureEditModeSelect } from "./fixture-edit-mode-select";
 import {
   useFixtureEditMode,
@@ -884,10 +885,30 @@ export function TournamentZonesPanel({
     setArmadoProOpen(false);
   }
 
+  async function loadActualizarWarning() {
+    if (!activeCategoryId) return null;
+    const flushed = await flushZonesSave();
+    if (!flushed.ok) {
+      return {
+        title: "No se pudo guardar el último cambio",
+        description:
+          "Revisá la conexión y volvé a intentar antes de Actualizar, o ese resultado se pierde.",
+        groups: [],
+      };
+    }
+    return loadZonesScoreLossWarning({
+      clubSlug,
+      tournamentId,
+      categoryId: activeCategoryId,
+      pairs,
+    });
+  }
+
   function handleActualizar() {
     if (!activeCategoryId) return;
     startTransition(async () => {
-      await flushZonesSave();
+      const flushed = await flushZonesSave();
+      if (!flushed.ok) return;
       const result = await buildZonesFixtureAction(
         clubSlug,
         tournamentId,
@@ -1010,6 +1031,7 @@ export function TournamentZonesPanel({
                 }
                 confirm={zoneConfirm}
                 onConfirm={handleActualizar}
+                loadWarning={loadActualizarWarning}
               />
             </>
           ) : null}

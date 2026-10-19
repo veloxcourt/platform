@@ -299,6 +299,7 @@ export class MockBookingRepository implements BookingRepository {
         fullName: p.name,
         firstName: null,
         lastName: null,
+        nickname: p.nickname ?? null,
         phone: null,
         instagram: null,
         gender: p.gender ?? null,
@@ -327,6 +328,7 @@ export class MockBookingRepository implements BookingRepository {
     return {
       firstName: firstName ?? p.name,
       lastName: rest.join(" "),
+      nickname: p.nickname ?? "",
       ...EMPTY_PHONE_FIELDS,
       email: "",
       instagram: "",
@@ -352,6 +354,7 @@ export class MockBookingRepository implements BookingRepository {
     const player: PlayerRef = {
       id: `pl-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       name: `${input.firstName} ${input.lastName}`.trim(),
+      nickname: input.nickname?.trim() || null,
       gender: input.gender || null,
       city: input.city ? input.city : null,
     };
@@ -368,6 +371,7 @@ export class MockBookingRepository implements BookingRepository {
     const p = record.players.find((x) => x.id === userId);
     if (p) {
       p.name = `${input.firstName} ${input.lastName}`.trim();
+      p.nickname = input.nickname?.trim() || null;
       p.city = input.city ? input.city : null;
     }
   }

@@ -158,12 +158,57 @@ export function mergeZoneDraftScores(
   );
 }
 
+export function zonePairIdsOf(zone: {
+  pairIds: string[];
+  matches: Array<{ pair1Id?: string | null; pair2Id?: string | null }>;
+}): string[] {
+  if (zone.pairIds.length > 0) return [...zone.pairIds];
+  const ids: string[] = [];
+  for (const match of zone.matches) {
+    if (match.pair1Id && !ids.includes(match.pair1Id)) ids.push(match.pair1Id);
+    if (match.pair2Id && !ids.includes(match.pair2Id)) ids.push(match.pair2Id);
+  }
+  return ids;
+}
+
+function samePairSet(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const other = new Set(right);
+  return left.every((id) => other.has(id));
+}
+
+/// Un partido sin parejas (ganador vs ganador, perdedor vs perdedor) solo se
+/// identifica por zona y tipo: si la zona cambió de parejas, su resultado
+/// sería de otras parejas.
+function dropOrphanedOpenScores(
+  previous: ZonesFixturePersisted,
+  next: ZonesFixturePersisted,
+): ZonesFixturePersisted {
+  const nextPairsByLabel = new Map(
+    next.zones.map((zone) => [zone.label, zonePairIdsOf(zone)]),
+  );
+  return {
+    ...previous,
+    zones: previous.zones.map((zone) => {
+      const nextIds = nextPairsByLabel.get(zone.label);
+      if (nextIds && samePairSet(zonePairIdsOf(zone), nextIds)) return zone;
+      return {
+        ...zone,
+        matches: zone.matches.map((match) =>
+          match.pair1Id && match.pair2Id ? match : { ...match, scores: undefined },
+        ),
+      };
+    }),
+  };
+}
+
 export function carryZoneScores(
   previous: ZonesFixturePersisted | null | undefined,
   next: ZonesFixturePersisted,
 ): ZonesFixturePersisted {
+  const carried = previous ? dropOrphanedOpenScores(previous, next) : previous;
   return applyZoneTieBreaks(
-    applyZoneScores(next, collectZoneScores(previous)),
+    applyZoneScores(next, collectZoneScores(carried)),
     collectZoneTieBreaks(previous),
   );
 }

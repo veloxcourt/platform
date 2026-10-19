@@ -24,6 +24,7 @@ const optionalText = (max: number) =>
 export const newPlayerSchema = z.object({
   firstName: z.string().min(1, "Nombre requerido").max(60),
   lastName: z.string().min(1, "Apellido requerido").max(60),
+  nickname: optionalText(60),
   phoneCountryDial: z.string().min(1),
   phoneLocal: optionalText(20),
   email: z
@@ -80,6 +81,14 @@ export function normalizeInstagram(
 ): string | null {
   const text = (value ?? "").trim().replace(/^@+/, "");
   return text ? text.slice(0, 80) : null;
+}
+
+/// Nombre informal. Vacío queda en null.
+export function normalizeNickname(
+  value: string | null | undefined,
+): string | null {
+  const text = (value ?? "").trim();
+  return text ? text.slice(0, 60) : null;
 }
 
 export function playerPhoneToE164(

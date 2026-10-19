@@ -139,7 +139,7 @@ function phoneMatches(stored: string | null, digits: string): boolean {
 const FILTER_SELECT_CLASS =
   "h-8 max-w-[14rem] shrink-0 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
-/// Columnas que se pueden ocultar. "Nombre" y las acciones siempre quedan visibles.
+/// Columnas que se pueden ocultar. "Nombre", "Sobre-Nombre" y las acciones siempre quedan visibles.
 const OPTIONAL_COLUMNS = [
   { key: "photo", label: "Foto" },
   { key: "message", label: "Mensaje" },
@@ -510,7 +510,14 @@ export function PlayersTable({
       if (hideLatestInscribed && latestInscribedIds.has(p.id)) return false;
       if (onlyWithoutPhone && p.phone?.trim()) return false;
       if (phoneDigits && !phoneMatches(p.phone, phoneDigits)) return false;
-      if (q && !normalizeText(p.fullName).includes(q) && !normalizeText(p.city ?? "").includes(q)) return false;
+      if (
+        q &&
+        !normalizeText(p.fullName).includes(q) &&
+        !normalizeText(p.nickname ?? "").includes(q) &&
+        !normalizeText(p.city ?? "").includes(q)
+      ) {
+        return false;
+      }
       if (category === NO_CATEGORY) {
         if (p.category?.trim()) return false;
       } else if (category !== ALL_CATEGORIES && p.category?.trim() !== category) {
@@ -571,8 +578,8 @@ export function PlayersTable({
   const visibleOptionalCount = OPTIONAL_COLUMNS.filter(
     (c) => columns[c.key],
   ).length;
-  /// Las opcionales visibles más "Nombre" y las acciones, que nunca se ocultan.
-  const visibleColumnCount = visibleOptionalCount + 2;
+  /// Las opcionales visibles más "Nombre", "Sobre-Nombre" y las acciones.
+  const visibleColumnCount = visibleOptionalCount + 3;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -772,6 +779,7 @@ export function PlayersTable({
             <tr>
               {columns.photo && <th className="w-10 px-3 py-2" />}
               <th className="px-3 py-2 font-medium">Nombre</th>
+              <th className="px-3 py-2 font-medium">Sobre-Nombre</th>
               {columns.message && (
                 <th className="px-3 py-2 text-center font-medium">Mensaje</th>
               )}
@@ -842,6 +850,14 @@ export function PlayersTable({
                     className="font-medium"
                   >
                     {p.fullName}
+                  </EditableCell>
+                  <EditableCell
+                    player={p}
+                    field="nickname"
+                    onEdit={openFieldEdit}
+                    className="text-muted-foreground"
+                  >
+                    {p.nickname?.trim() || "—"}
                   </EditableCell>
                   {columns.message && (
                     <td className="px-3 py-2 text-center">

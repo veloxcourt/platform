@@ -34,6 +34,7 @@ import type { CourtInput } from "../domain/settings-schema";
 import type { NewPlayerValues } from "../domain/new-player-schema";
 import {
   normalizeInstagram,
+  normalizeNickname,
   playerPhoneToE164,
 } from "../domain/new-player-schema";
 import {
@@ -56,6 +57,49 @@ import { formatQuantity } from "@/lib/quantity";
 
 function prismaUserHasInstagram(): boolean {
   return "instagram" in Prisma.UserScalarFieldEnum;
+}
+
+function prismaUserHasNickname(): boolean {
+  return "nickname" in Prisma.UserScalarFieldEnum;
+}
+
+/// El proceso de Next puede seguir con un cliente Prisma anterior a esta columna.
+async function persistUserNickname(userId: string, nickname: string | null) {
+  await ensureRuntimeSchema();
+  await prisma.$executeRawUnsafe(
+    `UPDATE "users" SET "nickname" = $1 WHERE "id" = $2`,
+    nickname,
+    userId,
+  );
+}
+
+async function readUserNickname(
+  userId: string,
+  fromClient?: string | null,
+): Promise<string> {
+  if (prismaUserHasNickname()) return fromClient ?? "";
+  await ensureRuntimeSchema();
+  const rows = await prisma.$queryRawUnsafe<Array<{ nickname: string | null }>>(
+    `SELECT "nickname" FROM "users" WHERE "id" = $1`,
+    userId,
+  );
+  return rows[0]?.nickname ?? "";
+}
+
+async function readManyUsersNickname(
+  userIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (userIds.length === 0) return map;
+  await ensureRuntimeSchema();
+  const rows = await prisma.$queryRaw<
+    Array<{ id: string; nickname: string | null }>
+  >`SELECT "id", "nickname" FROM "users" WHERE "id" IN (${Prisma.join(userIds)})`;
+  for (const row of rows) {
+    const value = row.nickname?.trim();
+    if (value) map.set(row.id, value);
+  }
+  return map;
 }
 
 async function persistUserInstagram(userId: string, instagram: string | null) {
@@ -462,9 +506,11 @@ export class PrismaBookingRepository implements BookingRepository {
         catalogCity: { select: { name: true } },
       },
     });
+    const nicknameMap = await readManyUsersNickname(users.map((u) => u.id));
     return users.map((u) => ({
       id: u.id,
       name: u.fullName,
+      nickname: nicknameMap.get(u.id) ?? null,
       gender: u.gender,
       city: u.catalogCity?.name ?? u.city,
     }));
@@ -505,12 +551,17 @@ export class PrismaBookingRepository implements BookingRepository {
     const instagramMap = prismaUserHasInstagram()
       ? null
       : await readManyUsersInstagram(users.map((u) => u.id));
+    const nicknameMap = prismaUserHasNickname()
+      ? null
+      : await readManyUsersNickname(users.map((u) => u.id));
 
     return users.map((u) => ({
       id: u.id,
       fullName: u.fullName,
       firstName: u.firstName,
       lastName: u.lastName,
+      nickname:
+        (nicknameMap ? nicknameMap.get(u.id) : u.nickname?.trim()) || null,
       phone: u.phone,
       instagram:
         (instagramMap ? instagramMap.get(u.id) : u.instagram?.trim()) || null,
@@ -573,6 +624,7 @@ export class PrismaBookingRepository implements BookingRepository {
     return {
       firstName: u.firstName ?? "",
       lastName: u.lastName ?? "",
+      nickname: await readUserNickname(u.id, u.nickname),
       phoneCountryDial: phone.dial,
       phoneLocal: phone.local,
       email: u.email ?? "",
@@ -639,8 +691,16 @@ export class PrismaBookingRepository implements BookingRepository {
         },
       },
     });
+    const nickname = normalizeNickname(input.nickname);
     await persistUserInstagram(user.id, normalizeInstagram(input.instagram));
-    return { id: user.id, name: user.fullName, gender: user.gender, city: user.city };
+    await persistUserNickname(user.id, nickname);
+    return {
+      id: user.id,
+      name: user.fullName,
+      nickname,
+      gender: user.gender,
+      city: user.city,
+    };
   }
 
   async updatePlayer(
@@ -685,6 +745,7 @@ export class PrismaBookingRepository implements BookingRepository {
       },
     });
     await persistUserInstagram(userId, normalizeInstagram(input.instagram));
+    await persistUserNickname(userId, normalizeNickname(input.nickname));
 
     const tournamentId = await latestClubTournamentId(clubId);
     const current = visiblePlayerObservation(

@@ -91,6 +91,8 @@ model User {
   fullName      String
   firstName     String?
   lastName      String?
+  /// Nombre informal con el que se lo conoce.
+  nickname      String?
   phone         String?
   gender        Gender?
   birthDate     DateTime?      @db.Date

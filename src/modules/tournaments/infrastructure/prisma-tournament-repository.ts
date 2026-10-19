@@ -2137,6 +2137,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
     clubId: string,
     tournamentId: string,
     categoryId?: string,
+    options: { dryRun?: boolean } = {},
   ): Promise<
     | {
         ok: true;
@@ -2202,15 +2203,17 @@ export class PrismaTournamentRepository implements TournamentRepository {
           categoryConfig.zonesFixture,
           toPersistedZonesFixture(result),
         );
-        await persistZonesFixtures(tournamentId, [
-          {
-            categoryId,
-            categoryName: categoryConfig.categoryName,
-            fixture: persisted,
-            matchFormat: categoryConfig.phases.zones.matchFormat,
-            zone4Advancers: categoryConfig.zone4Advancers === 2 ? 2 : 3,
-          },
-        ]);
+        if (!options.dryRun) {
+          await persistZonesFixtures(tournamentId, [
+            {
+              categoryId,
+              categoryName: categoryConfig.categoryName,
+              fixture: persisted,
+              matchFormat: categoryConfig.phases.zones.matchFormat,
+              zone4Advancers: categoryConfig.zone4Advancers === 2 ? 2 : 3,
+            },
+          ]);
+        }
         return {
           ok: true,
           fixture: persisted,
@@ -2370,7 +2373,7 @@ export class PrismaTournamentRepository implements TournamentRepository {
       return { ok: false, error: "No se pudieron armar las zonas" };
     }
 
-    await persistZonesFixtures(tournamentId, toPersist);
+    if (!options.dryRun) await persistZonesFixtures(tournamentId, toPersist);
     const requested =
       (categoryId
         ? toPersist.find((item) => item.categoryId === categoryId)

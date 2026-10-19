@@ -89,6 +89,7 @@ import { ZonesMatchGridPanel } from "./zones-match-grid-panel";
 import { ZonesMatchRulePanel } from "./zones-match-rule-panel";
 import { ActualizarConfirmButton } from "./actualizar-confirm-button";
 import { ActualizarHoverHint } from "./actualizar-hover-hint";
+import { loadZonesScoreLossWarning } from "./zones-score-loss-warning";
 import {
   FixtureEditModeProvider,
   FixturePersistFlushBinder,
@@ -747,6 +748,14 @@ export function ZonasTournamentDetail({
                       }
                       confirm={zonesConfirm}
                       onConfirm={handleActualizarTodasLasZonas}
+                      loadWarning={async () => {
+                        await flushPendingPersistsRef.current();
+                        return loadZonesScoreLossWarning({
+                          clubSlug,
+                          tournamentId: tournament.id,
+                          pairs: tournament.pairs,
+                        });
+                      }}
                     />
                   </>
                 ) : null}

@@ -24,6 +24,10 @@ import type {
 import { isPairPaymentMethod } from "@/modules/tournaments/domain/pair-payment";
 import { intermediateFixtureSchema } from "@/modules/tournaments/domain/intermediate-fixture-schema";
 import { zonesFixtureDraftSchema } from "@/modules/tournaments/domain/zones-fixture-schema";
+import {
+  findZoneScoreLosses,
+  type ZoneScoreLoss,
+} from "@/modules/tournaments/domain/zones-score-loss";
 import { armadoProLayoutSchema } from "@/modules/tournaments/domain/armado-pro";
 import {
   isPhaseManual,
@@ -396,6 +400,49 @@ export async function buildZonesFixtureAction(
     zoneCount: result.fixture.zones.length,
     matchCount,
   };
+}
+
+/// Arma las zonas sin guardar y devuelve qué resultados cargados se perderían.
+/// Sin `categoryId` revisa el Actualizar de todas las categorías.
+export async function previewZonesScoreLossAction(
+  clubSlug: string,
+  tournamentId: string,
+  categoryId?: string,
+): Promise<
+  | {
+      ok: true;
+      categories: Array<{
+        categoryId: string;
+        categoryName: string;
+        zones: ZoneScoreLoss[];
+      }>;
+    }
+  | { ok: false; error: string }
+> {
+  const { repo, clubId } = await resolveClubId(clubSlug);
+  if (!clubId) return { ok: false, error: "Club no encontrado" };
+
+  const config = await repo.getTournamentConfig(clubId, tournamentId);
+  if (!config) return { ok: false, error: "Configuración no encontrada" };
+
+  const result = await repo.buildAndSaveZonesFixture(
+    clubId,
+    tournamentId,
+    categoryId,
+    { dryRun: true },
+  );
+  if (!result.ok) return { ok: false, error: result.error ?? "Error" };
+
+  const categories = result.saved.flatMap((item) => {
+    const previous = config.categories.find(
+      (category) => category.categoryId === item.categoryId,
+    )?.zonesFixture;
+    const zones = findZoneScoreLosses(previous, item.fixture);
+    return zones.length > 0
+      ? [{ categoryId: item.categoryId, categoryName: item.categoryName, zones }]
+      : [];
+  });
+  return { ok: true, categories };
 }
 
 export async function buildAllZonesFixturesAction(

@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { ensureRuntimeSchema, prisma } from "@/lib/prisma";
 import {
   normalizeInstagram,
+  normalizeNickname,
   playerPhoneToE164,
 } from "@/modules/bookings/domain/new-player-schema";
 import type { CourtPosition, Gender } from "@/modules/bookings/domain/new-player-schema";
@@ -47,6 +48,7 @@ export async function registerPublicPlayer(
   if (!phone) return { ok: false, error: "Teléfono inválido. Ej: 11 2345 6789" };
 
   const email = data.email?.trim().toLowerCase() || null;
+  const nickname = normalizeNickname(data.nickname);
   const instagram = normalizeInstagram(data.instagram);
   const gender = (data.gender || null) as Gender | null;
   const located = await catalogCityAssignment(data.catalogCityId);
@@ -97,6 +99,7 @@ export async function registerPublicPlayer(
       category,
       courtPosition,
     });
+    await fillBlankNickname(existing.id, nickname);
     await fillBlankInstagram(existing.id, instagram);
     revalidateClubPlayers(club.slug);
     return { ok: true, already, clubName: club.name };
@@ -136,6 +139,7 @@ export async function registerPublicPlayer(
       },
       select: { id: true },
     });
+    if (nickname) await writeNickname(user.id, nickname);
     if (instagram) await writeInstagram(user.id, instagram);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
@@ -184,6 +188,32 @@ async function fillBlankProfile(
   }
   if (Object.keys(patch).length === 0) return;
   await prisma.user.update({ where: { id: existing.id }, data: patch });
+}
+
+async function fillBlankNickname(userId: string, nickname: string | null) {
+  if (!nickname) return;
+  const current = await readNickname(userId);
+  if (current) return;
+  await writeNickname(userId, nickname);
+}
+
+async function readNickname(userId: string): Promise<string | null> {
+  await ensureRuntimeSchema();
+  const rows = await prisma.$queryRawUnsafe<Array<{ nickname: string | null }>>(
+    `SELECT "nickname" FROM "users" WHERE "id" = $1`,
+    userId,
+  );
+  const value = rows[0]?.nickname?.trim() ?? "";
+  return value || null;
+}
+
+async function writeNickname(userId: string, nickname: string) {
+  await ensureRuntimeSchema();
+  await prisma.$executeRawUnsafe(
+    `UPDATE "users" SET "nickname" = $1 WHERE "id" = $2`,
+    nickname,
+    userId,
+  );
 }
 
 async function fillBlankInstagram(userId: string, instagram: string | null) {

@@ -38,6 +38,7 @@ const SELECT_CLASS =
 /// Campos de la grilla que se pueden editar de a uno, sin abrir la ficha completa.
 export const PLAYER_FIELD_LABELS = {
   name: "Nombre y apellido",
+  nickname: "Sobre-Nombre",
   phone: "Teléfono",
   instagram: "Instagram",
   city: "Localidad",
@@ -155,6 +156,16 @@ export function PlayerFieldDialog({
                 error={errors.lastName?.message}
               />
             </>
+          )}
+
+          {field === "nickname" && (
+            <ClipboardField
+              form={form}
+              name="nickname"
+              label="Sobre-Nombre"
+              placeholder="Nombre informal con el que se lo conoce"
+              error={errors.nickname?.message}
+            />
           )}
 
           {field === "phone" && (
@@ -331,7 +342,7 @@ function toNumberOrNull(value: string): number | null {
 }
 
 /// Campo de texto con copiar / pegar, para mover datos entre la app y WhatsApp.
-type TextFieldName = "firstName" | "lastName" | "instagram" | "city";
+type TextFieldName = "firstName" | "lastName" | "nickname" | "instagram" | "city";
 
 function ClipboardField({
   form,

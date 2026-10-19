@@ -1514,6 +1514,7 @@ export class MockTournamentRepository implements TournamentRepository {
     clubId: string,
     tournamentId: string,
     categoryId?: string,
+    options: { dryRun?: boolean } = {},
   ): Promise<
     | {
         ok: true;
@@ -1548,6 +1549,13 @@ export class MockTournamentRepository implements TournamentRepository {
           fixture: import("../domain/zones-fixture-schema").ZonesFixturePersisted;
         }>,
       ) => {
+        const requested =
+          (categoryId
+            ? saved.find((item) => item.categoryId === categoryId)
+            : saved[0]) ?? saved[0]!;
+        if (options.dryRun) {
+          return { ok: true as const, fixture: requested.fixture, saved };
+        }
         const byId = new Map(saved.map((item) => [item.categoryId, item.fixture]));
         for (const pair of record.pairs.get(tournamentId) ?? []) {
           if (byId.has(pair.categoryId)) pair.zoneLabel = null;
@@ -1577,10 +1585,6 @@ export class MockTournamentRepository implements TournamentRepository {
         });
         record.configs.set(tournamentId, { ...config, categories: nextCategories });
         syncCategoryCounts(record, tournamentId);
-        const requested =
-          (categoryId
-            ? saved.find((item) => item.categoryId === categoryId)
-            : saved[0]) ?? saved[0]!;
         return { ok: true as const, fixture: requested.fixture, saved };
       };
 

@@ -59,6 +59,17 @@ export function PublicPlayerSignupForm({
         <Field label="Apellido" htmlFor="lastName">
           <Input id="lastName" name="lastName" required maxLength={60} autoComplete="family-name" />
         </Field>
+        <div className="sm:col-span-2">
+          <Field label="Sobre-Nombre" htmlFor="nickname" hint="Opcional">
+            <Input
+              id="nickname"
+              name="nickname"
+              maxLength={60}
+              placeholder="Nombre informal con el que te conocen"
+              autoComplete="nickname"
+            />
+          </Field>
+        </div>
       </div>
 
       <div className="space-y-1.5">

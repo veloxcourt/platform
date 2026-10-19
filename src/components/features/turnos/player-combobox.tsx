@@ -18,12 +18,17 @@ export function normalizeText(s: string): string {
 const INPUT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-transparent pl-8 pr-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
-/// Selector de jugador con búsqueda por nombre/apellido.
+function playerLabel(player: PlayerRef): string {
+  const nickname = player.nickname?.trim();
+  return nickname ? `${player.name} (${nickname})` : player.name;
+}
+
+/// Selector de jugador con búsqueda por nombre/apellido o sobre-nombre.
 export function PlayerCombobox({
   players,
   value,
   onChange,
-  placeholder = "Buscar por nombre o apellido...",
+  placeholder = "Buscar por nombre, apellido o sobre-nombre...",
   exclude,
 }: {
   players: PlayerRef[];
@@ -45,6 +50,7 @@ export function PlayerCombobox({
     ? available.filter(
         (p) =>
           normalizeText(p.name).includes(q) ||
+          normalizeText(p.nickname ?? "").includes(q) ||
           normalizeText(p.city ?? "").includes(q),
       )
     : available;
@@ -54,7 +60,7 @@ export function PlayerCombobox({
       <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <input
         className={INPUT_CLASS}
-        value={open ? query : (selected?.name ?? "")}
+        value={open ? query : (selected ? playerLabel(selected) : "")}
         placeholder={placeholder}
         onMouseDown={() => {
           setQuery("");
@@ -95,7 +101,7 @@ export function PlayerCombobox({
                   p.id === value && "bg-muted font-medium",
                 )}
               >
-                {p.name}
+                {playerLabel(p)}
                 {p.city?.trim() ? (
                   <span className="ml-2 text-muted-foreground">{p.city}</span>
                 ) : null}

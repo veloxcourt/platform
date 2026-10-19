@@ -51,6 +51,7 @@ const SELECT_CLASS =
 const EMPTY_PLAYER: NewPlayerValues = {
   firstName: "",
   lastName: "",
+  nickname: "",
   ...EMPTY_PHONE_FIELDS,
   email: "",
   instagram: "",
@@ -469,6 +470,14 @@ export function NewPlayerDialog({
           <Field label="Apellido" error={errors.lastName?.message}>
             <Input {...register("lastName")} />
           </Field>
+          <div className="col-span-2">
+            <Field label="Sobre-Nombre" error={errors.nickname?.message}>
+              <Input
+                placeholder="Nombre informal con el que se lo conoce"
+                {...register("nickname")}
+              />
+            </Field>
+          </div>
           <PhoneInput
             dial={watch("phoneCountryDial") ?? DEFAULT_PHONE_DIAL}
             local={watch("phoneLocal") ?? ""}

@@ -169,10 +169,12 @@ export interface TournamentRepository {
     pairId: string,
     input: ReplacePairSlotPreferencesValues,
   ): Promise<MutationResult>;
+  /// Con `dryRun` arma y devuelve el resultado sin guardar nada.
   buildAndSaveZonesFixture(
     clubId: string,
     tournamentId: string,
     categoryId?: string,
+    options?: { dryRun?: boolean },
   ): Promise<
     | {
         ok: true;

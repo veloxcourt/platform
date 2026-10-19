@@ -17,6 +17,7 @@ export async function submitPublicPlayerSignupAction(
     clubSlug: String(formData.get("clubSlug") ?? ""),
     firstName: String(formData.get("firstName") ?? ""),
     lastName: String(formData.get("lastName") ?? ""),
+    nickname: String(formData.get("nickname") ?? ""),
     phoneCountryDial: String(formData.get("phoneCountryDial") ?? ""),
     phoneLocal: String(formData.get("phoneLocal") ?? ""),
     email: String(formData.get("email") ?? ""),

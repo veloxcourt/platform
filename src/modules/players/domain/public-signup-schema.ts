@@ -14,6 +14,7 @@ export const publicPlayerSignupSchema = z
     clubSlug: z.string().trim().min(1),
     firstName: z.string().trim().min(1, "Nombre requerido").max(60),
     lastName: z.string().trim().min(1, "Apellido requerido").max(60),
+    nickname: optionalText(60),
     phoneCountryDial: z.string().min(1),
     phoneLocal: z.string().trim().min(1, "Teléfono requerido").max(20),
     email: z
